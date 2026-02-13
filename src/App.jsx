@@ -176,15 +176,60 @@ function decodeFormData(hash) {
   } catch { return null; }
 }
 
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+async function loadSharedModel(token) {
+  if (!API_URL) return null;
+  try {
+    const res = await fetch(`${API_URL}/api/share/${token}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.formData || null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveModelToAPI(formData) {
+  if (!API_URL) return null;
+  try {
+    const res = await fetch(`${API_URL}/api/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ formData }),
+    });
+    if (!res.ok) return null;
+    return await res.json(); // { id, shareToken }
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results
   const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
+  const [modelId, setModelId] = useState(null);
   const initialLoadDone = useRef(false);
 
-  // Restore from URL hash on initial load
+  // Restore from share token (/share/:token) or URL hash on initial load
   useEffect(() => {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
+
+    const path = window.location.pathname;
+    const shareMatch = path.match(/\/share\/([A-Za-z0-9_-]{7})$/);
+
+    if (shareMatch) {
+      loadSharedModel(shareMatch[1]).then((loaded) => {
+        if (loaded && loaded.industry) {
+          setFormData({ ...DEFAULT_FORM_DATA, ...loaded });
+          setScreen('results');
+        }
+      });
+      return;
+    }
+
+    // Fallback: hash-based sharing
     const hash = window.location.hash.slice(1);
     if (hash) {
       const restored = decodeFormData(hash);
@@ -212,7 +257,16 @@ export default function App() {
   }, [formData]);
 
   const handleEditInputs = useCallback(() => setScreen('wizard'), []);
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback(async () => {
+    // Try API-based short URL first
+    const saved = await saveModelToAPI(formData);
+    if (saved?.shareToken) {
+      setModelId(saved.id);
+      const url = `${window.location.origin}/share/${saved.shareToken}`;
+      navigator.clipboard.writeText(url).catch(() => {});
+      return url;
+    }
+    // Fallback: hash-based sharing
     const encoded = encodeFormData(formData);
     const url = `${window.location.origin}${window.location.pathname}#${encoded}`;
     navigator.clipboard.writeText(url).catch(() => {});
@@ -220,6 +274,7 @@ export default function App() {
   }, [formData]);
   const handleStartOver = useCallback(() => {
     setFormData(DEFAULT_FORM_DATA);
+    setModelId(null);
     setScreen('landing');
   }, []);
 

@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 *.xlsx
+.vercel
+.env
+api/dist
+api/node_modules
