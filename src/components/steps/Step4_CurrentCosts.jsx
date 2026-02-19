@@ -10,7 +10,7 @@ const slideVariants = {
   exit: { x: -80, opacity: 0 },
 };
 
-export default function Step3_CurrentCosts({ formData, updateField }) {
+export default function Step4_CurrentCosts({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
 
   const teamSize = formData.teamSize || 10;

@@ -3,57 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import CardSelector from '../inputs/CardSelector';
 import SliderInput from '../inputs/SliderInput';
 import SegmentedSelect from '../inputs/SegmentedSelect';
+import { PROJECT_ARCHETYPES, getArchetypeDefaults } from '../../logic/archetypes';
 
-const PROCESS_TYPES = [
-  {
-    icon: '\ud83d\udcdd',
-    title: 'Document Processing',
-    description: 'Contracts, invoices, reports, compliance docs',
-    value: 'Document Processing',
-  },
-  {
-    icon: '\ud83d\udcac',
-    title: 'Customer Communication',
-    description: 'Support tickets, emails, chat, call summaries',
-    value: 'Customer Communication',
-  },
-  {
-    icon: '\ud83d\udcca',
-    title: 'Data Analysis & Reporting',
-    description: 'Financial analysis, forecasting, dashboards',
-    value: 'Data Analysis & Reporting',
-  },
-  {
-    icon: '\ud83d\udd0d',
-    title: 'Research & Intelligence',
-    description: 'Market research, competitive analysis, due diligence',
-    value: 'Research & Intelligence',
-  },
-  {
-    icon: '\u2699\ufe0f',
-    title: 'Workflow Automation',
-    description: 'Approvals, routing, scheduling, notifications',
-    value: 'Workflow Automation',
-  },
-  {
-    icon: '\ud83c\udfa8',
-    title: 'Content Creation',
-    description: 'Marketing copy, presentations, documentation',
-    value: 'Content Creation',
-  },
-  {
-    icon: '\ud83d\udee1\ufe0f',
-    title: 'Quality & Compliance',
-    description: 'Auditing, error detection, regulatory checks',
-    value: 'Quality & Compliance',
-  },
-  {
-    icon: '\ud83d\udce6',
-    title: 'Other',
-    description: 'Describe your use case',
-    value: 'Other',
-  },
-];
+const ARCHETYPE_OPTIONS = PROJECT_ARCHETYPES.map(a => ({
+  icon: a.icon,
+  title: a.label,
+  description: a.description,
+  value: a.id,
+  tags: a.tags,
+}));
 
 const ERROR_RATE_OPTIONS = [
   { label: 'Rarely', sublabel: '<5%', value: 0.025 },
@@ -68,7 +26,7 @@ const slideVariants = {
   exit: { x: -80, opacity: 0 },
 };
 
-export default function Step2_ProcessDetails({ formData, updateField }) {
+export default function Step3_ProcessDetails({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
   const advanceTimer = useRef(null);
 
@@ -84,8 +42,18 @@ export default function Step2_ProcessDetails({ formData, updateField }) {
     [],
   );
 
-  const handleProcessType = (val) => {
-    updateField('processType', val);
+  const handleArchetype = (id) => {
+    updateField('projectArchetype', id);
+    // Populate assumptions from archetype defaults for the selected industry
+    const defaults = getArchetypeDefaults(id, formData.industry || 'Other');
+    if (defaults) {
+      updateField('assumptions', defaults);
+    }
+    // Also set processType for backward compat (map archetype to primary processType)
+    const archetype = PROJECT_ARCHETYPES.find(a => a.id === id);
+    if (archetype && archetype.sourceProcessTypes.length > 0) {
+      updateField('processType', archetype.sourceProcessTypes[0]);
+    }
     autoAdvance(1);
   };
 
@@ -108,14 +76,14 @@ export default function Step2_ProcessDetails({ formData, updateField }) {
   return (
     <div className="mx-auto w-full max-w-xl">
       <h2 className="mb-2 text-2xl font-bold text-navy sm:text-3xl">
-        Tell us about the process you want to automate
+        What type of AI project is this?
       </h2>
       <div className="mb-8 h-1 w-16 rounded bg-gold" />
 
       <AnimatePresence mode="wait">
         {subStep === 0 && (
           <motion.div
-            key="processType"
+            key="archetype"
             variants={slideVariants}
             initial="enter"
             animate="center"
@@ -123,10 +91,10 @@ export default function Step2_ProcessDetails({ formData, updateField }) {
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
             <CardSelector
-              label="What type of work are you looking to improve with AI?"
-              options={PROCESS_TYPES}
-              value={formData.processType}
-              onChange={handleProcessType}
+              label="Select the archetype that best describes your project"
+              options={ARCHETYPE_OPTIONS}
+              value={formData.projectArchetype}
+              onChange={handleArchetype}
             />
           </motion.div>
         )}

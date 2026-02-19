@@ -108,10 +108,11 @@ describe('Opportunity Cost constants', () => {
 });
 
 describe('Revenue Enablement constants', () => {
-  it('REVENUE_ELIGIBLE_PROCESSES has 4 types', () => {
-    expect(REVENUE_ELIGIBLE_PROCESSES).toHaveLength(4);
+  it('REVENUE_ELIGIBLE_PROCESSES has 3 types', () => {
+    expect(REVENUE_ELIGIBLE_PROCESSES).toHaveLength(3);
     expect(REVENUE_ELIGIBLE_PROCESSES).toContain('Customer Communication');
     expect(REVENUE_ELIGIBLE_PROCESSES).toContain('Content Creation');
+    expect(REVENUE_ELIGIBLE_PROCESSES).toContain('Research & Intelligence');
   });
 
   it('each industry has 3 revenue uplift types', () => {

@@ -5,6 +5,15 @@ export const BASE_INPUTS = {
   industry: 'Technology / Software',
   companySize: 'Mid-Market (501-5,000)',
   processType: 'Document Processing',
+  projectArchetype: 'internal-process-automation',
+  assumptions: {
+    automationPotential: 0.60,
+    adoptionRate: 0.70,
+    apiCostPer1kRequests: 13,
+    requestsPerPersonHour: 21,
+    toolReplacementRate: 0.60,
+    revenueEligible: false,
+  },
   teamSize: 20,
   avgSalary: 85000,
   hoursPerWeek: 40,
@@ -43,6 +52,16 @@ export const ENTERPRISE_INPUTS = {
   industry: 'Financial Services / Banking',
   companySize: 'Enterprise (5,001-50,000)',
   processType: 'Quality & Compliance',
+  projectArchetype: 'risk-compliance-ai',
+  assumptions: {
+    automationPotential: 0.58,
+    adoptionRate: 0.70,
+    apiCostPer1kRequests: 16,
+    requestsPerPersonHour: 14,
+    toolReplacementRate: 0.53,
+    revenueEligible: false,
+    errorReductionPotential: 0.68,
+  },
   teamSize: 100,
   avgSalary: 120000,
   hoursPerWeek: 45,
@@ -64,6 +83,15 @@ export const GOVERNMENT_INPUTS = {
   industry: 'Government / Public Sector',
   companySize: 'Large Enterprise (50,000+)',
   processType: 'Workflow Automation',
+  projectArchetype: 'internal-process-automation',
+  assumptions: {
+    automationPotential: 0.38,
+    adoptionRate: 0.70,
+    apiCostPer1kRequests: 13,
+    requestsPerPersonHour: 21,
+    toolReplacementRate: 0.53,
+    revenueEligible: false,
+  },
   teamSize: 50,
   avgSalary: 75000,
   hoursPerWeek: 37,
@@ -90,10 +118,21 @@ export const NON_US_INPUTS = {
 export const REVENUE_ELIGIBLE_INPUTS = {
   ...BASE_INPUTS,
   processType: 'Customer Communication',
+  projectArchetype: 'customer-facing-ai',
+  assumptions: {
+    ...BASE_INPUTS.assumptions,
+    revenueEligible: true,
+  },
+  annualRevenue: 10000000,
 };
 
 // Non-revenue-eligible process type
 export const NON_REVENUE_INPUTS = {
   ...BASE_INPUTS,
   processType: 'Workflow Automation',
+  projectArchetype: 'internal-process-automation',
+  assumptions: {
+    ...BASE_INPUTS.assumptions,
+    revenueEligible: false,
+  },
 };

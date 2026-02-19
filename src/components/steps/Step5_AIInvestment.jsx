@@ -31,6 +31,7 @@ function computeSuggestedValues(formData) {
   const dataReadiness = formData.dataReadiness || 3;
   const industry = formData.industry || 'Other';
   const processType = formData.processType || 'Other';
+  const assumptions = formData.assumptions || {};
 
   // Suggest timeline based on industry and company size
   const suggestedTimeline = getRealisticTimeline(industry, companySize);
@@ -66,8 +67,8 @@ function computeSuggestedValues(formData) {
   // Ongoing costs based on company size and process type
   const licenseCost = PLATFORM_LICENSE_COST[companySize] || 48000;
   const complianceCost = ANNUAL_COMPLIANCE_COST[companySize] || 30000;
-  const apiCostPerK = API_COST_PER_1K_REQUESTS[processType] || 10;
-  const requestsPerHour = REQUESTS_PER_PERSON_HOUR[processType] || 12;
+  const apiCostPerK = assumptions.apiCostPer1kRequests ?? API_COST_PER_1K_REQUESTS[processType] ?? 10;
+  const requestsPerHour = assumptions.requestsPerPersonHour ?? REQUESTS_PER_PERSON_HOUR[processType] ?? 12;
   const monthlyApiVolume = teamSize * (formData.hoursPerWeek || 20) * 4.33 * requestsPerHour;
   const annualApiCost = (monthlyApiVolume / 1000) * apiCostPerK * 12;
   const ongoingAiHeadcount = Math.max(0.5, Math.round(engineers * 0.25 * 2) / 2);
@@ -168,7 +169,7 @@ function computeScopePreview(formData) {
   };
 }
 
-export default function Step4_AIInvestment({ formData, updateField }) {
+export default function Step5_AIInvestment({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
   const advanceTimer = useRef(null);
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
@@ -176,7 +177,7 @@ export default function Step4_AIInvestment({ formData, updateField }) {
   // Compute suggested values based on all context
   const suggested = useMemo(() => computeSuggestedValues(formData), [
     formData.teamSize, formData.companySize, formData.teamLocation,
-    formData.dataReadiness, formData.industry, formData.processType,
+    formData.dataReadiness, formData.industry, formData.projectArchetype,
     formData.hoursPerWeek
   ]);
 

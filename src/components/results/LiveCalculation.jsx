@@ -161,6 +161,54 @@ function TornadoChart({ extendedSensitivity, baseNPV }) {
   );
 }
 
+function CollapsibleSection({ title, subtitle, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="bg-white rounded-3xl shadow-xl mb-8 overflow-hidden"
+    >
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between p-6 cursor-pointer text-left hover:bg-gray-50 transition-colors"
+      >
+        <div>
+          <h3 className="text-navy font-bold text-lg">{title}</h3>
+          {subtitle && <p className="text-gray-500 text-xs mt-0.5">{subtitle}</p>}
+        </div>
+        <motion.svg
+          animate={{ rotate: open ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+          className="h-5 w-5 text-gray-400 shrink-0 ml-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </motion.svg>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="px-6 pb-6">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
 function CostVsSavingsBar({ totalCost, totalSavings, delay = 0 }) {
   const total = totalCost + totalSavings;
   const costPct = total > 0 ? (totalCost / total) * 100 : 50;
@@ -203,10 +251,41 @@ function CostVsSavingsBar({ totalCost, totalSavings, delay = 0 }) {
   );
 }
 
-function EmailGateModal({ onSubmit, onClose }) {
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+function EmailGateModal({ onSubmit, onClose, formData }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const handleSubmit = async () => {
+    if (!isValid) return;
+    setSubmitting(true);
+    localStorage.setItem('roi_lead_email', email);
+    if (name) localStorage.setItem('roi_lead_name', name);
+
+    // Fire-and-forget API call to capture lead
+    if (API_URL) {
+      try {
+        await fetch(`${API_URL}/api/leads`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            name: name || undefined,
+            industry: formData?.industry || undefined,
+            companySize: formData?.companySize || undefined,
+            source: 'report_download',
+          }),
+        });
+      } catch {
+        // Lead capture failure should not block download
+      }
+    }
+    setSubmitting(false);
+    onSubmit();
+  };
 
   return (
     <motion.div
@@ -243,17 +322,11 @@ function EmailGateModal({ onSubmit, onClose }) {
           />
         </div>
         <button
-          onClick={() => {
-            if (isValid) {
-              localStorage.setItem('roi_lead_email', email);
-              if (name) localStorage.setItem('roi_lead_name', name);
-              onSubmit();
-            }
-          }}
-          disabled={!isValid}
+          onClick={handleSubmit}
+          disabled={!isValid || submitting}
           className="w-full bg-gold text-navy font-bold py-3 rounded-xl text-sm cursor-pointer transition-all hover:bg-gold-light disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Download Report
+          {submitting ? 'Submitting...' : 'Download Report'}
         </button>
         <button
           onClick={onClose}
@@ -283,7 +356,9 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
   // Simplified to 2 states: positive ROI (green) or negative (red)
   const isPositiveROI = totalGrossSavings > totalInvestment;
-  const verdictColor = isPositiveROI ? 'emerald' : 'red';
+  const scenarioROI = totalInvestment > 0
+    ? (totalGrossSavings - totalInvestment) / totalInvestment
+    : 0;
 
   // Download loading states + email gate
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -384,12 +459,17 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </div>
         </div>
 
-        {/* Key Metrics - 3 Cards */}
+        {/* ============================================ */}
+        {/* ZONE A — Executive Scorecard (above the fold) */}
+        {/* ============================================ */}
+
+        {/* Executive Scorecard — 3 Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
           <MetricCard
-            label="5-Year NPV"
-            value={formatCurrency(scenario.npv)}
-            color={scenario.npv >= 0 ? 'green' : 'red'}
+            label="5-Year ROI"
+            value={formatPercent(scenarioROI)}
+            subtext={`Invest ${formatCompact(totalInvestment)}, save ${formatCompact(totalGrossSavings)}`}
+            color={scenarioROI >= 0 ? 'green' : 'red'}
             delay={0.2}
           />
           <MetricCard
@@ -399,22 +479,252 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             delay={0.3}
           />
           <MetricCard
-            label="ROIC"
-            value={formatPercent(scenario.roic)}
-            color={scenario.roic > 0 ? 'gold' : 'red'}
+            label="5-Year Net Savings"
+            value={formatCompact(totalGrossSavings - totalInvestment)}
+            subtext="Gross savings minus total investment"
+            color={totalGrossSavings > totalInvestment ? 'green' : 'red'}
             delay={0.4}
           />
         </div>
 
-        {/* ROI Ring + Investment Summary */}
+        {/* Year-by-Year Table */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5, duration: 0.5 }}
           className="bg-white rounded-3xl shadow-xl p-6 mb-8"
         >
-          <h3 className="text-navy font-bold text-lg mb-6 text-center">Investment Overview</h3>
+          <h3 className="text-navy font-bold text-lg mb-4">Year-by-Year Breakdown</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-navy/10">
+                  <th className="text-left py-2 text-gray-500 font-medium">Year</th>
+                  <th className="text-right py-2 text-gray-500 font-medium">Gross Savings</th>
+                  <th className="text-right py-2 text-gray-500 font-medium">AI Costs</th>
+                  <th className="text-right py-2 text-gray-500 font-medium">Net Savings</th>
+                  <th className="text-right py-2 text-gray-500 font-medium">Cumulative</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenario.projections.map((yr) => (
+                  <tr key={yr.year} className="border-b border-gray-100">
+                    <td className="py-2 font-medium text-navy">Year {yr.year}</td>
+                    <td className="py-2 text-right font-mono text-emerald-600">{formatCompact(yr.grossSavings)}</td>
+                    <td className="py-2 text-right font-mono text-red-500">{formatCompact(yr.ongoingCost + yr.separationCost)}</td>
+                    <td className={`py-2 text-right font-mono font-semibold ${yr.netCashFlow >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {formatCompact(yr.netCashFlow)}
+                    </td>
+                    <td className={`py-2 text-right font-mono ${yr.netCumulative >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {formatCompact(yr.netCumulative)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4">
+            <SimpleBarChart projections={scenario.projections} delay={0.6} />
+          </div>
+        </motion.div>
 
+        {/* Top 3 Levers */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7, duration: 0.5 }}
+          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+        >
+          <h3 className="text-navy font-bold text-lg mb-1">What Drives This Result?</h3>
+          <p className="text-gray-500 text-xs mb-4">Top 3 variables with the largest impact on NPV</p>
+          <div className="space-y-3">
+            {results.executiveSummary.topLevers.map((lever, i) => (
+              <motion.div
+                key={lever.label}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.8 + i * 0.1, duration: 0.3 }}
+                className="flex items-center justify-between bg-gray-50 rounded-xl p-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-navy text-white text-xs font-bold">{i + 1}</span>
+                  <span className="text-navy font-medium text-sm">{lever.label}</span>
+                </div>
+                <span className="font-mono font-bold text-navy text-sm">{formatCompact(lever.npvSwing)} swing</span>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Key Assumptions — 2x2 + timeline */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.9, duration: 0.5 }}
+          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+        >
+          <h3 className="text-navy font-bold text-lg mb-4">Key Assumptions</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-gray-500 text-xs mb-1">Automation Potential</p>
+              <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.automationPotential)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-gray-500 text-xs mb-1">Adoption Rate</p>
+              <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.adoptionRate)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-gray-500 text-xs mb-1">Risk Multiplier</p>
+              <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.riskMultiplier)}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-gray-500 text-xs mb-1">Discount Rate</p>
+              <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.discountRate)}</p>
+            </div>
+          </div>
+          <div className="mt-3 bg-gray-50 rounded-xl p-3 text-center">
+            <p className="text-gray-500 text-xs mb-1">Implementation Timeline</p>
+            <p className="font-mono text-xl font-bold text-navy">{results.executiveSummary.keyAssumptions.timelineMonths} months</p>
+          </div>
+        </motion.div>
+
+        {/* CTA Buttons — moved up */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1, duration: 0.5 }}
+          className="text-center space-y-4 mb-8"
+        >
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={handlePdfDownload}
+              disabled={pdfLoading}
+              className="bg-gold text-navy font-bold py-4 px-8 rounded-2xl text-lg shadow-lg shadow-gold/30 cursor-pointer transition-all hover:bg-gold-light hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
+            >
+              {pdfLoading ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Generating PDF...
+                </span>
+              ) : 'Download PDF Report'}
+            </button>
+            <button
+              onClick={handleExcelDownload}
+              disabled={excelLoading}
+              className="bg-white text-navy font-bold py-4 px-8 rounded-2xl text-lg shadow-lg border-2 border-navy/20 cursor-pointer transition-all hover:border-navy hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
+            >
+              {excelLoading ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Generating Excel...
+                </span>
+              ) : 'Download Excel Model'}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-center gap-4">
+            {onShare && (
+              <button
+                onClick={() => {
+                  onShare();
+                  setShareCopied(true);
+                  setTimeout(() => setShareCopied(false), 2000);
+                }}
+                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
+              >
+                {shareCopied ? 'Link Copied!' : 'Share Link'}
+              </button>
+            )}
+            {onEditInputs && (
+              <button
+                onClick={onEditInputs}
+                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
+              >
+                Edit Inputs
+              </button>
+            )}
+            {onStartOver && (
+              <button
+                onClick={onStartOver}
+                className="text-gray-400 hover:text-navy text-sm underline underline-offset-2 cursor-pointer transition-colors"
+              >
+                Start Over
+              </button>
+            )}
+          </div>
+        </motion.div>
+
+        {/* What Would Make This Work - shown only for negative ROI */}
+        {totalGrossSavings < totalInvestment && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.1, duration: 0.5 }}
+            className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 mb-8"
+          >
+            <h3 className="text-amber-800 font-bold text-lg mb-3 flex items-center gap-2">
+              What Would Make This Work?
+            </h3>
+            <ul className="space-y-2 text-amber-900 text-sm">
+              <li className="flex items-start gap-2">
+                <span className="text-amber-500 mt-0.5">&rarr;</span>
+                <span><strong>Larger team scope:</strong> AI savings scale with team size. Consider expanding to {Math.max(formData.teamSize * 2, 30)}+ people.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-amber-500 mt-0.5">&rarr;</span>
+                <span><strong>Higher-value processes:</strong> Focus on processes with more manual hours or higher error costs.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-amber-500 mt-0.5">&rarr;</span>
+                <span><strong>Improve data readiness:</strong> Clean, accessible data reduces implementation time by 30-50%.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-amber-500 mt-0.5">&rarr;</span>
+                <span><strong>Secure executive sponsorship:</strong> Projects with C-level support succeed 2x more often.</span>
+              </li>
+            </ul>
+            <p className="text-amber-700 text-xs mt-4 pt-3 border-t border-amber-200">
+              Download the full report to see detailed breakeven analysis and scenario modeling.
+            </p>
+          </motion.div>
+        )}
+
+        {/* ============================================ */}
+        {/* ZONE B — Detail Sections (below the fold)   */}
+        {/* ============================================ */}
+
+        {/* Financial Detail (old 3-card grid, now collapsible) */}
+        <CollapsibleSection title="Financial Detail" subtitle="NPV, IRR, and ROIC metrics">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-gray-500 text-xs mb-1">5-Year NPV</p>
+              <p className={`font-mono text-2xl font-bold ${scenario.npv >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                {formatCurrency(scenario.npv)}
+              </p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-gray-500 text-xs mb-1">IRR</p>
+              <p className="font-mono text-2xl font-bold text-navy">
+                {isFinite(scenario.irr) ? formatPercent(scenario.irr) : 'N/A'}
+              </p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-gray-500 text-xs mb-1">ROIC</p>
+              <p className={`font-mono text-2xl font-bold ${scenario.roic > 0 ? 'text-amber-500' : 'text-red-500'}`}>
+                {formatPercent(scenario.roic)}
+              </p>
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        {/* Investment Overview (ring + bar) */}
+        <CollapsibleSection title="Investment Overview" subtitle="Total investment vs 5-year gross savings">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-8 mb-6">
             <div className="relative">
               <ProgressRing
@@ -446,80 +756,47 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           <CostVsSavingsBar
             totalCost={totalInvestment}
             totalSavings={totalGrossSavings}
-            delay={0.6}
+            delay={0}
           />
-        </motion.div>
-
-        {/* 5-Year Projection Chart */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-navy font-bold text-lg mb-4">5-Year Savings Projection</h3>
-          <p className="text-gray-500 text-sm mb-4">{activeScenario === 'conservative' ? 'Conservative' : activeScenario === 'optimistic' ? 'Optimistic' : 'Base case'} scenario</p>
-          <SimpleBarChart projections={scenario.projections} delay={0.8} />
-        </motion.div>
+        </CollapsibleSection>
 
         {/* Sensitivity Tornado Chart */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.85, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-navy font-bold text-lg mb-1">Sensitivity Analysis</h3>
-          <p className="text-gray-500 text-xs mb-4">How each variable affects 5-Year NPV</p>
+        <CollapsibleSection title="Sensitivity Analysis" subtitle="How each variable affects 5-Year NPV">
           <TornadoChart extendedSensitivity={results.extendedSensitivity} baseNPV={results.scenarios.base.npv} />
-        </motion.div>
+        </CollapsibleSection>
 
-        {/* Quick Stats */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1, duration: 0.5 }}
-          className="bg-navy rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-gold font-bold text-lg mb-4">Quick Facts</h3>
+        {/* Quick Facts */}
+        <CollapsibleSection title="Quick Facts" subtitle="Key input parameters and results">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-400">Team Size</span>
-              <span className="text-white font-mono">{formData.teamSize} people</span>
+              <span className="text-gray-500">Team Size</span>
+              <span className="text-navy font-mono">{formData.teamSize} people</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">Implementation</span>
-              <span className="text-white font-mono">{results.riskAdjustments.adjustedTimeline} months</span>
+              <span className="text-gray-500">Implementation</span>
+              <span className="text-navy font-mono">{results.riskAdjustments.adjustedTimeline} months</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">Upfront Cost</span>
-              <span className="text-white font-mono">{formatCurrency(results.upfrontInvestment)}</span>
+              <span className="text-gray-500">Upfront Cost</span>
+              <span className="text-navy font-mono">{formatCurrency(results.upfrontInvestment)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">Annual AI Cost</span>
-              <span className="text-white font-mono">{formatCurrency(results.aiCostModel.baseOngoingCost)}</span>
+              <span className="text-gray-500">Annual AI Cost</span>
+              <span className="text-navy font-mono">{formatCurrency(results.aiCostModel.baseOngoingCost)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">Adoption Rate</span>
-              <span className="text-white font-mono">{formatPercent(results.riskAdjustments.adoptionRate)}</span>
+              <span className="text-gray-500">Adoption Rate</span>
+              <span className="text-navy font-mono">{formatPercent(results.riskAdjustments.adoptionRate)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">IRR</span>
-              <span className="text-white font-mono">{isFinite(scenario.irr) ? formatPercent(scenario.irr) : 'N/A'}</span>
+              <span className="text-gray-500">IRR</span>
+              <span className="text-navy font-mono">{isFinite(scenario.irr) ? formatPercent(scenario.irr) : 'N/A'}</span>
             </div>
           </div>
-        </motion.div>
+        </CollapsibleSection>
 
         {/* V3: Value Pathways */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.05, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-navy font-bold text-lg mb-1">Value Creation Pathways</h3>
-          <p className="text-gray-500 text-xs mb-4">Three lenses on how AI creates value</p>
-
+        <CollapsibleSection title="Value Creation Pathways" subtitle="Three lenses on how AI creates value">
           <div className="space-y-4">
             {/* Path A: Cost Efficiency */}
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
@@ -593,16 +870,10 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               </span>
             </div>
           </div>
-        </motion.div>
+        </CollapsibleSection>
 
         {/* V3: Capital Efficiency */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.1, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-navy font-bold text-lg mb-4">Capital Efficiency</h3>
+        <CollapsibleSection title="Capital Efficiency" subtitle="EVA, cash-on-cash, and ROIC metrics">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="rounded-xl bg-gray-50 p-3 text-center">
               <p className="text-gray-500 text-xs mb-1">EVA</p>
@@ -641,19 +912,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               </p>
             </div>
           </div>
-        </motion.div>
+        </CollapsibleSection>
 
         {/* Industry Peer Comparison */}
         {results.peerComparison && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.12, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-          >
-            <h3 className="text-navy font-bold text-lg mb-1">Industry Peer Comparison</h3>
-            <p className="text-gray-500 text-xs mb-5">Your projected ROIC vs {formData.industry || 'industry'} peers ({formData.companySize || 'your size'})</p>
-
+          <CollapsibleSection title="Industry Peer Comparison" subtitle={`Your projected ROIC vs ${formData.industry || 'industry'} peers (${formData.companySize || 'your size'})`}>
             {/* Percentile gauge */}
             <div className="relative h-8 bg-gray-100 rounded-full overflow-hidden mb-3">
               {/* P25 marker */}
@@ -666,7 +929,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               <motion.div
                 initial={{ left: '0%' }}
                 animate={{ left: `${Math.min(Math.max(results.peerComparison.percentileRank, 2), 98)}%` }}
-                transition={{ delay: 1.2, duration: 0.8, ease: 'easeOut' }}
+                transition={{ duration: 0.8, ease: 'easeOut' }}
                 className="absolute top-0 bottom-0 w-3 -ml-1.5 z-20"
               >
                 <div className={`w-full h-full rounded-full ${
@@ -705,19 +968,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 </p>
               </div>
             </div>
-          </motion.div>
+          </CollapsibleSection>
         )}
 
         {/* V3: Gate Structure */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.15, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-navy font-bold text-lg mb-1">Phased Deployment Gates</h3>
-          <p className="text-gray-500 text-xs mb-4">Go/no-go thresholds at each stage</p>
-
+        <CollapsibleSection title="Phased Deployment Gates" subtitle="Go/no-go thresholds at each stage">
           <div className="space-y-3">
             {results.gateStructure.map((gate, i) => {
               const allMet = Object.values(gate.meetsThresholds).every(Boolean);
@@ -757,135 +1012,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               );
             })}
           </div>
-        </motion.div>
-
-        {/* What Would Make This Work - shown only for negative ROI */}
-        {totalGrossSavings < totalInvestment && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.1, duration: 0.5 }}
-            className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 mb-8"
-          >
-            <h3 className="text-amber-800 font-bold text-lg mb-3 flex items-center gap-2">
-              <span className="text-2xl">💡</span> What Would Make This Work?
-            </h3>
-            <ul className="space-y-2 text-amber-900 text-sm">
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">→</span>
-                <span><strong>Larger team scope:</strong> AI savings scale with team size. Consider expanding to {Math.max(formData.teamSize * 2, 30)}+ people.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">→</span>
-                <span><strong>Higher-value processes:</strong> Focus on processes with more manual hours or higher error costs.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">→</span>
-                <span><strong>Improve data readiness:</strong> Clean, accessible data reduces implementation time by 30-50%.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">→</span>
-                <span><strong>Secure executive sponsorship:</strong> Projects with C-level support succeed 2x more often.</span>
-              </li>
-            </ul>
-            <p className="text-amber-700 text-xs mt-4 pt-3 border-t border-amber-200">
-              Download the full report to see detailed breakeven analysis and scenario modeling.
-            </p>
-          </motion.div>
-        )}
-
-        {/* CTA Buttons */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.2, duration: 0.5 }}
-          className="text-center space-y-4"
-        >
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <button
-              onClick={handlePdfDownload}
-              disabled={pdfLoading}
-              className="bg-gold text-navy font-bold py-4 px-8 rounded-2xl text-lg shadow-lg shadow-gold/30 cursor-pointer transition-all hover:bg-gold-light hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
-            >
-              {pdfLoading ? (
-                <span className="flex items-center gap-2 justify-center">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Generating PDF...
-                </span>
-              ) : 'Download PDF Report'}
-            </button>
-            <button
-              onClick={handleExcelDownload}
-              disabled={excelLoading}
-              className="bg-white text-navy font-bold py-4 px-8 rounded-2xl text-lg shadow-lg border-2 border-navy/20 cursor-pointer transition-all hover:border-navy hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
-            >
-              {excelLoading ? (
-                <span className="flex items-center gap-2 justify-center">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Generating Excel...
-                </span>
-              ) : 'Download Excel Model'}
-            </button>
-          </div>
-
-          <div className="flex items-center justify-center gap-4">
-            {onShare && (
-              <button
-                onClick={() => {
-                  onShare();
-                  setShareCopied(true);
-                  setTimeout(() => setShareCopied(false), 2000);
-                }}
-                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
-              >
-                {shareCopied ? 'Link Copied!' : 'Share Link'}
-              </button>
-            )}
-            {onEditInputs && (
-              <button
-                onClick={onEditInputs}
-                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
-              >
-                Edit Inputs
-              </button>
-            )}
-            {onStartOver && (
-              <button
-                onClick={onStartOver}
-                className="text-gray-400 hover:text-navy text-sm underline underline-offset-2 cursor-pointer transition-colors"
-              >
-                Start Over
-              </button>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Consultation CTA */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.4, duration: 0.5 }}
-          className="bg-gradient-to-br from-navy to-navy/90 rounded-3xl shadow-xl p-6 sm:p-8 text-center mb-8"
-        >
-          <p className="text-gold font-bold text-lg mb-2">Want expert guidance on your AI strategy?</p>
-          <p className="text-white/70 text-sm mb-5 max-w-md mx-auto">
-            Our team can help you validate these projections, identify quick wins, and build a phased implementation roadmap.
-          </p>
-          <a
-            href="https://calendly.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block bg-gold text-navy font-bold py-3 px-8 rounded-xl text-sm shadow-lg shadow-gold/20 transition-all hover:bg-gold-light hover:scale-[1.02] active:scale-[0.98]"
-          >
-            Schedule a Free Consultation
-          </a>
-        </motion.div>
+        </CollapsibleSection>
 
       </div>
 
@@ -895,6 +1022,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           <EmailGateModal
             onSubmit={handleEmailSubmit}
             onClose={() => setEmailGateAction(null)}
+            formData={formData}
           />
         )}
       </AnimatePresence>

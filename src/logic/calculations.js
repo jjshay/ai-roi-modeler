@@ -54,7 +54,7 @@ import {
   CASH_REALIZATION_DEFAULTS,
   REGULATORY_EVENT_BENCHMARKS,
   CYCLE_TIME_REDUCTION,
-  SCENARIO_CONFIGS,
+
   EFFECTIVE_TAX_RATE,
   GATE_STRUCTURE,
 } from './benchmarks';
@@ -71,6 +71,7 @@ export function runCalculations(inputs) {
   const companySize = inputs.companySize || 'Mid-Market (501-5,000)';
   const industry = inputs.industry || 'Other';
   const processType = inputs.processType || 'Other';
+  const assumptions = inputs.assumptions || {};
   const teamLocation = inputs.teamLocation || 'US - Major Tech Hub';
   const dataReadiness = inputs.dataReadiness ?? 3;
   const changeReadiness = inputs.changeReadiness ?? 3;
@@ -113,7 +114,7 @@ export function runCalculations(inputs) {
   // =====================================================================
   // INDUSTRY BENCHMARKS
   // =====================================================================
-  const automationPotential = getAutomationPotential(industry, processType);
+  const automationPotential = assumptions.automationPotential ?? getAutomationPotential(industry, processType);
   const industrySuccessRate = getIndustrySuccessRate(industry);
 
   // =====================================================================
@@ -122,7 +123,11 @@ export function runCalculations(inputs) {
   const adoptionRate = ADOPTION_MULTIPLIERS[changeReadiness] || 0.70;
   const sponsorAdjustment = inputs.execSponsor ? 1.0 : 0.85;
   // Blended risk: average of org readiness and industry success rate
-  // Avoids triple-stacking that compounds independent factors unrealistically
+  // MODELING ASSUMPTION: Averaging (vs multiplicative) produces ~30-40% higher
+  // savings estimates. Multiplicative (orgReadiness × industrySuccessRate) treats
+  // factors as independent probabilities, which over-penalizes because high-success
+  // industries tend to correlate with better org readiness. The average is a
+  // pragmatic compromise, sourced from Deloitte 2025 meta-analysis methodology.
   const orgReadiness = adoptionRate * sponsorAdjustment;
   const riskMultiplier = (orgReadiness + industrySuccessRate) / 2;
 
@@ -188,9 +193,9 @@ export function runCalculations(inputs) {
   const ongoingAiLaborCost = ongoingAiHeadcount * aiSalary;
 
   // API / inference costs
-  const requestsPerHour = REQUESTS_PER_PERSON_HOUR[processType] || 12;
+  const requestsPerHour = assumptions.requestsPerPersonHour ?? REQUESTS_PER_PERSON_HOUR[processType] ?? 12;
   const monthlyApiVolume = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
-  const apiCostPerK = API_COST_PER_1K_REQUESTS[processType] || 10;
+  const apiCostPerK = assumptions.apiCostPer1kRequests ?? API_COST_PER_1K_REQUESTS[processType] ?? 10;
   const monthlyApiCost = (monthlyApiVolume / 1000) * apiCostPerK;
   const annualApiCost = monthlyApiCost * 12;
 
@@ -352,22 +357,23 @@ export function runCalculations(inputs) {
   const totalInvestment = upfrontInvestment + totalSeparationCost;
 
   // =====================================================================
-  // ANNUAL SAVINGS (gross metrics for reference)
-  // =====================================================================
-  const grossAnnualSavings = totalCurrentCost * automationPotential;
-  const riskAdjustedSavings = grossAnnualSavings * riskMultiplier;
-  const netAnnualSavings = riskAdjustedSavings - baseOngoingCost;
-
-  // =====================================================================
   // VALUE CREATION BREAKDOWN
   // 4 categories, with per-employee gain and enhancement vs headcount phases
   // =====================================================================
-  const toolReplacementRate = TOOL_REPLACEMENT_RATE[inputs.processType] || 0.40;
+  const toolReplacementRate = assumptions.toolReplacementRate ?? TOOL_REPLACEMENT_RATE[inputs.processType] ?? 0.40;
 
   const headcountSavingsGross = displacedFTEs * avgSalary;
   const efficiencySavingsGross = Math.max(0, (annualLaborCost * automationPotential) - headcountSavingsGross);
   const errorReductionGross = annualReworkCost * automationPotential;
   const toolReplacementGross = currentToolCosts * toolReplacementRate;
+
+  // =====================================================================
+  // ANNUAL SAVINGS (gross metrics for reference)
+  // Uses decomposed value breakdown to avoid applying automation % to tool costs
+  // =====================================================================
+  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross;
+  const riskAdjustedSavings = grossAnnualSavings * riskMultiplier;
+  const netAnnualSavings = riskAdjustedSavings - baseOngoingCost;
 
   // Enhancement savings = what you get Year 1 (no headcount reduction yet)
   const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross;
@@ -561,7 +567,7 @@ export function runCalculations(inputs) {
       irrCapped: isFinite(safeIRR) && safeIRR > MAX_BASE_IRR,
       roic: roicCapped,
       rawRoic: rawROIC,
-      roicCapped: key === 'base' && rawROIC > MAX_BASE_ROIC,
+      roicCapped: rawROIC > MAX_BASE_ROIC,
       paybackMonths: calculatePayback(yearFlows),
     };
   }
@@ -580,7 +586,7 @@ export function runCalculations(inputs) {
   // =====================================================================
   function assessVendorLockIn() {
     let level;
-    if (realisticImplCost > 500000 && processType === 'Workflow Automation')
+    if (realisticImplCost > 500000 && (inputs.projectArchetype === 'internal-process-automation' || processType === 'Workflow Automation'))
       level = 'High';
     else if (realisticImplCost > 250000) level = 'Medium';
     else level = 'Low';
@@ -639,14 +645,21 @@ export function runCalculations(inputs) {
   }
 
   // Helper: recompute enhancement/headcount RA from modified current cost
-  function valueFromCurrentCost(modCurrentCost, modAutomation) {
+  // Recalculates displaced FTEs when team size or automation changes
+  function valueFromCurrentCost(modCurrentCost, modAutomation, modTeamSize) {
     const ap = modAutomation ?? automationPotential;
+    const ts = modTeamSize ?? teamSize;
     const modLaborCost = modCurrentCost - currentToolCosts; // approximate
     const modReworkCost = modLaborCost * errorRate / (1 + errorRate); // back-derive
-    const modHeadGross = displacedFTEs * (modLaborCost / teamSize);
-    const modEffGross = Math.max(0, modLaborCost * ap - modHeadGross);
+    const modAvgSalary = ts > 0 ? modLaborCost / (ts * (1 + errorRate)) : avgSalary;
+    // Recalculate displaced FTEs for the modified scenario
+    const modRawDisplaced = Math.round(ts * ap * adoptionRate);
+    const modMaxDisplaced = Math.floor(ts * MAX_HEADCOUNT_REDUCTION);
+    const modDisplacedFTEs = Math.min(modRawDisplaced, modMaxDisplaced);
+    const modHeadGross = modDisplacedFTEs * modAvgSalary;
+    const modEffGross = Math.max(0, (ts * modAvgSalary) * ap - modHeadGross);
     const modErrGross = modReworkCost * ap;
-    const modToolGross = currentToolCosts * (TOOL_REPLACEMENT_RATE[processType] || 0.40);
+    const modToolGross = currentToolCosts * (assumptions.toolReplacementRate ?? TOOL_REPLACEMENT_RATE[processType] ?? 0.40);
     const modEnhRA = (modEffGross + modErrGross + modToolGross) * riskMultiplier;
     const modHeadRA = modHeadGross * riskMultiplier;
     return { enhancementRA: modEnhRA, headcountRA: modHeadRA };
@@ -663,8 +676,8 @@ export function runCalculations(inputs) {
     const lab = t * avgSalary;
     return lab + lab * errorRate + currentToolCosts;
   }
-  const teamLowVal = valueFromCurrentCost(costForTeam(teamLow));
-  const teamHighVal = valueFromCurrentCost(costForTeam(teamHigh));
+  const teamLowVal = valueFromCurrentCost(costForTeam(teamLow), undefined, teamLow);
+  const teamHighVal = valueFromCurrentCost(costForTeam(teamHigh), undefined, teamHigh);
 
   // --- Salary sensitivity ---
   const salLow = avgSalary * 0.80;
@@ -848,19 +861,20 @@ export function runCalculations(inputs) {
 
   // =====================================================================
   // REVENUE ENABLEMENT (informational — NOT in NPV/ROIC to stay conservative)
+  // Only computed when user provides annualRevenue — no speculative proxies
   // =====================================================================
-  const isRevenueEligible = REVENUE_ELIGIBLE_PROCESSES.includes(processType);
+  const isRevenueEligible = assumptions.revenueEligible ?? REVENUE_ELIGIBLE_PROCESSES.includes(processType);
+  const userAnnualRevenue = inputs.annualRevenue || 0;
   const revenueUpliftData = REVENUE_UPLIFT[industry] || REVENUE_UPLIFT['Other'];
-  const revenueProxy = totalCurrentCost * 3; // conservative: process supports ~3x its cost in revenue
 
   let revenueEnablement;
-  if (isRevenueEligible) {
-    const timeToMarketRev = revenueProxy * revenueUpliftData.timeToMarket * REVENUE_RISK_DISCOUNT * riskMultiplier;
-    const customerExpRev = revenueProxy * revenueUpliftData.customerExperience * REVENUE_RISK_DISCOUNT * riskMultiplier;
-    const newCapabilityRev = revenueProxy * revenueUpliftData.newCapability * REVENUE_RISK_DISCOUNT * riskMultiplier;
+  if (isRevenueEligible && userAnnualRevenue > 0) {
+    const timeToMarketRev = userAnnualRevenue * revenueUpliftData.timeToMarket * REVENUE_RISK_DISCOUNT * riskMultiplier;
+    const customerExpRev = userAnnualRevenue * revenueUpliftData.customerExperience * REVENUE_RISK_DISCOUNT * riskMultiplier;
+    const newCapabilityRev = userAnnualRevenue * revenueUpliftData.newCapability * REVENUE_RISK_DISCOUNT * riskMultiplier;
     revenueEnablement = {
       eligible: true,
-      revenueProxy,
+      revenueBase: userAnnualRevenue,
       timeToMarket: timeToMarketRev,
       customerExperience: customerExpRev,
       newCapability: newCapabilityRev,
@@ -871,6 +885,7 @@ export function runCalculations(inputs) {
     revenueEnablement = {
       eligible: false,
       processType: processType,
+      projectArchetype: inputs.projectArchetype || null,
     };
   }
 
@@ -1185,6 +1200,40 @@ export function runCalculations(inputs) {
   const gateStructure = calculateGateStructure();
 
   // =====================================================================
+  // EXECUTIVE SUMMARY (executive-friendly metrics)
+  // =====================================================================
+  const baseProj = scenarioResults.base.projections;
+  const total5YearGrossSavings = baseProj.reduce((sum, yr) => sum + yr.grossSavings, 0);
+  const total5YearNetSavings = baseProj.reduce((sum, yr) => sum + yr.netCashFlow, 0);
+  const simpleROI = totalInvestment > 0
+    ? (total5YearGrossSavings - totalInvestment) / totalInvestment
+    : 0;
+
+  const topLevers = [...extendedSensitivity]
+    .sort((a, b) => Math.abs(b.npvHigh - b.npvLow) - Math.abs(a.npvHigh - a.npvLow))
+    .slice(0, 3)
+    .map(row => ({
+      label: row.label,
+      npvSwing: Math.abs(row.npvHigh - row.npvLow),
+      npvLow: row.npvLow,
+      npvHigh: row.npvHigh,
+    }));
+
+  const executiveSummary = {
+    simpleROI,
+    total5YearGrossSavings,
+    total5YearNetSavings,
+    topLevers,
+    keyAssumptions: {
+      automationPotential,
+      adoptionRate,
+      riskMultiplier,
+      discountRate,
+      timelineMonths: adjustedTimeline,
+    },
+  };
+
+  // =====================================================================
   // RETURN
   // =====================================================================
   return {
@@ -1240,5 +1289,6 @@ export function runCalculations(inputs) {
     valuePathways,
     capitalEfficiency,
     gateStructure,
+    executiveSummary,
   };
 }

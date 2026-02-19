@@ -446,10 +446,10 @@ export const REVENUE_UPLIFT = {
 };
 
 // Process types eligible for revenue enablement calculations
+// DEPRECATED: use assumptions.revenueEligible from archetype defaults instead
 export const REVENUE_ELIGIBLE_PROCESSES = [
   'Customer Communication',
   'Content Creation',
-  'Data Analysis & Reporting',
   'Research & Intelligence',
 ];
 
@@ -794,3 +794,9 @@ export const BENCHMARK_SOURCES = [
   { id: 25, short: 'IDC 2025', full: 'IDC, "AI Infrastructure Total Cost of Ownership," 2025. Annual model retraining and drift monitoring costs average 5-10% of initial implementation investment.' },
   { id: 26, short: 'Damodaran 2025', full: 'Aswath Damodaran, "Cost of Capital by Company Lifecycle," NYU Stern, 2025. WACC ranges from 8% (large-cap mature) to 18%+ (early-stage startup). Company size is strongest predictor of capital cost.' },
 ];
+
+// ---------------------------------------------------------------------------
+// Archetype Defaults
+// Import directly from './archetypes' — not re-exported here to avoid
+// circular dependency (archetypes.js imports benchmark constants).
+// ---------------------------------------------------------------------------

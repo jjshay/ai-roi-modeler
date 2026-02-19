@@ -1,29 +1,31 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProgressBar from './ProgressBar';
 import Step1_CompanyContext from './steps/Step1_CompanyContext';
-import Step2_RiskReadiness from './steps/Step5_RiskReadiness'; // Moved to step 2
-import Step3_ProcessDetails from './steps/Step2_ProcessDetails';
-import Step4_CurrentCosts from './steps/Step3_CurrentCosts';
-import Step5_AIInvestment from './steps/Step4_AIInvestment';
+import Step2_RiskReadiness from './steps/Step2_RiskReadiness';
+import Step3_ProcessDetails from './steps/Step3_ProcessDetails';
+import Step4_ReviewAssumptions from './steps/Step4_ReviewAssumptions';
+import Step4_CurrentCosts from './steps/Step4_CurrentCosts';
+import Step5_AIInvestment from './steps/Step5_AIInvestment';
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
-// Reordered: Readiness now comes BEFORE cost inputs (drives estimates)
 const STEP_COMPONENTS = [
   Step1_CompanyContext,
-  Step2_RiskReadiness, // Ask readiness early - it affects cost calculations
+  Step2_RiskReadiness,
   Step3_ProcessDetails,
+  Step4_ReviewAssumptions,
   Step4_CurrentCosts,
   Step5_AIInvestment,
 ];
 
 const REQUIRED_FIELDS = {
   1: ['industry', 'companySize', 'role', 'teamLocation'],
-  2: ['changeReadiness', 'dataReadiness'], // Readiness now step 2
-  3: ['processType', 'teamSize', 'hoursPerWeek', 'errorRate'],
-  4: ['avgSalary'],
-  5: [], // AI investment has auto-suggested defaults
+  2: ['changeReadiness', 'dataReadiness'],
+  3: ['projectArchetype', 'teamSize', 'hoursPerWeek', 'errorRate'],
+  4: [], // assumptions have defaults, all optional to override
+  5: ['avgSalary'],
+  6: [], // AI investment has auto-suggested defaults
 };
 
 const slideVariants = {
@@ -76,26 +78,24 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
     setCurrentStep((prev) => Math.max(prev - 1, 1));
   };
 
-  // Keyboard navigation: Enter to advance, Escape to go back
+  // Keep refs to avoid re-registering the keyboard listener every render
+  const isStepValidRef = useRef(isStepValid);
+  const handleNextRef = useRef(handleNext);
+  isStepValidRef.current = isStepValid;
+  handleNextRef.current = handleNext;
+
+  // Keyboard navigation: Enter to advance
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Don't intercept if user is typing in an input/textarea
+      if (e.key !== 'Enter') return;
       const tag = e.target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          if (isStepValid()) handleNext();
-        }
-        return;
-      }
-      if (e.key === 'Enter' && isStepValid()) {
-        e.preventDefault();
-        handleNext();
-      }
+      if (tag === 'TEXTAREA') return;
+      e.preventDefault();
+      if (isStepValidRef.current()) handleNextRef.current();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  });
+  }, []);
 
   const StepComponent = STEP_COMPONENTS[currentStep - 1];
 

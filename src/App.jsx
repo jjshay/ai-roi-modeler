@@ -14,8 +14,10 @@ const DEFAULT_FORM_DATA = {
   changeReadiness: 3,
   dataReadiness: 3,
   execSponsor: true,
-  // Step 3: Process Details
-  processType: '',
+  // Step 3: Project Archetype & Team Details
+  processType: '',              // kept for backward compat
+  projectArchetype: '',         // archetype id string
+  assumptions: {},              // populated from archetype defaults, user-editable
   teamSize: 10,
   hoursPerWeek: 20,
   errorRate: 0.10,

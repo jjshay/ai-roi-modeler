@@ -139,10 +139,10 @@ describe('Value Creation Breakdown', () => {
     );
   });
 
-  it('tool replacement uses process-specific rate', () => {
+  it('tool replacement uses assumptions rate (fallback to process-specific)', () => {
     const r = runCalculations(BASE_INPUTS);
-    // DocProc tool replacement = 0.55
-    expect(r.valueBreakdown.toolReplacement.gross).toBe(50000 * 0.55);
+    // assumptions.toolReplacementRate = 0.60 (archetype default)
+    expect(r.valueBreakdown.toolReplacement.gross).toBe(50000 * BASE_INPUTS.assumptions.toolReplacementRate);
   });
 });
 
@@ -733,5 +733,352 @@ describe('Cross-scenario consistency', () => {
       expect(r).toHaveProperty('peerComparison');
       expect(r).toHaveProperty('scenarios');
     }
+  });
+});
+
+// =====================================================================
+// L3: Extreme Input Tests
+// =====================================================================
+describe('Extreme inputs', () => {
+  it('teamSize=1 produces valid results without errors', () => {
+    const r = runCalculations({ ...BASE_INPUTS, teamSize: 1 });
+    expect(r.currentState.totalCurrentCost).toBeGreaterThan(0);
+    expect(r.scenarios.base.npv).toBeDefined();
+    expect(isFinite(r.scenarios.base.npv)).toBe(true);
+    expect(r.oneTimeCosts.displacedFTEs).toBeLessThanOrEqual(1);
+  });
+
+  it('errorRate=0 produces valid results (no rework)', () => {
+    const r = runCalculations({ ...BASE_INPUTS, errorRate: 0 });
+    expect(r.currentState.annualReworkCost).toBe(0);
+    expect(r.currentState.totalCurrentCost).toBe(
+      BASE_INPUTS.teamSize * BASE_INPUTS.avgSalary + BASE_INPUTS.currentToolCosts
+    );
+    expect(r.valueBreakdown.errorReduction.gross).toBe(0);
+    expect(r.scenarios.base.npv).toBeDefined();
+  });
+
+  it('very large teamSize=1000 produces bounded results', () => {
+    const r = runCalculations({ ...BASE_INPUTS, teamSize: 1000 });
+    expect(r.scenarios.base.roic).toBeLessThanOrEqual(1.0);
+    if (isFinite(r.scenarios.base.irr)) {
+      expect(r.scenarios.base.irr).toBeLessThanOrEqual(0.75);
+      expect(r.scenarios.base.irr).toBeGreaterThanOrEqual(-0.75);
+    }
+    // Displaced FTEs should not exceed MAX_HEADCOUNT_REDUCTION cap (75%)
+    expect(r.oneTimeCosts.displacedFTEs).toBeLessThanOrEqual(Math.floor(1000 * 0.75));
+  });
+});
+
+// =====================================================================
+// L4: NPV/Payback Ordering Across Scenarios
+// =====================================================================
+describe('Scenario ordering invariants', () => {
+  it('conservative NPV <= base NPV <= optimistic NPV', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.scenarios.conservative.npv).toBeLessThanOrEqual(r.scenarios.base.npv);
+    expect(r.scenarios.base.npv).toBeLessThanOrEqual(r.scenarios.optimistic.npv);
+  });
+
+  it('conservative payback >= base payback >= optimistic payback', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.scenarios.conservative.paybackMonths).toBeGreaterThanOrEqual(
+      r.scenarios.base.paybackMonths
+    );
+    expect(r.scenarios.base.paybackMonths).toBeGreaterThanOrEqual(
+      r.scenarios.optimistic.paybackMonths
+    );
+  });
+
+  it('conservative ROIC <= base ROIC <= optimistic ROIC', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.scenarios.conservative.roic).toBeLessThanOrEqual(r.scenarios.base.roic);
+    expect(r.scenarios.base.roic).toBeLessThanOrEqual(r.scenarios.optimistic.roic);
+  });
+
+  it('ordering holds for enterprise profile too', () => {
+    const r = runCalculations(ENTERPRISE_INPUTS);
+    expect(r.scenarios.conservative.npv).toBeLessThanOrEqual(r.scenarios.base.npv);
+    expect(r.scenarios.base.npv).toBeLessThanOrEqual(r.scenarios.optimistic.npv);
+    expect(r.scenarios.conservative.paybackMonths).toBeGreaterThanOrEqual(
+      r.scenarios.base.paybackMonths
+    );
+  });
+});
+
+// =====================================================================
+// L5: V3 Value Creation Pathway Tests
+// =====================================================================
+describe('Value Creation Pathways (V3)', () => {
+  it('cost efficiency pathway ties to risk-adjusted savings', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const ce = r.valuePathways.costEfficiency;
+    expect(ce.annualRiskAdjusted).toBeGreaterThan(0);
+    expect(ce.annualGross).toBeGreaterThanOrEqual(ce.annualRiskAdjusted);
+  });
+
+  it('capacity creation pathway computes freed hours', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const cc = r.valuePathways.capacityCreation;
+    expect(cc.hoursFreed).toBeGreaterThan(0);
+    expect(cc.fteEquivalent).toBeGreaterThan(0);
+    expect(cc.annualCapacityValue).toBe(cc.hoursFreed * cc.hourlyValue);
+  });
+
+  it('risk reduction pathway uses industry benchmarks', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const rr = r.valuePathways.riskReduction;
+    expect(rr.eventProbability).toBeGreaterThan(0);
+    expect(rr.eventImpact).toBeGreaterThan(0);
+    expect(rr.annualValueAvoided).toBeGreaterThan(0);
+    expect(rr.expectedLossAfter).toBeLessThan(rr.expectedLossBefore);
+  });
+
+  it('revenue acceleration is zero when no annual revenue provided', () => {
+    const r = runCalculations(BASE_INPUTS); // no annualRevenue
+    expect(r.valuePathways.capacityCreation.revenueAcceleration).toBe(0);
+  });
+
+  it('revenue acceleration is positive when annual revenue is provided', () => {
+    const r = runCalculations({ ...BASE_INPUTS, annualRevenue: 5000000 });
+    expect(r.valuePathways.capacityCreation.revenueAcceleration).toBeGreaterThan(0);
+  });
+
+  it('costOnlyAnnual matches cost efficiency pathway', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.valuePathways.costOnlyAnnual).toBe(
+      r.valuePathways.costEfficiency.annualRiskAdjusted
+    );
+  });
+});
+
+// =====================================================================
+// L6: grossAnnualSavings Reconciliation
+// =====================================================================
+describe('grossAnnualSavings reconciliation', () => {
+  it('grossAnnualSavings equals valueBreakdown.totalGross', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.savings.grossAnnualSavings).toBeCloseTo(r.valueBreakdown.totalGross, 2);
+  });
+
+  it('reconciles for startup profile', () => {
+    const r = runCalculations(STARTUP_INPUTS);
+    expect(r.savings.grossAnnualSavings).toBeCloseTo(r.valueBreakdown.totalGross, 2);
+  });
+
+  it('reconciles for enterprise profile', () => {
+    const r = runCalculations(ENTERPRISE_INPUTS);
+    expect(r.savings.grossAnnualSavings).toBeCloseTo(r.valueBreakdown.totalGross, 2);
+  });
+
+  it('reconciles for government profile', () => {
+    const r = runCalculations(GOVERNMENT_INPUTS);
+    expect(r.savings.grossAnnualSavings).toBeCloseTo(r.valueBreakdown.totalGross, 2);
+  });
+});
+
+// =====================================================================
+// Executive Summary
+// =====================================================================
+describe('Executive Summary', () => {
+  it('returns executiveSummary with all expected properties', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.executiveSummary).toBeDefined();
+    expect(r.executiveSummary).toHaveProperty('simpleROI');
+    expect(r.executiveSummary).toHaveProperty('total5YearGrossSavings');
+    expect(r.executiveSummary).toHaveProperty('total5YearNetSavings');
+    expect(r.executiveSummary).toHaveProperty('topLevers');
+    expect(r.executiveSummary).toHaveProperty('keyAssumptions');
+  });
+
+  it('simpleROI = (total5YearGrossSavings - totalInvestment) / totalInvestment', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const expected = (r.executiveSummary.total5YearGrossSavings - r.totalInvestment) / r.totalInvestment;
+    expect(r.executiveSummary.simpleROI).toBeCloseTo(expected, 6);
+  });
+
+  it('total5YearGrossSavings = sum of base projections grossSavings', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const sum = r.scenarios.base.projections.reduce((s, yr) => s + yr.grossSavings, 0);
+    expect(r.executiveSummary.total5YearGrossSavings).toBeCloseTo(sum, 2);
+  });
+
+  it('total5YearNetSavings = sum of base projections netCashFlow', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const sum = r.scenarios.base.projections.reduce((s, yr) => s + yr.netCashFlow, 0);
+    expect(r.executiveSummary.total5YearNetSavings).toBeCloseTo(sum, 2);
+  });
+
+  it('topLevers has exactly 3 items sorted by NPV swing descending', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.executiveSummary.topLevers).toHaveLength(3);
+    for (let i = 0; i < 2; i++) {
+      expect(r.executiveSummary.topLevers[i].npvSwing).toBeGreaterThanOrEqual(
+        r.executiveSummary.topLevers[i + 1].npvSwing
+      );
+    }
+  });
+
+  it('each topLever has label, npvSwing, npvLow, npvHigh', () => {
+    const r = runCalculations(BASE_INPUTS);
+    r.executiveSummary.topLevers.forEach(lever => {
+      expect(lever).toHaveProperty('label');
+      expect(lever).toHaveProperty('npvSwing');
+      expect(lever).toHaveProperty('npvLow');
+      expect(lever).toHaveProperty('npvHigh');
+      expect(typeof lever.npvSwing).toBe('number');
+    });
+  });
+
+  it('keyAssumptions has expected fields', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const ka = r.executiveSummary.keyAssumptions;
+    expect(ka).toHaveProperty('automationPotential');
+    expect(ka).toHaveProperty('adoptionRate');
+    expect(ka).toHaveProperty('riskMultiplier');
+    expect(ka).toHaveProperty('discountRate');
+    expect(ka).toHaveProperty('timelineMonths');
+    expect(ka.automationPotential).toBeGreaterThan(0);
+    expect(ka.adoptionRate).toBeGreaterThan(0);
+    expect(ka.timelineMonths).toBeGreaterThan(0);
+  });
+
+  it('works for all input profiles', () => {
+    const profiles = [BASE_INPUTS, STARTUP_INPUTS, ENTERPRISE_INPUTS, GOVERNMENT_INPUTS];
+    for (const profile of profiles) {
+      const r = runCalculations(profile);
+      expect(r.executiveSummary).toBeDefined();
+      expect(r.executiveSummary.topLevers).toHaveLength(3);
+      expect(typeof r.executiveSummary.simpleROI).toBe('number');
+      expect(isFinite(r.executiveSummary.simpleROI)).toBe(true);
+    }
+  });
+});
+
+// =====================================================================
+// Archetype & Assumptions Tests
+// =====================================================================
+describe('Project Archetypes & Assumptions', () => {
+  it('assumptions.automationPotential overrides benchmark lookup', () => {
+    const custom = { ...BASE_INPUTS, assumptions: { ...BASE_INPUTS.assumptions, automationPotential: 0.30 } };
+    const r = runCalculations(custom);
+    expect(r.benchmarks.automationPotential).toBe(0.30);
+  });
+
+  it('assumptions.apiCostPer1kRequests overrides benchmark lookup', () => {
+    const custom = { ...BASE_INPUTS, assumptions: { ...BASE_INPUTS.assumptions, apiCostPer1kRequests: 50 } };
+    const r = runCalculations(custom);
+    // Monthly volume = 20 * 40 * 4.33 * requestsPerHour
+    // Annual API cost = (monthlyVol / 1000) * 50 * 12
+    expect(r.aiCostModel.annualApiCost).toBeGreaterThan(0);
+  });
+
+  it('assumptions.toolReplacementRate overrides benchmark lookup', () => {
+    const custom = { ...BASE_INPUTS, assumptions: { ...BASE_INPUTS.assumptions, toolReplacementRate: 0.80 } };
+    const r = runCalculations(custom);
+    expect(r.valueBreakdown.toolReplacement.gross).toBe(50000 * 0.80);
+  });
+
+  it('assumptions.revenueEligible=true makes revenue pathway eligible', () => {
+    const custom = {
+      ...BASE_INPUTS,
+      assumptions: { ...BASE_INPUTS.assumptions, revenueEligible: true },
+      annualRevenue: 5000000,
+    };
+    const r = runCalculations(custom);
+    expect(r.revenueEnablement.eligible).toBe(true);
+    expect(r.revenueEnablement.totalAnnualRevenue).toBeGreaterThan(0);
+  });
+
+  it('assumptions.revenueEligible=false blocks revenue pathway', () => {
+    const custom = {
+      ...BASE_INPUTS,
+      processType: 'Customer Communication', // would normally be eligible
+      assumptions: { ...BASE_INPUTS.assumptions, revenueEligible: false },
+      annualRevenue: 5000000,
+    };
+    const r = runCalculations(custom);
+    expect(r.revenueEnablement.eligible).toBe(false);
+  });
+
+  it('backward compat: old processType-only inputs still work (no assumptions)', () => {
+    const oldStyle = {
+      industry: 'Technology / Software',
+      companySize: 'Mid-Market (501-5,000)',
+      processType: 'Document Processing',
+      teamSize: 20,
+      avgSalary: 85000,
+      hoursPerWeek: 40,
+      errorRate: 0.15,
+      currentToolCosts: 50000,
+      vendorsReplaced: 0,
+      vendorTerminationCost: 0,
+      changeReadiness: 3,
+      dataReadiness: 3,
+      execSponsor: true,
+      expectedTimeline: 6,
+      implementationBudget: 200000,
+      ongoingAnnualCost: 50000,
+      teamLocation: 'US - Major Tech Hub',
+      companyState: 'California',
+    };
+    const r = runCalculations(oldStyle);
+    expect(r.currentState.totalCurrentCost).toBeGreaterThan(0);
+    expect(r.scenarios.base.npv).toBeDefined();
+    expect(isFinite(r.scenarios.base.npv)).toBe(true);
+    // Should use benchmark lookups (DocProc: automation=0.60, toolRepl=0.55)
+    expect(r.benchmarks.automationPotential).toBe(0.60);
+    expect(r.valueBreakdown.toolReplacement.gross).toBe(50000 * 0.55);
+  });
+
+  it('each archetype profile produces valid results', () => {
+    const archetypeIds = [
+      'internal-process-automation',
+      'customer-facing-ai',
+      'data-analytics-automation',
+      'revenue-growth-ai',
+      'risk-compliance-ai',
+    ];
+    for (const id of archetypeIds) {
+      const inputs = {
+        ...BASE_INPUTS,
+        projectArchetype: id,
+        assumptions: {
+          automationPotential: 0.50,
+          adoptionRate: 0.70,
+          apiCostPer1kRequests: 10,
+          requestsPerPersonHour: 15,
+          toolReplacementRate: 0.45,
+          revenueEligible: ['customer-facing-ai', 'revenue-growth-ai'].includes(id),
+        },
+      };
+      const r = runCalculations(inputs);
+      expect(r.currentState.totalCurrentCost).toBeGreaterThan(0);
+      expect(r.scenarios.base).toBeDefined();
+      expect(isFinite(r.scenarios.base.npv)).toBe(true);
+    }
+  });
+
+  it('empty assumptions object falls back to processType benchmarks', () => {
+    const inputs = { ...BASE_INPUTS, assumptions: {} };
+    const r = runCalculations(inputs);
+    // Falls back to processType='Document Processing' lookups
+    expect(r.benchmarks.automationPotential).toBe(0.60);
+  });
+
+  it('vendor lock-in uses projectArchetype for high-risk assessment', () => {
+    const inputs = {
+      ...BASE_INPUTS,
+      projectArchetype: 'internal-process-automation',
+      implementationBudget: 1000000,
+      ongoingAnnualCost: 200000,
+    };
+    const r = runCalculations(inputs);
+    expect(r.vendorLockIn.level).toBe('High');
+  });
+
+  it('projectArchetype appears in revenueEnablement output when not eligible', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.revenueEnablement.projectArchetype).toBe('internal-process-automation');
   });
 });

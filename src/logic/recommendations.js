@@ -1,10 +1,4 @@
-function formatCompact(value) {
-  if (value == null || isNaN(value)) return '$0';
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return '$' + (abs / 1_000_000).toFixed(1) + 'M';
-  if (abs >= 1_000) return '$' + (abs / 1_000).toFixed(0) + 'K';
-  return '$' + abs.toFixed(0);
-}
+import { formatCompact } from '../utils/formatters';
 
 export function getRecommendation(results) {
   const conservativeNPV = results.scenarios.conservative.npv;

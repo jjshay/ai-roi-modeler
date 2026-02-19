@@ -25,7 +25,7 @@ const slideVariants = {
   exit: { x: -40, opacity: 0 },
 };
 
-export default function Step5_RiskReadiness({ formData, updateField }) {
+export default function Step2_RiskReadiness({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
   const advanceTimer = useRef(null);
 

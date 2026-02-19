@@ -26,6 +26,7 @@ import {
   SEPARATION_COST_BREAKDOWN,
   MAX_HEADCOUNT_REDUCTION,
 } from '../logic/benchmarks';
+import { getArchetypeById } from '../logic/archetypes';
 import { getRiskMitigations } from '../logic/recommendations';
 
 // ---------------------------------------------------------------------------
@@ -211,102 +212,108 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   y = sectionTitle(doc, 'Executive Summary', y);
   y += 2;
   const summaryText =
-    'This analysis provides a comprehensive, risk-adjusted assessment of the proposed AI implementation. ' +
-    'Unlike typical vendor ROI calculators, this model incorporates industry-specific adoption curves [1][5], ' +
-    'transition and friction costs [9], organizational readiness factors, and multi-scenario projections to ' +
-    'deliver a realistic view of expected returns. Empirical return ceilings are based on IBM [2] and MIT/RAND [4] research ' +
-    'on actual AI project outcomes. All figures are adjusted for your industry, company size, and readiness posture. ' +
-    'See Appendix B for full source references.';
+    'This analysis provides a risk-adjusted assessment of the proposed AI implementation, incorporating ' +
+    'industry-specific adoption curves, transition costs, and organizational readiness factors. ' +
+    'All figures are adjusted for your industry, company size, and readiness posture. ' +
+    'See Appendix B for source references.';
   y = bodyText(doc, summaryText, MARGIN, y, { maxWidth: CONTENT_W });
-  y += 6;
+  y += 4;
 
-  // Key Metrics Box
+  // --- Simple ROI hero box ---
+  const exec = results.executiveSummary;
   const base = results.scenarios.base;
-  const lastProjection = base.projections[base.projections.length - 1];
-  const fiveYearNet = lastProjection?.netCumulative || 0;
-
-  const boxY = y;
-  const boxH = 48;
-  drawRoundedRect(doc, MARGIN, boxY, CONTENT_W, boxH, 3, [240, 244, 252]);
-  doc.setDrawColor(...NAVY);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(MARGIN, boxY, CONTENT_W, boxH, 3, 3, 'S');
-
-  // Box title
+  const roiPositive = exec.simpleROI >= 0;
+  const heroBoxH = 22;
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, heroBoxH, 3, roiPositive ? GREEN : RED);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...GOLD);
-  doc.text('KEY METRICS', MARGIN + 6, boxY + 8);
-
-  const colW = CONTENT_W / 5;
-  const metricValY = boxY + 28;
-  const metricLabelY = boxY + 34;
-
-  const roicDisplay = base.roicCapped
-    ? formatPercent(base.roic) + '*'
-    : formatPercent(base.roic);
-  const irrDisplay = base.irrCapped
-    ? safeIRR(base.irr) + '*'
-    : safeIRR(base.irr);
-
-  const metrics = [
-    { label: `${DCF_YEARS}-Year Net Value (Base)`, value: formatCompactValue(fiveYearNet) },
-    { label: 'Break-Even', value: safePayback(base.paybackMonths) },
-    { label: 'ROIC (Base)', value: roicDisplay },
-    { label: 'IRR (Base)', value: irrDisplay },
-    { label: 'Confidence', value: results.confidenceLevel },
-  ];
-
-  metrics.forEach((m, i) => {
-    const cx = MARGIN + 6 + i * colW;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor(...NAVY);
-    doc.text(m.value, cx, metricValY);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...MID_GRAY);
-    doc.text(m.label, cx, metricLabelY);
-  });
-
-  y = boxY + boxH + 4;
-
-  // Hurdle rate indicator bar
-  const baseIRR = base.irr;
-  const hurdleRate = results.discountRate || 0.10;
-  const clearsHurdle = !isNaN(baseIRR) && isFinite(baseIRR) && baseIRR > hurdleRate;
-  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 10, 1.5, clearsHurdle ? GREEN : RED);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
+  doc.setFontSize(22);
   doc.setTextColor(...WHITE);
-  const hurdleRateDisplay = formatPercent(hurdleRate);
-  const hurdleStatus = clearsHurdle
-    ? `Hurdle Rate: ${hurdleRateDisplay} WACC [26]  |  Base IRR: ${safeIRR(baseIRR)}  |  CLEARS HURDLE`
-    : `Hurdle Rate: ${hurdleRateDisplay} WACC [26]  |  Base IRR: ${safeIRR(baseIRR)}  |  BELOW HURDLE`;
-  doc.text(hurdleStatus, MARGIN + 6, y + 7);
-  y += 14;
+  doc.text(formatPercent(exec.simpleROI), MARGIN + 8, y + 10);
+  doc.setFontSize(11);
+  doc.text('5-Year ROI', MARGIN + 8, y + 18);
+  // Subtext on right
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(
+    `Invest ${formatCompactValue(results.totalInvestment)}, save ${formatCompactValue(exec.total5YearGrossSavings)} over 5 years`,
+    PAGE_W - MARGIN - 4, y + 10, { align: 'right' }
+  );
+  y += heroBoxH + 4;
 
-  // Expected NPV (probability-weighted)
-  if (results.expectedNPV != null) {
-    drawRoundedRect(doc, MARGIN, y, CONTENT_W, 10, 1.5, [240, 244, 252]);
-    doc.setDrawColor(...NAVY);
-    doc.setLineWidth(0.3);
-    doc.roundedRect(MARGIN, y, CONTENT_W, 10, 1.5, 1.5, 'S');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(...NAVY);
-    doc.text(
-      `Expected NPV: ${formatCompactValue(results.expectedNPV)}  |  Expected ROIC: ${formatPercent(results.expectedROIC)}  (probability-weighted 25/50/25)`,
-      MARGIN + 6, y + 7
-    );
-    y += 14;
-  }
+  // --- Payback line ---
+  const paybackText = base.paybackMonths > 60
+    ? 'Break-even: >5 years'
+    : `Break-even in ${base.paybackMonths} months (${(base.paybackMonths / 12).toFixed(1)} years)`;
+  y = bodyText(doc, paybackText, MARGIN, y, { bold: true, size: 10 });
+  y += 4;
 
-  // Recommendation section
+  // --- Year-by-year table ---
+  y = sectionTitle(doc, 'Year-by-Year Cash Flow', y);
+  const projections = base.projections;
+  autoTable(doc, {
+    startY: y,
+    head: [['Year', 'Gross Savings', 'AI Costs', 'Net Cash Flow', 'Cumulative']],
+    body: projections.map(yr => [
+      `Year ${yr.year}`,
+      formatCompactValue(yr.grossSavings),
+      formatCompactValue(yr.ongoingCost + yr.separationCost),
+      formatCompactValue(yr.netCashFlow),
+      formatCompactValue(yr.netCumulative),
+    ]),
+    ...autoTableTheme(),
+    columnStyles: {
+      0: { cellWidth: 22 },
+      1: { halign: 'right' },
+      2: { halign: 'right' },
+      3: { halign: 'right', fontStyle: 'bold' },
+      4: { halign: 'right' },
+    },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  // --- Top 3 levers ---
+  y = sectionTitle(doc, 'Top 3 Value Drivers', y);
+  autoTable(doc, {
+    startY: y,
+    head: [['Rank', 'Variable', 'NPV Swing']],
+    body: exec.topLevers.map((lever, i) => [
+      `#${i + 1}`,
+      lever.label,
+      formatCompactValue(lever.npvSwing),
+    ]),
+    ...autoTableTheme(),
+    columnStyles: {
+      0: { cellWidth: 14 },
+      2: { halign: 'right', fontStyle: 'bold' },
+    },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  // --- Key assumptions grid ---
+  y = sectionTitle(doc, 'Key Assumptions', y);
+  const ka = exec.keyAssumptions;
+  const assumptionPairs = [
+    ['Automation Potential', formatPercent(ka.automationPotential), 'Adoption Rate', formatPercent(ka.adoptionRate)],
+    ['Risk Multiplier', formatPercent(ka.riskMultiplier), 'Discount Rate', formatPercent(ka.discountRate)],
+  ];
+  autoTable(doc, {
+    startY: y,
+    body: assumptionPairs,
+    ...autoTableTheme(),
+    showHead: false,
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 40 },
+      1: { halign: 'right', cellWidth: 30 },
+      2: { fontStyle: 'bold', cellWidth: 40 },
+      3: { halign: 'right', cellWidth: 30 },
+    },
+  });
+  y = doc.lastAutoTable.finalY + 2;
+  y = bodyText(doc, `Implementation Timeline: ${ka.timelineMonths} months`, MARGIN, y, { bold: true, size: 9 });
+  y += 4;
+
+  // --- Recommendation verdict ---
   y = sectionTitle(doc, 'Recommendation', y);
-  y += 2;
-
-  // Verdict badge
   const verdictColors = {
     STRONG: [34, 197, 94],
     MODERATE: [201, 162, 39],
@@ -507,7 +514,7 @@ function page2_CurrentState(doc, formData, results) {
   const contextItems = [
     ['Industry', formData.industry || 'N/A'],
     ['Company Size', formData.companySize || 'N/A'],
-    ['Process Type', formData.processType || 'N/A'],
+    ['Project Archetype', (getArchetypeById(formData.projectArchetype) || {}).label || formData.processType || 'N/A'],
     ['Automation Potential', formatPercent(results.benchmarks.automationPotential)],
     ['Industry Success Rate', formatPercent(results.benchmarks.industrySuccessRate)],
   ];
@@ -1216,7 +1223,7 @@ function page6_SensitivityAnalysis(doc, results) {
       assessment(lowerAdoptionDelta),
     ],
     [
-      'Costs 30% Over Budget',
+      'Costs 50% Over Budget',
       formatCurrency(higherCostsDelta),
       assessment(higherCostsDelta),
     ],
@@ -1257,7 +1264,7 @@ function page6_SensitivityAnalysis(doc, results) {
 
   const impacts = [
     { label: 'Adoption 20% Lower', delta: lowerAdoptionDelta },
-    { label: 'Costs 30% Over Budget', delta: higherCostsDelta },
+    { label: 'Costs 50% Over Budget', delta: higherCostsDelta },
     { label: 'Timeline Doubles', delta: doubleTimelineDelta },
   ];
 
@@ -1460,7 +1467,7 @@ function page8_InputAssumptions(doc, formData, results) {
     ['Company Size', formData.companySize || 'N/A'],
     ['Role', formData.role || 'N/A'],
     ['AI Team Location', formData.teamLocation || 'N/A'],
-    ['Process Type', formData.processType || 'N/A'],
+    ['Project Archetype', (getArchetypeById(formData.projectArchetype) || {}).label || formData.processType || 'N/A'],
     ['Team Size', `${formData.teamSize || 0} people`],
     ['Hours per Person per Week', `${formData.hoursPerWeek || 0} hours`],
     ['Avg Fully-Loaded Cost per Person', formatCurrency(formData.avgSalary || 0)],
@@ -1872,7 +1879,7 @@ function page10_AppendixMethodology(doc, formData, results) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...WHITE);
-  doc.text('Total Upfront Investment', MARGIN + 4, y + 4);
+  doc.text('Total Capital Deployed (Upfront + Separation)', MARGIN + 4, y + 4);
   doc.text(formatCurrency(results.totalInvestment), PAGE_W - MARGIN - 4, y + 4, { align: 'right' });
   y += 14;
 
@@ -2459,7 +2466,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
 
   const apiRows = Object.entries(API_COST_PER_1K_REQUESTS).map(([proc, cost]) => {
     const reqPerHr = REQUESTS_PER_PERSON_HOUR[proc] || 12;
-    return [proc, `$${cost.toFixed(2)}`, `${reqPerHr}`, proc === formData.processType ? 'Selected' : ''];
+    return [proc, `$${cost.toFixed(2)}`, `${reqPerHr}`, proc === formData.processType ? 'Mapped' : ''];
   });
 
   autoTable(doc, {
