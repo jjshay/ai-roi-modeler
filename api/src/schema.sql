@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS models (
   deleted_at TIMESTAMPTZ DEFAULT NULL
 );
 
+-- Migration: add project_archetype column if table already existed
+ALTER TABLE models ADD COLUMN IF NOT EXISTS project_archetype VARCHAR(100);
+
 CREATE INDEX IF NOT EXISTS idx_share_token ON models(share_token) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_created_at ON models(created_at DESC) WHERE deleted_at IS NULL;
 
