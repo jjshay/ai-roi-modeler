@@ -4,12 +4,12 @@ export default function ProgressBar({ currentStep = 1, totalSteps = 5 }) {
   const progress = (currentStep / totalSteps) * 100;
 
   return (
-    <div className="w-full px-4 py-3 sm:px-6">
+    <div className="w-full px-4 py-2 sm:py-3 sm:px-6">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-navy">
           Step {currentStep} of {totalSteps}
         </span>
-        <span className="text-sm font-medium text-navy/60">
+        <span className="hidden text-sm font-medium text-navy/60 sm:inline">
           {Math.round(progress)}%
         </span>
       </div>

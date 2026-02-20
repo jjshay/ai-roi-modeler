@@ -336,7 +336,7 @@ export default function Step5_AIInvestment({ formData, updateField }) {
                 How quickly do you expect to see results?
               </label>
 
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex">
                 {TIMELINE_OPTIONS.map((opt) => {
                   const isSelected = formData.expectedTimeline === opt.value;
                   return (
@@ -345,8 +345,8 @@ export default function Step5_AIInvestment({ formData, updateField }) {
                       type="button"
                       onClick={() => handleTimeline(opt.value)}
                       className={`
-                        flex-1 flex flex-col items-center gap-1 rounded-lg border-2
-                        px-3 py-3 text-center transition-all duration-150
+                        sm:flex-1 flex flex-col items-center gap-1 rounded-lg border-2
+                        min-h-[44px] px-3 py-3 text-center transition-all duration-150
                         focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
                         ${
                           isSelected
@@ -422,7 +422,7 @@ export default function Step5_AIInvestment({ formData, updateField }) {
                 type="button"
                 onClick={() => setSubStep(3)}
                 className="
-                  mt-2 rounded-lg border-2 border-dashed border-navy/20 px-6 py-2.5
+                  mt-2 min-h-[44px] rounded-lg border-2 border-dashed border-navy/20 px-6 py-2.5
                   text-sm font-medium text-navy/60 transition-all duration-150
                   hover:border-navy/40 hover:text-navy hover:bg-navy/5
                   focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2

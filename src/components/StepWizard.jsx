@@ -107,7 +107,7 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
           <button
             type="button"
             onClick={handleBack}
-            className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-navy transition-colors hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            className="flex min-h-[44px] items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-navy transition-colors hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
             aria-label="Go to previous step"
           >
             <svg
@@ -135,7 +135,7 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
       </div>
 
       {/* Step content with slide animation */}
-      <div className="relative min-h-[400px] overflow-hidden px-4 py-6 sm:px-6">
+      <div className="relative min-h-[300px] sm:min-h-[400px] flex-1 overflow-hidden px-4 py-6 sm:px-6">
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
             key={currentStep}
@@ -151,16 +151,18 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
         </AnimatePresence>
       </div>
 
-      {/* Next / Complete button */}
-      <div className="flex justify-end px-4 pb-6 sm:px-6">
-        <button
-          type="button"
-          onClick={handleNext}
-          disabled={!isStepValid()}
-          className="rounded-lg bg-gold px-8 py-3 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-gold-light focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {currentStep === TOTAL_STEPS ? 'Complete' : 'Next'}
-        </button>
+      {/* Sticky bottom nav for Next / Complete button */}
+      <div className="sticky bottom-0 z-10 border-t border-gray-100 bg-white/95 px-4 pb-safe backdrop-blur-sm sm:px-6">
+        <div className="flex justify-end py-4">
+          <button
+            type="button"
+            onClick={handleNext}
+            disabled={!isStepValid()}
+            className="min-h-[48px] w-full rounded-lg bg-gold px-8 py-3 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-gold-light focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+          >
+            {currentStep === TOTAL_STEPS ? 'Complete' : 'Next'}
+          </button>
+        </div>
       </div>
     </div>
   );

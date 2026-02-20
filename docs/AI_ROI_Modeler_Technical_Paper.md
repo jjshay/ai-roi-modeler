@@ -1,10 +1,10 @@
 # AI ROI Modeler: Technical Reference Paper
 
-**Version:** 1.0
+**Version:** 2.1
 **Date:** February 2026
 **Authors:** Engineering Team
 **Classification:** Internal / Stakeholder Review
-**Status:** Complete
+**Status:** Complete — V2 adds Monte Carlo simulation, enhanced competitive erosion, AI maturity premium, and synthetic case study
 
 ---
 
@@ -15,15 +15,18 @@
 3. [Solution Architecture](#3-solution-architecture)
 4. [The 5 Project Archetypes](#4-the-5-project-archetypes)
 5. [Calculation Engine -- Core Formulas](#5-calculation-engine----core-formulas)
-6. [User Interface & Wizard Flow](#6-user-interface--wizard-flow)
-7. [Excel Model Design](#7-excel-model-design)
-8. [PDF Report Generation](#8-pdf-report-generation)
-9. [API & Data Persistence](#9-api--data-persistence)
-10. [Benchmark Data & Sources](#10-benchmark-data--sources)
-11. [Testing & Validation](#11-testing--validation)
-12. [What It Does vs. What It Doesn't](#12-what-it-does-vs-what-it-doesnt)
-13. [Design Decisions & Trade-offs](#13-design-decisions--trade-offs)
-14. [Future Considerations](#14-future-considerations)
+6. [Monte Carlo Simulation Engine](#6-monte-carlo-simulation-engine) *(V2)*
+7. [Enhanced Competitive Erosion](#7-enhanced-competitive-erosion) *(V2)*
+8. [AI Maturity Premium](#8-ai-maturity-premium) *(V2)*
+9. [User Interface & Wizard Flow](#9-user-interface--wizard-flow)
+10. [Excel Model Design](#10-excel-model-design)
+11. [PDF Report Generation](#11-pdf-report-generation)
+12. [API & Data Persistence](#12-api--data-persistence)
+13. [Benchmark Data & Sources](#13-benchmark-data--sources)
+14. [Testing & Validation](#14-testing--validation)
+15. [What It Does vs. What It Doesn't](#15-what-it-does-vs-what-it-doesnt)
+16. [Design Decisions & Trade-offs](#16-design-decisions--trade-offs)
+17. [Future Considerations](#17-future-considerations)
 - [Appendix A: Complete Formula Reference](#appendix-a-complete-formula-reference)
 - [Appendix B: Benchmark Data Tables](#appendix-b-benchmark-data-tables)
 - [Appendix C: API Endpoint Reference](#appendix-c-api-endpoint-reference)
@@ -36,9 +39,9 @@ This section provides a high-level overview of what the AI ROI Modeler is, the k
 
 ### What We Built
 
-The AI ROI Modeler is a browser-based financial calculator that helps organizations estimate the return on investment for AI initiatives. Given a set of inputs about a company's industry, team composition, operational readiness, and planned investment, the tool produces a full 5-year discounted cash flow (DCF) analysis across three scenarios (Conservative, Base, Optimistic), a 6-variable sensitivity analysis, and probability-weighted expected values.
+The AI ROI Modeler is a browser-based financial calculator that helps organizations estimate the return on investment for AI initiatives. Given a set of inputs about a company's industry, team composition, operational readiness, and planned investment, the tool produces a full 5-year discounted cash flow (DCF) analysis across three scenarios (Conservative, Base, Optimistic), a 6-variable sensitivity analysis, probability-weighted expected values, and a 500-iteration Monte Carlo simulation that produces true probabilistic outcomes (P10/P50/P90 confidence intervals, probability of positive NPV).
 
-The system generates two downloadable artifacts: a presentation-ready Excel workbook with live formulas (so stakeholders can change inputs and see results recalculate), and a branded PDF report suitable for executive distribution. Models can be saved to a PostgreSQL database and shared via short URLs.
+The system generates two downloadable artifacts: a presentation-ready Excel workbook with live formulas (so stakeholders can change inputs and see results recalculate), and a branded 24-page PDF report suitable for executive distribution that includes a Monte Carlo analysis page, a synthetic case study, and an AI maturity premium analysis. Models can be saved to a PostgreSQL database and shared via short URLs.
 
 ### Key Design Decisions
 
@@ -47,14 +50,17 @@ The system generates two downloadable artifacts: a presentation-ready Excel work
 - **Risk-adjusted everything.** Every savings projection is multiplied by a blended risk factor derived from organizational readiness and industry success rates. The tool is designed to be an "honest broker" -- it consistently discounts optimistic projections.
 - **5 strategic archetypes.** The original system used 8 flat "process types." We consolidated these into 5 project archetypes that map to how organizations actually think about AI investments. Backward compatibility with old process-type data is preserved.
 - **DCF over simpler models.** We chose discounted cash flow analysis over simpler payback-only models because DCF accounts for the time value of money, which matters over a 5-year horizon.
+- **Monte Carlo with fast mode.** The Monte Carlo engine runs 500 iterations of the full DCF engine by setting a `_mcMode: 'fast'` flag that causes the calculation engine to return after scenario results, skipping expensive post-processing (sensitivity, peer comparison, gates). This reduces per-iteration time from ~10ms to ~1ms, keeping total simulation time under 500ms.
+- **Revenue-based competitive erosion.** When the user provides annual revenue, competitive erosion uses industry-specific margin compression rates and AI adoption rates rather than the simpler cost-based penalty. This produces more realistic inaction cost projections for revenue-generating organizations.
+- **Maturity premium as narrative only.** AI maturity premium data (compounding benefits of successive deployments) is presented in the UI and PDF for strategic context but deliberately excluded from the core DCF to maintain conservative, defensible projections.
 
 ### Calculation Methodology Summary
 
-The calculation chain follows this sequence: (1) Establish current-state costs from user inputs, (2) Look up industry/archetype benchmarks, (3) Compute a blended risk multiplier from organizational readiness and industry success rates, (4) Derive implementation costs from team sizing and timeline, (5) Calculate four categories of savings (headcount, efficiency, error reduction, tool replacement), (6) Risk-adjust all savings, (7) Build 5-year cash flows with adoption ramps and cost escalation, (8) Compute NPV, IRR, ROIC, and payback for three scenarios, (9) Run sensitivity analysis on 6 key variables.
+The calculation chain follows this sequence: (1) Establish current-state costs from user inputs, (2) Look up industry/archetype benchmarks, (3) Compute a blended risk multiplier from organizational readiness and industry success rates, (4) Derive implementation costs from team sizing and timeline, (5) Calculate four categories of savings (headcount, efficiency, error reduction, tool replacement), (6) Risk-adjust all savings, (7) Build 5-year cash flows with adoption ramps and cost escalation, (8) Compute NPV, IRR, ROIC, and payback for three scenarios, (9) Run sensitivity analysis on 6 key variables, (10) Run 500-iteration Monte Carlo simulation with perturbed inputs across 6 probability distributions.
 
 ### How to Use This Document
 
-This paper is organized so that each section can be read independently. Section 5 (Calculation Engine) is the most critical for verifying mathematical correctness. Section 10 (Benchmark Data) documents the empirical basis for all default values. Section 12 (What It Does vs. What It Doesn't) provides an honest assessment of the system's limitations. Reviewers focused on financial accuracy should start with Sections 5 and Appendix A. Reviewers focused on system architecture should start with Sections 3 and 9.
+This paper is organized so that each section can be read independently. Section 5 (Calculation Engine) is the most critical for verifying mathematical correctness. Section 6 (Monte Carlo Simulation) documents the probabilistic analysis added in V2. Section 13 (Benchmark Data) documents the empirical basis for all default values. Section 15 (What It Does vs. What It Doesn't) provides an honest assessment of the system's limitations. Reviewers focused on financial accuracy should start with Sections 5-6 and Appendix A. Reviewers focused on system architecture should start with Sections 3 and 12.
 
 ---
 
@@ -92,7 +98,7 @@ Most AI ROI tools available today suffer from one or more of the following gaps:
 
 ### The Gap We Fill
 
-The gap this tool addresses is between "AI will save money" (the qualitative claim made by AI vendors and consultants) and "here is the NPV with a DCF, risk-adjusted across three scenarios, backed by 26 cited research sources, with a live Excel model you can audit" (the quantitative evidence finance teams need to approve a capital allocation).
+The gap this tool addresses is between "AI will save money" (the qualitative claim made by AI vendors and consultants) and "here is the NPV with a DCF, risk-adjusted across three scenarios, backed by 31 cited research sources, with a live Excel model you can audit" (the quantitative evidence finance teams need to approve a capital allocation).
 
 ### Who This Tool Is For
 
@@ -203,14 +209,16 @@ ai-roi-modeler/
     App.jsx                          # Root component, screen state machine
     main.jsx                         # React entry point
     logic/
-      calculations.js                # Core calculation engine (~1,300 lines)
-      benchmarks.js                  # All benchmark constants + sources (~800 lines)
+      calculations.js                # Core calculation engine (~1,500 lines)
+      benchmarks.js                  # All benchmark constants + sources (~930 lines)
+      monteCarlo.js                  # Monte Carlo simulation engine (V2)
       archetypes.js                  # 5 project archetypes + defaults (~166 lines)
       recommendations.js             # Verdict engine (STRONG/MODERATE/CAUTIOUS/WEAK)
       __tests__/
-        calculations.test.js         # 120 tests on core calculations
+        calculations.test.js         # 147 tests on core calculations
         benchmarks.test.js           # 31 tests on benchmark data integrity
         recommendations.test.js      # 13 tests on recommendation logic
+        monteCarlo.test.js           # 11 tests on Monte Carlo engine (V2)
         testFixtures.js              # Standard input profiles for testing
     components/
       StepWizard.jsx                 # 6-step wizard controller
@@ -251,8 +259,10 @@ ai-roi-modeler/
       generateReport.js              # Branded PDF report generator
     utils/
       formatters.js                  # Currency, percent, date formatting
+      statistics.js                  # Statistical distributions for Monte Carlo (V2)
       __tests__/
         formatters.test.js           # 13 tests on formatting functions
+        statistics.test.js           # 19 tests on statistical utilities (V2)
   api/
     src/
       index.ts                       # Hono API server
@@ -272,9 +282,10 @@ The data flow follows a unidirectional pattern:
 1. **User inputs** are collected across 6 wizard steps and stored in a single `formData` state object in `App.jsx`.
 2. **On wizard completion**, `formData` is passed to the `LiveCalculation` results component.
 3. **`LiveCalculation`** calls `runCalculations(formData)` from `calculations.js`, which returns a comprehensive results object (~50 properties).
-4. **Results** are distributed to child result components (ScenarioCards, ValueBreakdown, etc.) as props.
-5. **Excel export** calls `generateExcelModel(formData)`, which internally runs the same calculations and writes formulas to an ExcelJS workbook.
-6. **PDF export** calls `generateReport(formData, results, recommendation)`, which renders the results into a jsPDF document.
+4. **Monte Carlo** runs asynchronously via dynamic import (`import('../../logic/monteCarlo')`), perturbing 6 input variables across probability distributions for 500 iterations. Results are stored in `mcResults` state.
+5. **Results** are distributed to child result components (ScenarioCards, ValueBreakdown, etc.) as props.
+6. **Excel export** calls `generateExcelModel(formData, mcResults)`, which internally runs the same calculations and writes formulas to an ExcelJS workbook, with Monte Carlo summary in the Sensitivity tab.
+7. **PDF export** calls `generateReport(formData, results, recommendation, mcResults)`, which renders the results into a 24-page jsPDF document including Monte Carlo, case study, and maturity premium pages.
 7. **Save/Share** sends `formData` to the API, which stores it in PostgreSQL and returns a share token.
 8. **Load** retrieves `formData` from the API by share token or model ID, restores it to state, and renders results.
 
@@ -447,9 +458,15 @@ User Inputs
 [Sensitivity Analysis] ----------> 6-variable tornado (full DCF re-run each)
     |
     v
-[Supplementary Analyses] --------> opportunityCost, revenueEnablement, rdTaxCredit,
+[Supplementary Analyses] --------> opportunityCost, competitiveErosion,
+                                    revenueEnablement, rdTaxCredit,
                                     peerComparison, confidenceIntervals,
                                     capitalEfficiency, gateStructure
+    |
+    v (async, in UI layer)
+[Monte Carlo Simulation] --------> 500 iterations with perturbed inputs
+                                    → P10/P25/P50/P75/P90, probabilityPositiveNPV,
+                                      NPV distribution histogram
 ```
 
 ### 5.1 Risk Multiplier
@@ -878,15 +895,15 @@ Three scenarios are computed using multipliers on the savings:
 
 | Scenario | Multiplier | Timeline Adjustment | Probability Weight |
 |----------|-----------|--------------------|--------------------|
-| Conservative | 0.70 | +30% | 25% |
+| Conservative | 0.75 | +30% | 25% |
 | Base Case | 1.00 | 0% | 50% |
-| Optimistic | 1.20 | -20% | 25% |
+| Optimistic | 1.25 | -20% | 25% |
 
 ```javascript
 const scenarioConfigs = {
-  conservative: { label: 'Conservative', multiplier: 0.70 },
+  conservative: { label: 'Conservative', multiplier: 0.75 },
   base:         { label: 'Base Case',    multiplier: 1.0 },
-  optimistic:   { label: 'Optimistic',   multiplier: 1.20 },
+  optimistic:   { label: 'Optimistic',   multiplier: 1.25 },
 };
 ```
 
@@ -995,7 +1012,203 @@ Each gate is evaluated against the user's current metrics. If the current automa
 
 ---
 
-## 6. User Interface & Wizard Flow
+## 6. Monte Carlo Simulation Engine
+
+This section documents the probabilistic simulation layer added in V2 that transforms the deterministic 3-scenario analysis into a full probability distribution.
+
+### Motivation
+
+The original three-scenario approach (Conservative 0.75x / Base 1.0x / Optimistic 1.25x) provides a useful range but cannot capture the full spectrum of outcomes or the interaction effects between variables. A Monte Carlo simulation addresses this by sampling from probability distributions for each uncertain input, running hundreds of complete DCF calculations, and producing a continuous distribution of outcomes.
+
+### Architecture
+
+The Monte Carlo engine is implemented in two files:
+
+- **`src/utils/statistics.js`** — Pure statistical utility functions (no business logic)
+- **`src/logic/monteCarlo.js`** — Simulation orchestration using the existing DCF engine
+
+The simulation runs client-side in the browser. It is loaded via dynamic import (`import('../../logic/monteCarlo')`) to avoid blocking the initial render. The Vite bundler code-splits it into a separate 2.1KB chunk.
+
+### Statistical Distributions
+
+Seven statistical functions are provided in `statistics.js`:
+
+| Function | Algorithm | Use |
+|----------|-----------|-----|
+| `gaussianRandom(mean, stdDev)` | Box-Muller transform | Normal distribution sampling |
+| `lognormalRandom(mean, stdDev)` | `exp(gaussianRandom)` | Right-skewed cost distributions |
+| `triangularRandom(low, mid, high)` | Inverse CDF method | Bounded distributions with mode |
+| `percentile(sortedArr, p)` | Linear interpolation | P10/P25/P50/P75/P90 extraction |
+| `mean(arr)` | Arithmetic mean | Descriptive statistics |
+| `stdDev(arr)` | Population standard deviation | Distribution spread |
+| `clamp(val, min, max)` | Min/max bounds | Preventing unrealistic values |
+
+### Perturbed Variables
+
+The `sampleDistributions(formData)` function creates a perturbed copy of the user's inputs by sampling 6 key variables:
+
+| Variable | Distribution | Range | Rationale |
+|----------|-------------|-------|-----------|
+| `automationPotential` | Normal(μ=input, σ=0.08) | [0.10, 0.95] | Core uncertainty in AI capability (independent) |
+| `changeReadiness` | Weighted discrete (50% 0, 30% +1, 20% -1) | [1, 5] | Anchoring bias: readiness rarely shifts dramatically mid-project. Correlated with environment shock. |
+| `implementationBudget` | Lognormal(μ=shock, σ=0.30) | [0.7x, 1.8x] | Enterprise cost overruns skew right; σ=0.30 reflects wider real-world variance. Correlated with environment shock. |
+| `ongoingAnnualCost` | Lognormal(μ=shock, σ=0.35) | [0.5x, 2.0x] | Pricing volatility in AI services. Correlated with environment shock. |
+| `cashRealizationPct` | Triangular(0.20, input, 0.80) | [0.20, 0.80] | Political constraints on headcount reduction (independent) |
+| `errorRate` | Normal(μ=input, σ=input×0.25) | [0.01, 0.50] | Measurement uncertainty (independent) |
+
+**Structural correlation:** A shared "environment shock" factor (ε ~ Normal(0,1)) links change readiness, implementation budget, and ongoing cost. Negative ε (poor organizational environment) simultaneously degrades readiness and inflates costs, preventing unrealistic combinations like low readiness with below-average costs. Automation potential, cash realization, and error rate remain independent.
+
+Each perturbed copy receives the flag `_mcMode: 'fast'` to enable the fast-mode early return in `calculations.js`.
+
+### Fast Mode
+
+When `inputs._mcMode === 'fast'` is set, the DCF engine returns immediately after computing the three scenario results:
+
+```javascript
+if (inputs._mcMode === 'fast') {
+  return { scenarios: scenarioResults, upfrontInvestment, totalInvestment, discountRate };
+}
+```
+
+This skips sensitivity analysis, peer comparison, gate evaluation, value pathways, capital efficiency metrics, and all other post-processing. The result is a reduction from ~10ms to ~1ms per iteration. At 500 iterations, total simulation time is approximately 500ms.
+
+### Output Structure
+
+`runMonteCarlo(formData, 500)` returns:
+
+```javascript
+{
+  sampleSize: 500,
+  npv:     { p5, p10, p25, p50, p75, p90, mean, stdDev },
+  irr:     { p10, p25, p50, p75, p90, mean },
+  payback: { p10, p25, p50, p75, p90, mean },
+  roic:    { p10, p25, p50, p75, p90, mean },
+  probabilityPositiveNPV: 0.82,  // fraction of iterations with NPV > 0
+  tailRisk: {
+    p5Npv: -125000,              // 5th percentile NPV (worst case)
+    probCapitalLoss50: 0.08,     // P(NPV < -50% of median upfront investment)
+    probPaybackOver60: 0.05,     // P(payback > 60 months)
+  },
+  npvDistribution: [...],        // sorted array for histogram rendering
+}
+```
+
+### UI Integration
+
+In `LiveCalculation.jsx`, the Monte Carlo simulation runs as a side effect:
+
+```javascript
+const [mcResults, setMcResults] = useState(null);
+useEffect(() => {
+  let cancelled = false;
+  import('../../logic/monteCarlo').then(({ runMonteCarlo }) => {
+    if (!cancelled) setMcResults(runMonteCarlo(formData, 500));
+  });
+  return () => { cancelled = true; };
+}, [formData]);
+```
+
+The results are displayed in a CollapsibleSection containing: a probability hero box (color-coded green/amber/red), P10/P50/P90 cards, a 20-bin histogram rendered with div bars (no chart library), summary statistics, and a VaR tail risk row (P5 worst case, P(capital loss >50%), P(payback >60 months)).
+
+---
+
+## 7. Enhanced Competitive Erosion
+
+This section documents the V2 enhancement to the opportunity cost of inaction calculation.
+
+### Original Approach
+
+The original `calculateInactionCost()` function used a cost-based competitive penalty: a fixed percentage of total current cost, compounding annually. This worked for organizations without revenue data but underestimated the true competitive risk for revenue-generating businesses.
+
+### Revenue-Based S-Curve Margin Compression
+
+When `annualRevenue > 0`, the enhanced calculation uses a logistic S-curve adoption function:
+
+```javascript
+function logisticAdoption(year, terminalRate, k = 1.2, t0 = 2.5) {
+  return terminalRate / (1 + Math.exp(-k * (year - t0)));
+}
+revenueErosion = annualRevenue × marginCompression × logisticAdoption(year, aiAdoptionRate)
+```
+
+The S-curve models that competitor AI adoption follows a logistic trajectory rather than linear growth. Early years see slow adoption, years 2-3 hit the inflection point with rapid acceleration, and years 4-5 approach the terminal rate. This produces more realistic erosion patterns than the V1 linear model.
+
+Parameters: `k=1.2` (moderate steepness), `t0=2.5` (inflection at mid-horizon). Source: BCG 2025 technology adoption S-curves; McKinsey 2025 AI diffusion data.
+
+Two benchmark maps provide the industry-specific terminal rates:
+
+| Industry | AI Adoption Rate | Margin Compression | Source |
+|----------|-----------------|-------------------|--------|
+| Technology / Software | 75% | 4.5% | BCG 2025, McKinsey Q3 2025 |
+| Financial Services / Banking | 65% | 3.5% | BCG 2025 |
+| Healthcare / Life Sciences | 45% | 2.0% | McKinsey Q3 2025 |
+| Manufacturing / Industrial | 50% | 2.5% | BCG 2025 |
+| Retail / E-Commerce | 60% | 4.0% | BCG 2025 |
+| Professional Services | 55% | 3.5% | BCG 2025 |
+| Media / Entertainment | 60% | 4.0% | McKinsey Q3 2025 |
+| Energy / Utilities | 35% | 1.5% | BCG 2025 |
+| Government / Public Sector | 30% | 1.5% | McKinsey Q3 2025 |
+
+When no revenue is provided, the original cost-based competitive penalty is used as fallback, ensuring backward compatibility.
+
+The enhanced output includes a `competitiveErosion` object in the results with `annualRevenue`, `aiAdoptionRate`, `marginCompression`, `erosionModel` ('logistic-s-curve' or 'linear-cost-penalty'), `revenueBasedErosion` (boolean), and `year5RevenueErosion`.
+
+---
+
+## 8. AI Maturity Premium
+
+This section documents the strategic narrative data added in V2.
+
+### Purpose
+
+Organizations that successfully deploy their first AI project see compounding returns on subsequent deployments through reusable infrastructure, institutional knowledge, and data asset leverage. The maturity premium quantifies this compounding for strategic planning.
+
+### Constants
+
+The `AI_MATURITY_PREMIUM` object in `benchmarks.js` provides:
+
+| Metric | 2nd Deployment | 3rd Deployment |
+|--------|---------------|----------------|
+| Cost Reduction | 30% | 45% |
+| Time Compression | 40% | 55% |
+| Model Reusability | 60% | 60% |
+| Data Asset Multiplier | 1.5x | 2.25x |
+
+### Deliberate Exclusion from DCF
+
+These values are presented in the UI (as a CollapsibleSection table) and in the PDF report (a dedicated page with strategic narrative) but are **not** included in any NPV, IRR, ROIC, or payback calculation. This is a deliberate design decision: maturity premiums are speculative projections about future deployments and would undermine the credibility of the current project's financial analysis if included in the DCF.
+
+**Industry caveat:** These are cross-industry averages. Highly regulated industries (Healthcare, Financial Services, Government) may see smaller time compression due to compliance review requirements that cannot be shortened regardless of AI maturity. Technology and Retail organizations often exceed these averages. Source: a16z "AI in the Enterprise" 2024, McKinsey 2025.
+
+### Break-Even Adoption Rate
+
+Added in V2.1, the break-even adoption rate is the minimum adoption rate (as a percentage) that produces a positive base-case NPV. It is calculated via binary search over the `buildYearCashFlows` savings multiplier:
+
+1. Binary search over multiplier range [0.01, 3.0] with 25 iterations
+2. For each multiplier, compute `calculateNPV(buildYearCashFlows(multiplier))`
+3. Find the multiplier where NPV crosses zero
+4. Break-even rate = `currentAdoptionRate × breakEvenMultiplier`
+5. Returns `null` if break-even requires >99% adoption (infeasible)
+
+This metric helps stakeholders understand: "How much worse can adoption be before the project destroys value?" It is displayed in the Quick Facts UI section, the PDF Monte Carlo page, and the executive summary.
+
+### Industry Cash Realization Defaults
+
+Added in V2.1, the `CASH_REALIZATION_BY_INDUSTRY` constant provides industry-specific base-case defaults for cash realization percentage. Industries with higher natural turnover (Technology, Retail) realize more cash from AI productivity gains, while industries with strong job protections (Government) realize less.
+
+| Industry | Default Cash Realization |
+|----------|------------------------|
+| Technology / Software | 50% |
+| Financial Services | 45% |
+| Healthcare / Life Sciences | 30% |
+| Retail / E-Commerce | 55% |
+| Government / Public Sector | 20% |
+
+Source: BLS JOLTS turnover data 2025, McKinsey workforce restructuring data 2025.
+
+---
+
+## 9. User Interface & Wizard Flow
 
 This section describes the 6-step wizard that collects user inputs, the validation logic, and the state management approach.
 
@@ -1084,7 +1297,7 @@ The "analyzing" screen is a brief animated transition (approximately 3 seconds) 
 
 ---
 
-## 7. Excel Model Design
+## 10. Excel Model Design
 
 This section documents the 6-tab Excel workbook structure, the formula chain between tabs, and the design rationale.
 
@@ -1184,11 +1397,12 @@ Enhancement savings in Year 1 reflect the 75% adoption ramp (not full adoption).
 
 ### Tab 5: Sensitivity
 
-Contains three sections:
+Contains four sections:
 
 - **Scenario comparison table:** Conservative, Base, Optimistic side by side
 - **Tornado analysis:** 6 variables with low/high NPV impact
 - **Confidence intervals:** NPV, payback, and ROIC at p25/p50/p75
+- **Monte Carlo simulation summary (V2):** When `mcResults` is available, rows 49-56 display the distribution summary for NPV, IRR, ROIC, and Payback at P10/P25/P50/P75/P90 percentiles, plus probability of positive NPV. Static values from the simulation (not formulas, since MC runs in JavaScript).
 
 ### Tab 6: Lookups (Hidden)
 
@@ -1233,7 +1447,7 @@ The goal was to produce a workbook that a CFO could review in a single sitting w
 
 ---
 
-## 8. PDF Report Generation
+## 11. PDF Report Generation
 
 This section documents the PDF report structure, content, and generation approach.
 
@@ -1280,7 +1494,13 @@ The PDF report includes the following sections, each starting on a new page:
 
 9. **Hidden Costs.** Breakdown of change management, cultural resistance, data cleanup, integration testing, and productivity dip.
 
-10. **Methodology & Sources.** Description of the calculation methodology and the 26 research sources cited throughout.
+10. **Methodology & Sources.** Description of the calculation methodology and the 31 research sources cited throughout.
+
+11. **Monte Carlo Simulation (V2).** Probability hero box (green/amber/red by threshold), distribution summary table (P10-P90 for NPV, IRR, ROIC, Payback), 20-bar histogram of NPV distribution rendered via `drawRoundedRect`, and methodology note. Only rendered when `mcResults` is available.
+
+12. **Case Study: Mid-Market Financial Services (V2).** Synthetic case study illustrating a representative 50-analyst, $120K salary, 60% automation scenario. Shows scenario parameters, model outputs (NPV, IRR, Payback, ROIC across 3 scenarios), real-world benchmark comparison, and key insights.
+
+13. **AI Maturity Premium (V2).** Deployment-over-deployment improvements table (cost reduction, time compression, model reusability, data asset multiplier for 1st/2nd/3rd deployments). Strategic narrative paragraphs on infrastructure leverage, organizational learning, data asset appreciation, and model reusability. Explicit note that these values are not in the DCF.
 
 ### Formatting Details
 
@@ -1306,7 +1526,7 @@ Each verdict comes with a headline, narrative summary, and a prioritized list of
 
 ### Data Dependencies
 
-The report receives `formData`, `results` (from `runCalculations`), and `recommendation` (from `getRecommendation`) as parameters. It formats all currency values using utility functions that handle millions/thousands abbreviation and percentage formatting.
+The report receives `formData`, `results` (from `runCalculations`), `recommendation` (from `getRecommendation`), and `mcResults` (from `runMonteCarlo`, may be null) as parameters. The report now produces 24 pages including 3 new pages added in V2. It formats all currency values using utility functions that handle millions/thousands abbreviation and percentage formatting.
 
 ### Formatting Utilities
 
@@ -1321,7 +1541,7 @@ These utilities handle edge cases including null values, NaN, negative numbers, 
 
 ---
 
-## 9. API & Data Persistence
+## 12. API & Data Persistence
 
 This section documents the REST API, database schema, authentication model, and deployment configuration.
 
@@ -1375,7 +1595,7 @@ function rateLimit(ip: string): boolean {
 }
 ```
 
-The rate limiter resets on server restart because it uses an in-memory Map. This is a known limitation documented in Section 12.
+The rate limiter resets on server restart because it uses an in-memory Map. This is a known limitation documented in Section 15.
 
 ### Database Schema
 
@@ -1490,13 +1710,13 @@ Email validation is performed server-side: `!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e
 
 ---
 
-## 10. Benchmark Data & Sources
+## 13. Benchmark Data & Sources
 
 This section documents all benchmark constants used in the model, their sources, and their limitations.
 
 ### Research Sources
 
-The model cites 26 research sources, all documented in the `BENCHMARK_SOURCES` array in `benchmarks.js`. The key sources are:
+The model cites 31 research sources, all documented in the `BENCHMARK_SOURCES` array in `benchmarks.js`. The key sources are:
 
 | # | Short Citation | Data Used |
 |---|---------------|-----------|
@@ -1597,22 +1817,24 @@ The original automation potential matrix used values ranging from 30% to 75%. Th
 
 ---
 
-## 11. Testing & Validation
+## 14. Testing & Validation
 
 This section documents the test strategy, test fixtures, key test categories, and what is not tested.
 
 ### Test Infrastructure
 
-Tests use Vitest (a Vite-native test runner) and run against the pure calculation functions. There are 177 tests across 4 test files:
+Tests use Vitest (a Vite-native test runner) and run against the pure calculation functions. There are 234 tests across 6 test files:
 
 | File | Tests | Coverage |
 |------|-------|----------|
-| `calculations.test.js` | 120 | Core calculation engine |
+| `calculations.test.js` | 147 | Core calculation engine |
 | `benchmarks.test.js` | 31 | Benchmark data integrity and lookup functions |
 | `recommendations.test.js` | 13 | Verdict engine (STRONG/MODERATE/CAUTIOUS/WEAK) |
 | `formatters.test.js` | 13 | Currency and percentage formatting |
+| `statistics.test.js` | 19 | Statistical distribution functions (V2) |
+| `monteCarlo.test.js` | 11 | Monte Carlo simulation engine (V2) |
 
-All 177 tests pass. Total execution time is approximately 65ms.
+All 234 tests pass. Total execution time is approximately 200ms.
 
 ### Test Fixtures
 
@@ -1730,7 +1952,7 @@ This reconciliation catches any case where savings are double-counted or omitted
 
 ---
 
-## 12. What It Does vs. What It Doesn't
+## 15. What It Does vs. What It Doesn't
 
 This section provides an honest assessment of the system's capabilities and limitations.
 
@@ -1744,9 +1966,15 @@ This section provides an honest assessment of the system's capabilities and limi
 
 **Generates live Excel models that recalculate when inputs change.** Unlike PDF reports or static spreadsheets, the Excel model uses real formulas. Users can change any input (team size, salary, automation potential, etc.) and see all downstream calculations update immediately.
 
-**Provides 3 scenarios with probability weighting.** Conservative (0.7x savings, 25% weight), Base (1.0x, 50% weight), and Optimistic (1.2x, 25% weight) provide a range of outcomes. The probability-weighted expected value gives a single "most likely" NPV.
+**Provides 3 scenarios with probability weighting.** Conservative (0.75x savings, 25% weight), Base (1.0x, 50% weight), and Optimistic (1.25x, 25% weight) provide a range of outcomes. The probability-weighted expected value gives a single "most likely" NPV.
 
-**Sensitivity analysis on 6 key variables.** The tornado analysis identifies which inputs have the greatest impact on NPV, helping stakeholders focus due diligence on the variables that matter most.
+**Sensitivity analysis on 6 key variables.** The tornado analysis identifies which inputs have the greatest impact on NPV, helping stakeholders focus due diligence on the variables that matter most. The sensitivity variables are: automation potential, team size, average salary, implementation cost, ongoing AI cost, and discount rate.
+
+**Runs 500-iteration Monte Carlo simulation.** Six *different* input variables are perturbed across probability distributions (normal, lognormal, triangular), and the full DCF engine runs for each combination. The Monte Carlo variables are: automation potential, change readiness, implementation budget, ongoing annual cost, cash realization percentage, and error rate. Note: the sensitivity tornado and Monte Carlo analyses deliberately use different (partially overlapping) variable sets — sensitivity tests direct input levers CFOs can control, while Monte Carlo captures environmental uncertainty and organizational factors that are harder to predict. This captures interaction effects between variables that the deterministic sensitivity analysis cannot.
+
+**Revenue-based competitive erosion.** When annual revenue is provided, the opportunity cost of inaction uses industry-specific AI adoption rates and margin compression data rather than a simple cost-based penalty. This produces more realistic projections for revenue-generating organizations.
+
+**AI maturity premium narrative.** Strategic context on the compounding benefits of successive AI deployments (30-45% cost reduction, 40-55% time compression on 2nd and 3rd projects). Deliberately excluded from the DCF to maintain conservative projections.
 
 **Backward compatible with old process-type data.** Models saved before the archetype migration continue to work. The calculation engine falls back to process-type benchmark lookups when archetype assumptions are not present.
 
@@ -1785,13 +2013,13 @@ Revenue enablement is only calculated when (a) the archetype is customer-facing 
 
 **Excel model formulas may not be 100% identical to JS calculations due to rounding.** The JavaScript engine and ExcelJS use IEEE 754 double-precision floating point. Intermediate rounding decisions (when to `toFixed(2)`, when to `Math.round`) may cause minor discrepancies between the web-displayed results and the Excel model results. In testing, differences are typically less than $1 on any individual value.
 
-**Sensitivity analysis uses simplified delta calculations.** While the sensitivity analysis rebuilds the full DCF for each variable, it holds other variables constant. It does not model the interaction effects between variables (e.g., increasing team size AND salary simultaneously). A full Monte Carlo simulation would capture these interactions but would be significantly more complex.
+**Sensitivity analysis and Monte Carlo use different variable sets.** The sensitivity tornado varies 6 direct input levers (automation potential, team size, salary, implementation cost, ongoing cost, discount rate) one at a time. The Monte Carlo varies 6 different environmental/organizational variables (automation potential, change readiness, implementation budget, ongoing cost, cash realization, error rate) simultaneously with structural correlation. This is deliberate — sensitivity tests what CFOs can control, while Monte Carlo captures environmental uncertainty. However, the two analyses are not directly comparable and may suggest different risk profiles.
 
 **Separation costs use a single multiplier.** Total separation cost is modeled as a multiple of annual salary (0.70x to 1.50x depending on company size). In reality, separation costs vary significantly by role, tenure, jurisdiction, and negotiation. The model does not account for these individual-level variations.
 
 ---
 
-## 13. Design Decisions & Trade-offs
+## 16. Design Decisions & Trade-offs
 
 This section explains the reasoning behind key architectural and methodological decisions.
 
@@ -1804,7 +2032,7 @@ All calculations run in the user's browser. The server is used only for saving a
 - **Performance.** The calculation engine completes in under 50ms. There is no benefit to server-side execution.
 - **Offline capability.** Once the page is loaded, the calculation engine works without a network connection (save/share requires connectivity).
 
-The trade-off: there is no server-side validation of calculations. If a bug is shipped in the JavaScript calculation engine, incorrect results will be served until the next deployment. Comprehensive testing (177 tests) mitigates this risk.
+The trade-off: there is no server-side validation of calculations. If a bug is shipped in the JavaScript calculation engine, incorrect results will be served until the next deployment. Comprehensive testing (234 tests) mitigates this risk.
 
 ### Why Formula-Driven Excel
 
@@ -1872,7 +2100,7 @@ The share token is a 7-character nanoid string. This was chosen over alternative
 
 ---
 
-## 14. Future Considerations
+## 17. Future Considerations
 
 This section outlines potential enhancements that are not currently planned but would add significant value.
 
@@ -1905,17 +2133,14 @@ The current system has no authentication. Adding user accounts would enable:
 - Access control on shared models (view-only vs. edit)
 - Usage analytics per user and organization
 
-### Monte Carlo Simulation
+### ~~Monte Carlo Simulation~~ (Completed in V2)
 
-The current three-scenario approach is a reasonable approximation but cannot capture the full range of outcomes or the interaction effects between variables. Monte Carlo simulation would:
+Monte Carlo simulation was implemented in V2 and enhanced in V2.1. The engine runs 500 correlated iterations with 6 perturbed variables across normal, lognormal, and triangular distributions. V2.1 added structural correlation via shared environment shock (ε), VaR/tail risk metrics (P5, probability of capital loss, probability of payback >60mo), weighted change readiness perturbation (anchoring bias), and wider implementation budget variance (σ=0.30). See Section 6 for full documentation.
 
-- Define probability distributions for each input variable (instead of single-point estimates)
-- Run 10,000+ simulations with random draws from each distribution
-- Produce a continuous probability distribution of NPV outcomes
-- Calculate true confidence intervals (P10, P50, P90)
-- Identify the variables that contribute most to outcome variance
-
-The trade-off is computational cost (10,000 DCF calculations) and UX complexity (users must specify distributions, not point estimates). Browser-side execution would likely be fast enough (50ms x 10,000 = 500ms).
+Potential future enhancements to the Monte Carlo engine:
+- Increase to 5,000-10,000 iterations for smoother distributions
+- Add user-configurable distribution parameters (let users specify their own uncertainty ranges)
+- Implement Sobol or Latin Hypercube sampling for more efficient coverage
 
 ### Integration with Financial Planning Tools
 
@@ -1948,14 +2173,12 @@ This is arguably the most valuable future feature. Without actuals tracking, the
 
 ### Improved Sensitivity: Interaction Effects
 
-The current sensitivity analysis varies one variable at a time while holding all others constant. This misses interaction effects. For example, increasing team size AND salary simultaneously has a larger impact than the sum of increasing each independently, because headcount savings are a function of both variables.
+The deterministic sensitivity analysis varies one variable at a time while holding all others constant. The V2 Monte Carlo simulation partially addresses interaction effects by varying 6 variables simultaneously, but does not yet provide:
 
-A more sophisticated sensitivity analysis would:
-
-- Vary pairs of variables simultaneously (bivariate sensitivity)
-- Identify the most impactful variable pairs
-- Visualize interaction effects as heat maps
-- Provide a "worst realistic case" where the 3 most impactful variables all move adversely simultaneously
+- Bivariate sensitivity heat maps (vary pairs explicitly)
+- Identification of the most impactful variable pairs
+- Contribution-to-variance analysis (which variable explains the most NPV spread)
+- "Worst realistic case" where the 3 most impactful variables all move adversely simultaneously
 
 ### Enhanced Excel Model Features
 

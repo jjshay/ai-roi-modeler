@@ -25,9 +25,11 @@ import {
   AI_COST_ESCALATION_SCHEDULE,
   SEPARATION_COST_BREAKDOWN,
   MAX_HEADCOUNT_REDUCTION,
+  AI_MATURITY_PREMIUM,
 } from '../logic/benchmarks';
 import { getArchetypeById } from '../logic/archetypes';
 import { getRiskMitigations } from '../logic/recommendations';
+import { getOutputTier, PDF_PAGES } from '../utils/outputTier';
 
 // ---------------------------------------------------------------------------
 // Brand constants
@@ -69,6 +71,7 @@ function formatCompactValue(value) {
 
 function safeIRR(val) {
   if (val == null || isNaN(val) || !isFinite(val)) return 'N/A';
+  if (val > 2.0) return '>200%';
   return formatPercent(val);
 }
 
@@ -338,7 +341,7 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   y = bodyText(doc, recommendation.summary, MARGIN, y, { maxWidth: CONTENT_W });
 }
 
-function page2_TableOfContents(doc) {
+function page2_TableOfContents(doc, includedPages) {
   doc.addPage();
   addHeader(doc);
 
@@ -354,26 +357,49 @@ function page2_TableOfContents(doc) {
   doc.rect(MARGIN, y, 50, 1.5, 'F');
   y += 16;
 
-  const tocEntries = [
-    { title: 'Executive Summary', page: 1 },
-    { title: 'Current State Analysis', page: 3 },
-    { title: 'Value Creation Breakdown', page: 4 },
-    { title: 'Value Creation Pathways (V3)', page: 5 },
-    { title: 'Capital Efficiency & Deployment Gates (V3)', page: 6 },
-    { title: 'AI Investment Analysis & Cost Model', page: 7 },
-    { title: 'Three-Scenario Projections & Hurdle Rate Analysis', page: 8 },
-    { title: 'Risk Assessment', page: 9 },
-    { title: 'Sensitivity Analysis', page: 10 },
-    { title: 'Variable Sensitivity Analysis (Extended)', page: 11 },
-    { title: 'Opportunity Cost & Scalability', page: 12 },
-    { title: 'Industry Peer Comparison & Confidence Intervals', page: 13 },
-    { title: 'Recommendations & Next Steps', page: 14 },
-    { title: 'Qualitative Benefits', page: 15 },
-    { title: 'Input Assumptions & Model Parameters', page: 16 },
-    { title: 'Appendix A: Calculation Walkthrough & DCF Model', page: 17 },
-    { title: 'Appendix B: Source References & Benchmarks', page: 19 },
-    { title: 'Appendix C: Definitions, Assumptions & Disclosures', page: 21 },
+  // Master TOC entry list — page numbers are auto-assigned based on which pages are included
+  const allTocEntries = [
+    { title: 'Executive Summary', key: 'executiveSummary' },
+    { title: 'Current State Analysis', key: 'currentState' },
+    { title: 'Value Creation Breakdown', key: 'valueBreakdown' },
+    { title: 'Value Creation Pathways (V3)', key: 'valuePathways' },
+    { title: 'Capital Efficiency & Deployment Gates (V3)', key: 'capitalEfficiencyGates' },
+    { title: 'AI Investment Analysis & Cost Model', key: 'investmentAnalysis' },
+    { title: 'Three-Scenario Projections & Hurdle Rate Analysis', key: 'scenarioProjections' },
+    { title: 'Risk Assessment', key: 'riskAssessment' },
+    { title: 'Sensitivity Analysis', key: 'sensitivityAnalysis' },
+    { title: 'Variable Sensitivity Analysis (Extended)', key: 'extendedSensitivity' },
+    { title: 'Monte Carlo Simulation', key: 'monteCarlo' },
+    { title: 'Opportunity Cost & Scalability', key: 'opportunityCost' },
+    { title: 'Industry Peer Comparison & Confidence Intervals', key: 'peerComparison' },
+    { title: 'Recommendations & Next Steps', key: 'recommendations' },
+    { title: 'Qualitative Benefits', key: 'qualitativeBenefits' },
+    { title: 'Case Study: Mid-Market Financial Services', key: 'caseStudy' },
+    { title: 'AI Maturity Premium', key: 'maturityPremium' },
+    { title: 'Input Assumptions & Model Parameters', key: 'inputAssumptions' },
+    { title: 'Appendix A: Calculation Walkthrough & DCF Model', key: 'appendixMethodology' },
+    { title: 'Appendix B: Source References & Benchmarks', key: 'appendixBenchmarks' },
+    { title: 'Appendix C: Definitions, Assumptions & Disclosures', key: 'appendixCostAssumptions' },
   ];
+
+  // Filter to only included pages and assign sequential page numbers
+  // Page 1 = executive summary, page 2 = TOC, then content pages start at 3
+  let pageNum = 3;
+  const tocEntries = [];
+  // Always include executive summary as page 1
+  tocEntries.push({ title: 'Executive Summary', page: 1 });
+  for (const entry of allTocEntries) {
+    if (entry.key === 'executiveSummary') continue; // already added
+    if (entry.key === 'tableOfContents') continue;
+    if (!includedPages.includes(entry.key)) continue;
+    tocEntries.push({ title: entry.title, page: pageNum });
+    // Some pages span 2 pages
+    if (entry.key === 'appendixMethodology' || entry.key === 'appendixCostAssumptions') {
+      pageNum += 2;
+    } else {
+      pageNum += 1;
+    }
+  }
 
   tocEntries.forEach((entry) => {
     const isAppendix = entry.title.startsWith('Appendix') || entry.title.startsWith('Input');
@@ -420,7 +446,7 @@ function page2_TableOfContents(doc) {
     'This report provides risk-adjusted projections, AI cost modeling, ROIC analysis, value creation ' +
     'breakdown, opportunity cost analysis, confidence intervals, industry peer ' +
     'comparison, sensitivity testing, DCF modeling, and P&L impact analysis. All figures are derived ' +
-    'from your inputs and 26 cited sources. Bracketed numbers [1]-[26] reference Appendix B. ' +
+    'from your inputs and 31 cited sources. Bracketed numbers [1]-[31] reference Appendix B. ' +
     'See Appendix C for SEC-style definitions, material assumptions, limitations, and legal disclosures. ' +
     'This report is for directional guidance only and does not constitute professional advice.';
   const aboutLines = doc.splitTextToSize(aboutText, CONTENT_W - 12);
@@ -1048,6 +1074,43 @@ function page4_ScenarioProjections(doc, results) {
       ? `Risk multiplier can drop ${thresh.riskMargin !== null ? formatPercent(thresh.riskMargin) : '—'} before NPV turns negative.`
       : 'Current risk profile does not support a positive NPV — consider mitigations.';
     doc.text(threshExplain, MARGIN + 4, y + tBoxH - 4);
+
+    y += tBoxH + 4;
+
+    // Break-even adoption rate (from calculations)
+    if (thresh.breakevenAdoptionRate != null && isFinite(thresh.breakevenAdoptionRate)) {
+      y = bodyText(doc,
+        `Break-even adoption rate: ${formatPercent(thresh.breakevenAdoptionRate)} (current: ${formatPercent(thresh.currentAdoptionRate || 0)})`,
+        MARGIN, y, { bold: true, size: 8.5 });
+    }
+  }
+
+  // --- CAPITAL ALLOCATION COMPARISON ---
+  if (results.capitalAllocation) {
+    y += 6;
+    y = sectionTitle(doc, 'Capital Allocation Comparison', y);
+    y += 2;
+    const ca = results.capitalAllocation;
+    const caRows = [
+      ['AI Project IRR', safeIRR(ca.aiProjectIRR)],
+      ['vs Stock Buyback (8%)', ca.vsStockBuyback != null ? formatPercent(ca.vsStockBuyback) : 'N/A'],
+      ['vs M&A Hurdle (15%)', ca.vsMAndA != null ? formatPercent(ca.vsMAndA) : 'N/A'],
+      ['vs Treasury Bond (4.5%)', ca.vsTreasuryBond != null ? formatPercent(ca.vsTreasuryBond) : 'N/A'],
+    ];
+    autoTable(doc, {
+      startY: y,
+      head: [['Benchmark', 'Spread']],
+      body: caRows,
+      ...autoTableTheme(),
+      bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 8.5, cellPadding: 2.5 },
+      headStyles: { ...autoTableTheme().headStyles, fontSize: 8.5, cellPadding: 2.5 },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.6 },
+        1: { cellWidth: CONTENT_W * 0.4, halign: 'right', fontStyle: 'bold' },
+      },
+    });
+    y = doc.lastAutoTable.finalY + 2;
+    y = bodyText(doc, `Recommendation: ${ca.recommendation || 'N/A'}`, MARGIN, y, { bold: true, size: 8.5 });
   }
 }
 
@@ -1536,7 +1599,7 @@ function page8_InputAssumptions(doc, formData, results) {
     ['Risk-Adjusted Timeline', `${results.riskAdjustments.adjustedTimeline} months`],
     ['Discount Rate (WACC proxy) [26]', formatPercent(results.discountRate || 0.10)],
     ['Adoption Ramp (Year 1-5)', ADOPTION_RAMP.map((r) => (r * 100).toFixed(0) + '%').join(' / ')],
-    ['Scenario Multipliers (Cons / Base / Opt)', '0.70x / 1.00x / 1.20x'],
+    ['Scenario Multipliers (Cons / Base / Opt)', '0.75x / 1.00x / 1.25x'],
     ['Base Case ROIC Cap [2]', `${(MAX_BASE_ROIC * 100).toFixed(0)}% max`],
     ['Base Case IRR Cap [2][4]', `${(MAX_BASE_IRR * 100).toFixed(0)}% max`],
     ['Vendor Lock-In Risk', results.vendorLockIn.level],
@@ -2296,7 +2359,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   sectionPara(
     'This report presents a forward-looking financial assessment of a proposed artificial intelligence ' +
     'implementation. All projections are derived from a deterministic model using (a) user-provided ' +
-    'inputs, (b) publicly available industry benchmarks sourced from 26 cited references (see Appendix B), ' +
+    'inputs, (b) publicly available industry benchmarks sourced from 31 cited references (see Appendix B), ' +
     'and (c) standardized risk adjustment factors. The model does not use proprietary data, machine learning ' +
     'predictions, or Monte Carlo simulation.'
   );
@@ -2381,7 +2444,10 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   );
   defItem('E. Ongoing Operational Costs',
     'Post-implementation costs include AI operations team labor (25% of implementation team, minimum 0.5 FTE), ' +
-    'API/inference costs (derived from per-process-type token pricing [11] and estimated request volume), ' +
+    'API/inference costs (derived from per-process-type token pricing [11] and estimated request volume; ' +
+    'agentic workflows use 2.5x multiplier [30]; API pricing as of Jan 2025, declining ~30% annually), ' +
+    'retained talent premium (8-15% wage increase for key retained staff [29]), ' +
+    'data transfer/egress costs (by company size [31]), ' +
     'platform/license fees (by company size), adjacent product costs (25% of license, reflecting forced ' +
     'vendor cross-sells) [22], model retraining/drift monitoring, annual compliance recertification, ' +
     'retained employee retraining, technical debt/integration maintenance, and cyber insurance increases. ' +
@@ -2409,7 +2475,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     'to determine eligibility and optimal claiming strategies.'
   );
   defItem('I. Opportunity Cost',
-    'The cost of delay (inaction) includes forgone risk-adjusted savings, wage inflation (4% annual [17]), ' +
+    'The cost of delay (inaction) includes forgone risk-adjusted savings, industry-specific wage inflation (3-5% annual [17][31]), ' +
     'legacy system maintenance creep (7% annual [16]), competitive penalty by industry [18], and compliance ' +
     'risk escalation. These projections assume continuation of current market trends and are inherently uncertain.'
   );
@@ -3444,10 +3510,394 @@ function pageN_QualitativeBenefits(doc) {
 }
 
 // ---------------------------------------------------------------------------
+// Monte Carlo Simulation Page
+// ---------------------------------------------------------------------------
+function pageN_MonteCarlo(doc, results, mcResults) {
+  if (!mcResults) return;
+  doc.addPage();
+  addHeader(doc);
+
+  let y = 25;
+  y = sectionTitle(doc, 'Monte Carlo Simulation', y);
+
+  y = bodyText(doc, `${mcResults.sampleSize} simulated scenarios were generated by varying six key input parameters across ` +
+    'their probability distributions: automation potential, change readiness, implementation budget, ' +
+    'ongoing costs, cash realization percentage, and error rate.', MARGIN, y);
+  y += 4;
+
+  // Probability hero box
+  const probPct = Math.round(mcResults.probabilityPositiveNPV * 100);
+  const heroColor = probPct >= 70 ? GREEN : probPct >= 40 ? GOLD : RED;
+  const heroH = 28;
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, heroH, 3, [...heroColor.map(c => Math.min(255, c + 60))]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(22);
+  doc.setTextColor(...heroColor);
+  doc.text(`${probPct}%`, MARGIN + CONTENT_W / 2, y + 14, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...DARK_TEXT);
+  doc.text('Probability of Positive NPV', MARGIN + CONTENT_W / 2, y + 22, { align: 'center' });
+  y += heroH + 8;
+
+  // Distribution summary table
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('Distribution Summary', MARGIN, y);
+  y += 6;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [['Metric', 'P10', 'P25', 'P50 (Median)', 'P75', 'P90', 'Mean']],
+    body: [
+      ['NPV', formatCompactValue(mcResults.npv.p10), formatCompactValue(mcResults.npv.p25),
+        formatCompactValue(mcResults.npv.p50), formatCompactValue(mcResults.npv.p75),
+        formatCompactValue(mcResults.npv.p90), formatCompactValue(mcResults.npv.mean)],
+      ['IRR', safeIRR(mcResults.irr.p10), safeIRR(mcResults.irr.p25),
+        safeIRR(mcResults.irr.p50), safeIRR(mcResults.irr.p75),
+        safeIRR(mcResults.irr.p90), safeIRR(mcResults.irr.mean)],
+      ['ROIC', formatPercent(mcResults.roic.p10), formatPercent(mcResults.roic.p25),
+        formatPercent(mcResults.roic.p50), formatPercent(mcResults.roic.p75),
+        formatPercent(mcResults.roic.p90), formatPercent(mcResults.roic.mean)],
+      ['Payback (mo)', Math.round(mcResults.payback.p10), Math.round(mcResults.payback.p25),
+        Math.round(mcResults.payback.p50), Math.round(mcResults.payback.p75),
+        Math.round(mcResults.payback.p90), Math.round(mcResults.payback.mean)],
+    ],
+    headStyles: { fillColor: NAVY, textColor: WHITE, fontSize: 8, font: 'helvetica', fontStyle: 'bold' },
+    bodyStyles: { fontSize: 8, font: 'helvetica', textColor: DARK_TEXT },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    theme: 'grid',
+    styles: { cellPadding: 2 },
+  });
+
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Simple histogram (20 bars)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('NPV Distribution Histogram', MARGIN, y);
+  y += 6;
+
+  const dist = mcResults.npvDistribution;
+  const bins = 20;
+  const minVal = dist[0];
+  const maxVal = dist[dist.length - 1];
+  const range = maxVal - minVal || 1;
+  const binWidth = range / bins;
+  const counts = new Array(bins).fill(0);
+  for (const val of dist) {
+    const idx = Math.min(Math.floor((val - minVal) / binWidth), bins - 1);
+    counts[idx]++;
+  }
+  const maxCount = Math.max(...counts);
+  const histH = 40;
+  const barW = CONTENT_W / bins;
+
+  for (let i = 0; i < bins; i++) {
+    const barH = maxCount > 0 ? (counts[i] / maxCount) * histH : 0;
+    const binStart = minVal + i * binWidth;
+    const color = binStart >= 0 ? GREEN : RED;
+    doc.setFillColor(...color);
+    doc.rect(MARGIN + i * barW, y + histH - barH, barW - 0.5, barH, 'F');
+  }
+
+  // Axis labels
+  y += histH + 3;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(...MID_GRAY);
+  doc.text(formatCompactValue(minVal), MARGIN, y);
+  doc.text(formatCompactValue(maxVal), PAGE_W - MARGIN, y, { align: 'right' });
+  doc.text('NPV', MARGIN + CONTENT_W / 2, y, { align: 'center' });
+  y += 8;
+
+  // VaR / Tail Risk section
+  if (mcResults.tailRisk) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...NAVY);
+    doc.text('Tail Risk Metrics (Value-at-Risk)', MARGIN, y);
+    y += 6;
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [['Metric', 'Value', 'Interpretation']],
+      body: [
+        ['P5 Worst Case (NPV)', formatCompactValue(mcResults.tailRisk.p5Npv),
+          'Only 5% of scenarios are worse than this'],
+        ['P(Capital Loss >50%)', `${Math.round(mcResults.tailRisk.probCapitalLoss50 * 100)}%`,
+          'Probability of losing more than half the investment'],
+        ['P(Payback >60 months)', `${Math.round(mcResults.tailRisk.probPaybackOver60 * 100)}%`,
+          'Probability payback exceeds project horizon'],
+      ],
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontSize: 8, font: 'helvetica', fontStyle: 'bold' },
+      bodyStyles: { fontSize: 8, font: 'helvetica', textColor: DARK_TEXT },
+      alternateRowStyles: { fillColor: LIGHT_GRAY },
+      theme: 'grid',
+      styles: { cellPadding: 2 },
+    });
+
+    y = doc.lastAutoTable.finalY + 8;
+  }
+
+  // Break-even adoption rate
+  if (results.breakEvenAdoptionRate != null) {
+    drawRoundedRect(doc, MARGIN, y, CONTENT_W, 12, 2, [245, 245, 255]);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...NAVY);
+    doc.text(`Break-Even Adoption Rate: ${formatPercent(results.breakEvenAdoptionRate)}`, MARGIN + 4, y + 5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...MID_GRAY);
+    doc.text('Minimum adoption rate required for positive NPV at base-case assumptions.', MARGIN + 4, y + 10);
+    y += 16;
+  }
+
+  // Methodology note
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 22, 2, LIGHT_GRAY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(...NAVY);
+  doc.text('Methodology', MARGIN + 4, y + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MID_GRAY);
+  const methText = `${mcResults.sampleSize} iterations using Box-Muller normal, lognormal, and triangular distributions ` +
+    'with structural correlation (shared environment shock links readiness and costs). ' +
+    'Each iteration runs the full DCF engine with perturbed inputs. Percentiles computed via linear interpolation.';
+  const methLines = doc.splitTextToSize(methText, CONTENT_W - 8);
+  doc.text(methLines, MARGIN + 4, y + 10);
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic Case Study Page
+// ---------------------------------------------------------------------------
+function pageN_CaseStudy(doc) {
+  doc.addPage();
+  addHeader(doc);
+
+  let y = 25;
+  y = sectionTitle(doc, 'Case Study: Mid-Market Financial Services', y);
+
+  y = bodyText(doc, 'This synthetic case study illustrates how the model applies to a representative organization. ' +
+    'The scenario below is based on median industry benchmarks and demonstrates typical ROI characteristics.', MARGIN, y);
+  y += 4;
+
+  // Case study parameters box
+  const boxH = 48;
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, boxH, 3, LIGHT_GRAY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...NAVY);
+  doc.text('Scenario Parameters', MARGIN + 6, y + 8);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...DARK_TEXT);
+  const params = [
+    ['Industry:', 'Financial Services / Banking', 'Team Size:', '50 analysts'],
+    ['Avg Salary:', '$120,000', 'Process:', 'Document Processing'],
+    ['Automation:', '60%', 'Impl Budget:', '$800,000'],
+    ['Readiness:', '4 (Good)', 'Timeline:', '9 months'],
+  ];
+  let paramY = y + 14;
+  params.forEach(row => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(row[0], MARGIN + 6, paramY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(row[1], MARGIN + 36, paramY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(row[2], MARGIN + 90, paramY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(row[3], MARGIN + 120, paramY);
+    paramY += 7;
+  });
+  y += boxH + 8;
+
+  // Model outputs
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('Model Outputs', MARGIN, y);
+  y += 6;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [['Metric', 'Conservative', 'Base Case', 'Optimistic']],
+    body: [
+      ['5-Year NPV', '$1.2M', '$2.1M', '$3.0M'],
+      ['IRR', '38%', '62%', '85%'],
+      ['Payback', '22 months', '16 months', '12 months'],
+      ['ROIC', '45%', '72%', '95%'],
+    ],
+    headStyles: { fillColor: NAVY, textColor: WHITE, fontSize: 9, font: 'helvetica', fontStyle: 'bold' },
+    bodyStyles: { fontSize: 9, font: 'helvetica', textColor: DARK_TEXT },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    theme: 'grid',
+    styles: { cellPadding: 3 },
+  });
+
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Comparison note
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 22, 3, [240, 244, 252]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...NAVY);
+  doc.text('Real-World Benchmark Comparison', MARGIN + 6, y + 7);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...DARK_TEXT);
+  const benchText = 'Industry benchmarks suggest 75-90% of projected value is typically achieved in practice (IBM, McKinsey [1][2]). ' +
+    'The conservative scenario applies a 25% discount to account for implementation friction and adoption challenges.';
+  const benchLines = doc.splitTextToSize(benchText, CONTENT_W - 12);
+  doc.text(benchLines, MARGIN + 6, y + 13);
+  y += 30;
+
+  // Key insights
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('Key Insights', MARGIN, y);
+  y += 6;
+
+  const insights = [
+    'Document processing automation at 60% drives the majority of value through labor cost reduction and error elimination.',
+    'The 50-analyst team size provides meaningful scale — breakeven is achieved within 16 months at base assumptions.',
+    'Financial services regulatory environment increases compliance-related savings but extends implementation timeline.',
+    'Strong executive sponsorship (readiness 4) significantly improves adoption rates and reduces cultural resistance costs.',
+  ];
+
+  insights.forEach((insight, i) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...GOLD);
+    doc.text(`${i + 1}.`, MARGIN, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...DARK_TEXT);
+    const lines = doc.splitTextToSize(insight, CONTENT_W - 10);
+    doc.text(lines, MARGIN + 8, y);
+    y += lines.length * 4 + 3;
+  });
+
+  // Disclaimer
+  y += 4;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MID_GRAY);
+  doc.text('This is a synthetic scenario for illustrative purposes. Actual results will vary based on organization-specific inputs.', MARGIN, y);
+}
+
+// ---------------------------------------------------------------------------
+// AI Maturity Premium Page
+// ---------------------------------------------------------------------------
+function pageN_MaturityPremium(doc) {
+  doc.addPage();
+  addHeader(doc);
+
+  let y = 25;
+  y = sectionTitle(doc, 'AI Maturity Premium', y);
+
+  y = bodyText(doc, 'Organizations that successfully deploy their first AI project see compounding returns on subsequent ' +
+    'deployments. This "maturity premium" emerges from reusable infrastructure, institutional knowledge, ' +
+    'data asset leverage, and accelerated organizational change management.', MARGIN, y);
+  y += 4;
+
+  // Deployment comparison table
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('Deployment-over-Deployment Improvements', MARGIN, y);
+  y += 6;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [['Metric', '1st Deployment', '2nd Deployment', '3rd Deployment']],
+    body: [
+      ['Cost Reduction', 'Baseline', formatPercent(AI_MATURITY_PREMIUM.secondDeploymentCostReduction), formatPercent(AI_MATURITY_PREMIUM.thirdDeploymentCostReduction)],
+      ['Time Compression', 'Baseline', formatPercent(AI_MATURITY_PREMIUM.secondDeploymentTimeCompression), formatPercent(AI_MATURITY_PREMIUM.thirdDeploymentTimeCompression)],
+      ['Model Reusability', '0%', formatPercent(AI_MATURITY_PREMIUM.modelReusabilityRate), formatPercent(AI_MATURITY_PREMIUM.modelReusabilityRate)],
+      ['Data Asset Multiplier', '1.0x', `${AI_MATURITY_PREMIUM.dataAssetValueMultiplier}x`, `${(AI_MATURITY_PREMIUM.dataAssetValueMultiplier ** 2).toFixed(1)}x`],
+    ],
+    headStyles: { fillColor: NAVY, textColor: WHITE, fontSize: 9, font: 'helvetica', fontStyle: 'bold' },
+    bodyStyles: { fontSize: 9, font: 'helvetica', textColor: DARK_TEXT },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    theme: 'grid',
+    styles: { cellPadding: 3 },
+  });
+
+  y = doc.lastAutoTable.finalY + 10;
+
+  // Strategic narrative
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('Strategic Implications', MARGIN, y);
+  y += 7;
+
+  const narratives = [
+    {
+      title: 'Infrastructure Leverage',
+      text: 'The initial AI deployment builds foundational infrastructure — data pipelines, model serving, monitoring, ' +
+        'and governance frameworks — that can be reused at near-zero marginal cost for subsequent projects. This drives the ' +
+        `${formatPercent(AI_MATURITY_PREMIUM.secondDeploymentCostReduction)} cost reduction observed in second deployments.`,
+    },
+    {
+      title: 'Organizational Learning',
+      text: 'Teams develop AI-specific skills during the first deployment: prompt engineering, data preparation, ' +
+        'change management playbooks, and vendor management capabilities. This institutional knowledge compresses ' +
+        `timelines by ${formatPercent(AI_MATURITY_PREMIUM.secondDeploymentTimeCompression)} on the second project ` +
+        `and ${formatPercent(AI_MATURITY_PREMIUM.thirdDeploymentTimeCompression)} on the third.`,
+    },
+    {
+      title: 'Data Asset Appreciation',
+      text: 'Each AI deployment generates structured data assets — labeled training sets, validated models, ' +
+        `performance benchmarks — that appreciate in value (${AI_MATURITY_PREMIUM.dataAssetValueMultiplier}x multiplier). ` +
+        'These assets become strategic advantages that compound across the portfolio.',
+    },
+    {
+      title: 'Model Reusability',
+      text: `Approximately ${formatPercent(AI_MATURITY_PREMIUM.modelReusabilityRate)} of models, fine-tuning datasets, and ` +
+        'evaluation frameworks developed for one use case can be adapted for adjacent applications, ' +
+        'dramatically reducing the cost and risk of expanding the AI portfolio.',
+    },
+  ];
+
+  narratives.forEach(({ title, text }) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...NAVY);
+    doc.text(title, MARGIN, y);
+    y += 4;
+    y = bodyText(doc, text, MARGIN, y, { size: 8.5 });
+    y += 2;
+  });
+
+  // Note
+  y += 2;
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 14, 2, LIGHT_GRAY);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MID_GRAY);
+  const noteText = 'Maturity premium projections are based on BCG and McKinsey research [1][18] and are presented for strategic ' +
+    'context only. They are not included in the core DCF calculations or NPV/ROIC figures in this report.';
+  const noteLines = doc.splitTextToSize(noteText, CONTENT_W - 8);
+  doc.text(noteLines, MARGIN + 4, y + 5);
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
-export default function generateReport(formData, results, recommendation) {
+export default function generateReport(formData, results, recommendation, mcResults) {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -3464,26 +3914,37 @@ export default function generateReport(formData, results, recommendation) {
   // Reset page counter
   _autoPageNum = 0;
 
-  // Build all pages
-  page1_ExecutiveSummary(doc, formData, results, recommendation);  // p1
-  page2_TableOfContents(doc);                                      // p2
-  page2_CurrentState(doc, formData, results);                      // p3
-  pageN_ValueBreakdown(doc, results);                              // p4
-  pageN_ValuePathways(doc, results);                               // p5
-  pageN_CapitalEfficiencyGates(doc, results);                      // p6
-  page3_InvestmentAnalysis(doc, formData, results);                // p7
-  page4_ScenarioProjections(doc, results);                         // p8
-  page5_RiskAssessment(doc, formData, results);                    // p9
-  page6_SensitivityAnalysis(doc, results);                         // p10
-  page9_ExtendedSensitivity(doc, results);                         // p11
-  pageN_OpportunityCostRevenue(doc, results);                      // p12
-  pageN_PeerComparison(doc, formData, results);                    // p13
-  page7_Recommendations(doc, recommendation);                      // p14
-  pageN_QualitativeBenefits(doc);                                   // p15
-  page8_InputAssumptions(doc, formData, results);                  // p16
-  page10_AppendixMethodology(doc, formData, results);              // p17-18
-  page12_AppendixBenchmarks(doc, formData);                        // p19
-  page13_AppendixCostAssumptions(doc, formData, results);          // p20-21
+  // Determine which pages to include based on role tier
+  const tier = getOutputTier(formData.role);
+  const includedPages = PDF_PAGES[tier] || PDF_PAGES.detailed;
+
+  const has = (key) => includedPages.includes(key);
+
+  // Page builders mapped to their keys
+  // Always: Executive Summary (p1) + Table of Contents (p2)
+  page1_ExecutiveSummary(doc, formData, results, recommendation);
+  page2_TableOfContents(doc, includedPages);
+
+  if (has('currentState'))            page2_CurrentState(doc, formData, results);
+  if (has('valueBreakdown'))          pageN_ValueBreakdown(doc, results);
+  if (has('valuePathways'))           pageN_ValuePathways(doc, results);
+  if (has('capitalEfficiencyGates'))  pageN_CapitalEfficiencyGates(doc, results);
+  if (has('investmentAnalysis'))      page3_InvestmentAnalysis(doc, formData, results);
+  if (has('scenarioProjections'))     page4_ScenarioProjections(doc, results);
+  if (has('riskAssessment'))          page5_RiskAssessment(doc, formData, results);
+  if (has('sensitivityAnalysis'))     page6_SensitivityAnalysis(doc, results);
+  if (has('extendedSensitivity'))     page9_ExtendedSensitivity(doc, results);
+  if (has('monteCarlo'))              pageN_MonteCarlo(doc, results, mcResults);
+  if (has('opportunityCost'))         pageN_OpportunityCostRevenue(doc, results);
+  if (has('peerComparison'))          pageN_PeerComparison(doc, formData, results);
+  if (has('recommendations'))         page7_Recommendations(doc, recommendation);
+  if (has('qualitativeBenefits'))     pageN_QualitativeBenefits(doc);
+  if (has('caseStudy'))               pageN_CaseStudy(doc);
+  if (has('maturityPremium'))         pageN_MaturityPremium(doc);
+  if (has('inputAssumptions'))        page8_InputAssumptions(doc, formData, results);
+  if (has('appendixMethodology'))     page10_AppendixMethodology(doc, formData, results);
+  if (has('appendixBenchmarks'))      page12_AppendixBenchmarks(doc, formData);
+  if (has('appendixCostAssumptions')) page13_AppendixCostAssumptions(doc, formData, results);
 
   // Use blob URL + <a> click to ensure download works
   const blob = doc.output('blob');

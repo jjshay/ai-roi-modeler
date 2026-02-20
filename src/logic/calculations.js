@@ -38,6 +38,7 @@ import {
   TECH_DEBT_RATE,
   CYBER_INSURANCE_INCREASE,
   WAGE_INFLATION_RATE,
+  WAGE_INFLATION_BY_INDUSTRY,
   LEGACY_MAINTENANCE_CREEP,
   COMPETITIVE_PENALTY,
   COMPLIANCE_RISK_ESCALATION,
@@ -57,6 +58,16 @@ import {
 
   EFFECTIVE_TAX_RATE,
   GATE_STRUCTURE,
+  // V4: Reviewer feedback additions
+  PRODUCTIVITY_DIP_PARAMS,
+  RETAINED_TALENT_PREMIUM_RATE,
+  AGENTIC_COMPUTE_MULTIPLIER,
+  DATA_TRANSFER_COST_MONTHLY,
+  REVENUE_DISPLACEMENT_RISK_RATE,
+  COMPLIANCE_ESCALATION_RATE,
+  ALTERNATIVE_HURDLE_RATES,
+  AI_ADOPTION_RATE_BY_INDUSTRY,
+  MARGIN_COMPRESSION_BY_INDUSTRY,
 } from './benchmarks';
 
 export function runCalculations(inputs) {
@@ -137,6 +148,11 @@ export function runCalculations(inputs) {
   const discountRate = DISCOUNT_RATE_BY_SIZE[companySize] || DISCOUNT_RATE;
 
   // =====================================================================
+  // INDUSTRY-SPECIFIC WAGE INFLATION (BLS ECI Q4 2025)
+  // =====================================================================
+  const wageInflationRate = WAGE_INFLATION_BY_INDUSTRY[industry] || WAGE_INFLATION_RATE;
+
+  // =====================================================================
   // DISPLACED / RETAINED FTEs (needed for ongoing cost model)
   // =====================================================================
   const rawDisplacedFTEs = Math.round(teamSize * automationPotential * adoptionRate);
@@ -193,8 +209,10 @@ export function runCalculations(inputs) {
   const ongoingAiLaborCost = ongoingAiHeadcount * aiSalary;
 
   // API / inference costs
+  const isAgenticWorkflow = inputs.isAgenticWorkflow || false;
   const requestsPerHour = assumptions.requestsPerPersonHour ?? REQUESTS_PER_PERSON_HOUR[processType] ?? 12;
-  const monthlyApiVolume = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
+  const effectiveRequestsPerHour = isAgenticWorkflow ? requestsPerHour * AGENTIC_COMPUTE_MULTIPLIER : requestsPerHour;
+  const monthlyApiVolume = teamSize * hoursPerWeek * 4.33 * effectiveRequestsPerHour;
   const apiCostPerK = assumptions.apiCostPer1kRequests ?? API_COST_PER_1K_REQUESTS[processType] ?? 10;
   const monthlyApiCost = (monthlyApiVolume / 1000) * apiCostPerK;
   const annualApiCost = monthlyApiCost * 12;
@@ -212,19 +230,31 @@ export function runCalculations(inputs) {
   const techDebtCost = realisticImplCost * TECH_DEBT_RATE;
   const cyberInsuranceCost = CYBER_INSURANCE_INCREASE[companySize] || 12000;
 
+  // Retained talent premium — wage increase to keep top performers during AI transition
+  const retainedTalentPremiumRate = inputs.retainedTalentPremiumRate ?? RETAINED_TALENT_PREMIUM_RATE;
+  const retainedTalentPremium = retainedFTEs * avgSalary * retainedTalentPremiumRate;
+
+  // Data egress/ingress costs
+  const dataTransferCostMonthly = DATA_TRANSFER_COST_MONTHLY[companySize] || 3000;
+  const dataTransferCostAnnual = dataTransferCostMonthly * 12;
+
   // Base year-1 ongoing cost (core AI ops + maintenance/compliance/insurance)
   const coreOngoingCost = ongoingAiLaborCost + annualApiCost + annualLicenseCost + annualAdjacentCost;
   const computedOngoingCost = coreOngoingCost + modelRetrainingCost + annualComplianceCostVal
-    + retainedRetrainingCost + techDebtCost + cyberInsuranceCost;
+    + retainedRetrainingCost + techDebtCost + cyberInsuranceCost
+    + retainedTalentPremium + dataTransferCostAnnual;
   const baseOngoingCost = Math.max(ongoingAnnualCost, computedOngoingCost);
 
-  // 5-year ongoing costs with tapered vendor escalation
+  // 5-year ongoing costs with tapered vendor escalation + compliance escalation
   // Years 1-2: 12% increase, Years 3-4: 7% (stabilized)
+  // Compliance portion escalates separately at 8% annually (growing regulatory burden)
+  const baseOngoingExCompliance = baseOngoingCost - annualComplianceCostVal;
   const ongoingCostsByYear = [];
   let cumulativeEscalation = 1.0;
   for (let yr = 0; yr < DCF_YEARS; yr++) {
     cumulativeEscalation *= (1 + (AI_COST_ESCALATION_SCHEDULE[yr] || 0));
-    ongoingCostsByYear.push(baseOngoingCost * cumulativeEscalation);
+    const complianceCostThisYear = annualComplianceCostVal * Math.pow(1 + COMPLIANCE_ESCALATION_RATE, yr);
+    ongoingCostsByYear.push(baseOngoingExCompliance * cumulativeEscalation + complianceCostThisYear);
   }
   const totalOngoing5Year = ongoingCostsByYear.reduce((sum, c) => sum + c, 0);
 
@@ -253,6 +283,10 @@ export function runCalculations(inputs) {
     retainedRetrainingCost,
     techDebtCost,
     cyberInsuranceCost,
+    retainedTalentPremium,
+    retainedTalentPremiumRate,
+    dataTransferCostAnnual,
+    isAgenticWorkflow,
     computedOngoingCost,
     baseOngoingCost,
     ongoingCostsByYear,
@@ -336,7 +370,9 @@ export function runCalculations(inputs) {
     realisticImplCost *
     (dataReadiness <= 2 ? 0.25 : dataReadiness === 3 ? 0.10 : 0);
   const integrationTesting = realisticImplCost * 0.10;
-  const productivityDip = (annualLaborCost / 12) * 3 * 0.25; // 3 months at 25% dip (was 2mo at 20%)
+  // Productivity dip scaled by company size (McKinsey Change 2025)
+  const dipParams = PRODUCTIVITY_DIP_PARAMS[companySize] || { months: 3, dipRate: 0.25 };
+  const productivityDip = (annualLaborCost / 12) * dipParams.months * dipParams.dipRate;
   const totalHidden = changeManagement + culturalResistance + dataCleanup + integrationTesting + productivityDip;
 
   const hiddenCosts = {
@@ -423,7 +459,7 @@ export function runCalculations(inputs) {
 
     for (let yr = 0; yr < DCF_YEARS; yr++) {
       // Savings inflate with wage growth (the labor costs being avoided grow annually)
-      const wageGrowth = Math.pow(1 + WAGE_INFLATION_RATE, yr);
+      const wageGrowth = Math.pow(1 + wageInflationRate, yr);
 
       // Enhancement savings (efficiency + error + tool) — adoption ramp applies
       const enhancementSavings = enhancementRiskAdjusted * ADOPTION_RAMP[yr] * scenarioMultiplier * wageGrowth;
@@ -538,9 +574,9 @@ export function runCalculations(inputs) {
   // SCENARIOS (build year-by-year flows for each)
   // =====================================================================
   const scenarioConfigs = {
-    conservative: { label: 'Conservative', multiplier: 0.70 },
+    conservative: { label: 'Conservative', multiplier: 0.75 },
     base: { label: 'Base Case', multiplier: 1.0 },
-    optimistic: { label: 'Optimistic', multiplier: 1.20 },
+    optimistic: { label: 'Optimistic', multiplier: 1.25 },
   };
 
   const scenarioResults = {};
@@ -570,6 +606,11 @@ export function runCalculations(inputs) {
       roicCapped: rawROIC > MAX_BASE_ROIC,
       paybackMonths: calculatePayback(yearFlows),
     };
+  }
+
+  // Fast mode: Monte Carlo iterations only need scenario results — skip everything else
+  if (inputs._mcMode === 'fast') {
+    return { scenarios: scenarioResults, upfrontInvestment, totalInvestment, discountRate };
   }
 
   // Probability-weighted expected value across scenarios
@@ -616,7 +657,7 @@ export function runCalculations(inputs) {
     let cumulativeReduction = 0;
     let cumulativeNet = -modUpfront;
     for (let yr = 0; yr < DCF_YEARS; yr++) {
-      const wageGrowth = Math.pow(1 + WAGE_INFLATION_RATE, yr);
+      const wageGrowth = Math.pow(1 + wageInflationRate, yr);
       const eSavings = modEnhancementRA * ADOPTION_RAMP[yr] * wageGrowth;
       cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
       const hSavings = modHeadcountRA * cumulativeReduction * wageGrowth;
@@ -717,6 +758,50 @@ export function runCalculations(inputs) {
     return ongoingCostsByYear.map(c => c * scale);
   }
 
+  // Discount rate sensitivity helper — runs full NPV with a different discount rate
+  function sensitivityNPVWithDiscount(discountRateOverride) {
+    const flows = [];
+    let cumulativeReduction = 0;
+    for (let yr = 0; yr < DCF_YEARS; yr++) {
+      const wageGrowth = Math.pow(1 + wageInflationRate, yr);
+      const eSavings = enhancementRiskAdjusted * ADOPTION_RAMP[yr] * wageGrowth;
+      cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
+      const hSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * wageGrowth;
+      const sepCost = separationByYear[yr];
+      const ongCost = ongoingCostsByYear[yr];
+      const net = eSavings + hSavings - sepCost - ongCost;
+      flows.push({ netCashFlow: net });
+    }
+    let npv = -upfrontInvestment;
+    for (let yr = 0; yr < flows.length; yr++) {
+      npv += flows[yr].netCashFlow / Math.pow(1 + discountRateOverride, yr + 1);
+    }
+    return npv;
+  }
+
+  // Payback helper for sensitivity rows
+  function sensitivityPayback(modEnhancementRA, modHeadcountRA, modOngoingByYear, modUpfront) {
+    let cumulative = -modUpfront;
+    const maxMonths = DCF_YEARS * 12;
+    for (let month = 1; month <= maxMonths; month++) {
+      const yearIndex = Math.floor((month - 1) / 12);
+      if (yearIndex >= DCF_YEARS) break;
+      const wageGrowth = Math.pow(1 + wageInflationRate, yearIndex);
+      let cRed = 0;
+      for (let y = 0; y <= yearIndex; y++) cRed += HEADCOUNT_REDUCTION_SCHEDULE[y];
+      const eSavings = modEnhancementRA * ADOPTION_RAMP[yearIndex] * wageGrowth;
+      const hSavings = modHeadcountRA * cRed * wageGrowth;
+      const monthlyNet = (eSavings + hSavings - separationByYear[yearIndex] - modOngoingByYear[yearIndex]) / 12;
+      cumulative += monthlyNet;
+      if (cumulative >= 0) return month;
+    }
+    return maxMonths + 1;
+  }
+
+  // --- Discount Rate sensitivity ---
+  const discLow = Math.max(0.01, discountRate - 0.03);
+  const discHigh = discountRate + 0.05;
+
   const extendedSensitivity = [
     sensitivityRow(
       'Team Size',
@@ -766,7 +851,42 @@ export function runCalculations(inputs) {
       sensitivityNPV(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, ongoingByYearScaled(0.50), upfrontInvestment),
       sensitivityNPV(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, ongoingByYearScaled(2.0), upfrontInvestment),
     ),
+    sensitivityRow(
+      'Discount Rate',
+      `${(discountRate * 100).toFixed(0)}%`,
+      `${(discLow * 100).toFixed(1)}% (-3pp)`,
+      `${(discHigh * 100).toFixed(1)}% (+5pp)`,
+      sensitivityNPVWithDiscount(discLow),
+      sensitivityNPVWithDiscount(discHigh),
+    ),
   ];
+
+  // Add payback to each sensitivity row (3B)
+  extendedSensitivity.forEach((row, i) => {
+    if (i === 0) { // Team Size
+      row.paybackLow = sensitivityPayback(teamLowVal.enhancementRA, teamLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+      row.paybackHigh = sensitivityPayback(teamHighVal.enhancementRA, teamHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+    } else if (i === 1) { // Salary
+      row.paybackLow = sensitivityPayback(salLowVal.enhancementRA, salLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+      row.paybackHigh = sensitivityPayback(salHighVal.enhancementRA, salHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+    } else if (i === 2) { // Error Rate
+      row.paybackLow = sensitivityPayback(errLowVal.enhancementRA, errLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+      row.paybackHigh = sensitivityPayback(errHighVal.enhancementRA, errHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+    } else if (i === 3) { // Automation Potential
+      row.paybackLow = sensitivityPayback(autLowVal.enhancementRA, autLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+      row.paybackHigh = sensitivityPayback(autHighVal.enhancementRA, autHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+    } else if (i === 4) { // Impl Cost
+      row.paybackLow = sensitivityPayback(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, ongoingCostsByYear, implLowInv);
+      row.paybackHigh = sensitivityPayback(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, ongoingCostsByYear, implHighInv);
+    } else if (i === 5) { // Ongoing Cost
+      row.paybackLow = sensitivityPayback(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, ongoingByYearScaled(0.50), upfrontInvestment);
+      row.paybackHigh = sensitivityPayback(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, ongoingByYearScaled(2.0), upfrontInvestment);
+    } else if (i === 6) { // Discount Rate — payback doesn't change with discount rate, but we include for consistency
+      const basePB = calculatePayback(baseFlows);
+      row.paybackLow = basePB;
+      row.paybackHigh = basePB;
+    }
+  });
 
   // Backward-compatible summary sensitivity (uses full DCF base now)
   const sensitivity = {
@@ -780,7 +900,7 @@ export function runCalculations(inputs) {
       const flows = [];
       let cumRed = 0;
       for (let yr = 0; yr < DCF_YEARS; yr++) {
-        const wg = Math.pow(1 + WAGE_INFLATION_RATE, yr);
+        const wg = Math.pow(1 + wageInflationRate, yr);
         const enh = enhancementRiskAdjusted * delayedRamp[yr] * wg;
         cumRed += HEADCOUNT_REDUCTION_SCHEDULE[yr];
         const hc = valueBreakdown.headcount.riskAdjusted * cumRed * wg;
@@ -801,18 +921,42 @@ export function runCalculations(inputs) {
   const competitivePenalty = COMPETITIVE_PENALTY[industry] || 0.03;
   const complianceEscalation = COMPLIANCE_RISK_ESCALATION[industry] || 0.02;
 
-  // BUG FIX: Use compounding instead of linear growth (audit issue #4)
-  // Linear (rate × yr) understates 5-year totals by 5-8%; inconsistent with DCF
+  // Enhanced competitive erosion: revenue-based S-curve margin compression
+  const userAnnualRevenueForErosion = inputs.annualRevenue || 0;
+  const aiAdoptionRate = AI_ADOPTION_RATE_BY_INDUSTRY[industry] || 0.45;
+  const marginCompression = MARGIN_COMPRESSION_BY_INDUSTRY[industry] || 0.025;
+
+  // S-curve (logistic) adoption function for competitive erosion
+  // Models that competitor AI adoption follows a logistic curve, not linear growth.
+  // L = terminal adoption rate (from benchmarks), k = steepness (1.2 = moderate),
+  // t0 = inflection point year (2.5 = midway through 5yr horizon)
+  // Source: BCG 2025 technology adoption S-curves; McKinsey 2025 AI diffusion data
+  function logisticAdoption(year, terminalRate, k = 1.2, t0 = 2.5) {
+    return terminalRate / (1 + Math.exp(-k * (year - t0)));
+  }
+
   function calculateInactionCost(delayYears) {
     let totalCost = 0;
     const yearlyBreakdown = [];
     for (let yr = 1; yr <= delayYears; yr++) {
       // Compounding: cost of wages that have grown yr years
-      const wageInflation = annualLaborCost * (Math.pow(1 + WAGE_INFLATION_RATE, yr) - 1);
+      const wageInflation = annualLaborCost * (Math.pow(1 + wageInflationRate, yr) - 1);
       const legacyCreep = currentToolCosts * (Math.pow(1 + LEGACY_MAINTENANCE_CREEP, yr) - 1);
       const forgoneSavings = netAnnualSavings * (yr <= DCF_YEARS ? ADOPTION_RAMP[Math.min(yr - 1, DCF_YEARS - 1)] : 1.0);
-      // Compounding competitive and compliance penalties
-      const competitiveLoss = totalCurrentCost * (Math.pow(1 + competitivePenalty, yr) - 1);
+
+      // Enhanced: revenue-based S-curve margin compression when annualRevenue is provided
+      let competitiveLoss;
+      let revenueErosion = 0;
+      if (userAnnualRevenueForErosion > 0) {
+        // S-curve: adoption accelerates then plateaus, creating non-linear erosion
+        const adoptionPct = logisticAdoption(yr, aiAdoptionRate);
+        revenueErosion = userAnnualRevenueForErosion * marginCompression * adoptionPct;
+        competitiveLoss = revenueErosion;
+      } else {
+        // Fallback: cost-based competitive penalty (original logic)
+        competitiveLoss = totalCurrentCost * (Math.pow(1 + competitivePenalty, yr) - 1);
+      }
+
       const complianceRisk = totalCurrentCost * (Math.pow(1 + complianceEscalation, yr) - 1);
 
       const yearTotal = wageInflation + legacyCreep + forgoneSavings + competitiveLoss + complianceRisk;
@@ -824,6 +968,7 @@ export function runCalculations(inputs) {
         forgoneSavings,
         competitiveLoss,
         complianceRisk,
+        revenueErosion,
         total: yearTotal,
       });
     }
@@ -836,6 +981,25 @@ export function runCalculations(inputs) {
     costOfWaiting12Months: inaction5yr.yearlyBreakdown[0]?.total || 0,
     costOfWaiting24Months: (inaction5yr.yearlyBreakdown[0]?.total || 0) + (inaction5yr.yearlyBreakdown[1]?.total || 0),
     yearlyBreakdown: inaction5yr.yearlyBreakdown,
+  };
+
+  // Enhanced competitive erosion summary (V2.1: S-curve model)
+  const competitiveErosion = {
+    annualRevenue: userAnnualRevenueForErosion,
+    aiAdoptionRate,
+    marginCompression,
+    revenueBasedErosion: userAnnualRevenueForErosion > 0,
+    erosionModel: userAnnualRevenueForErosion > 0 ? 'logistic-s-curve' : 'linear-cost-penalty',
+    year5RevenueErosion: inaction5yr.yearlyBreakdown[4]?.revenueErosion || 0,
+  };
+
+  // --- "Do Nothing" Cost Projection (3C) ---
+  const doNothingYearByCost = inaction5yr.yearlyBreakdown.map(yr => yr.total);
+  const doNothingCumulative = doNothingYearByCost.reduce((sum, c) => sum + c, 0);
+  const doNothingProjection = {
+    yearByCost: doNothingYearByCost,
+    cumulative5Year: doNothingCumulative,
+    vsAiProjectNPV: doNothingCumulative + baseNPV, // net advantage of AI
   };
 
   // =====================================================================
@@ -872,13 +1036,17 @@ export function runCalculations(inputs) {
     const timeToMarketRev = userAnnualRevenue * revenueUpliftData.timeToMarket * REVENUE_RISK_DISCOUNT * riskMultiplier;
     const customerExpRev = userAnnualRevenue * revenueUpliftData.customerExperience * REVENUE_RISK_DISCOUNT * riskMultiplier;
     const newCapabilityRev = userAnnualRevenue * revenueUpliftData.newCapability * REVENUE_RISK_DISCOUNT * riskMultiplier;
+    // Revenue displacement risk — chance AI degrades customer experience initially
+    const displacementRisk = userAnnualRevenue * REVENUE_DISPLACEMENT_RISK_RATE * riskMultiplier;
+    const grossRevenue = timeToMarketRev + customerExpRev + newCapabilityRev;
     revenueEnablement = {
       eligible: true,
       revenueBase: userAnnualRevenue,
       timeToMarket: timeToMarketRev,
       customerExperience: customerExpRev,
       newCapability: newCapabilityRev,
-      totalAnnualRevenue: timeToMarketRev + customerExpRev + newCapabilityRev,
+      displacementRisk,
+      totalAnnualRevenue: grossRevenue - displacementRisk,
       riskDiscount: REVENUE_RISK_DISCOUNT,
     };
   } else {
@@ -906,6 +1074,11 @@ export function runCalculations(inputs) {
       ? riskAdjustedSavings - (upfrontInvestment / pvFactor)
       : null;
 
+    // Break-even adoption rate: what adoption rate makes NPV = 0?
+    const breakevenAdoptionRate = grossAnnualSavings > 0 && automationPotential > 0
+      ? ((upfrontInvestment / pvFactor) + baseOngoingCost) / (grossAnnualSavings / adoptionRate)
+      : null;
+
     return {
       breakevenRiskMultiplier: breakevenRisk,
       currentRiskMultiplier: riskMultiplier,
@@ -914,6 +1087,9 @@ export function runCalculations(inputs) {
       maxOngoingCost,
       currentOngoingCost: baseOngoingCost,
       ongoingCostMargin: maxOngoingCost !== null ? maxOngoingCost - baseOngoingCost : null,
+      breakevenAdoptionRate,
+      currentAdoptionRate: adoptionRate,
+      adoptionMargin: breakevenAdoptionRate !== null ? adoptionRate - breakevenAdoptionRate : null,
     };
   }
 
@@ -960,8 +1136,8 @@ export function runCalculations(inputs) {
   // CONFIDENCE INTERVALS (from scenario + sensitivity spread)
   // =====================================================================
   function deriveConfidenceIntervals() {
-    const consFlows = buildYearCashFlows(0.70);
-    const optFlows = buildYearCashFlows(1.20);
+    const consFlows = buildYearCashFlows(0.75);
+    const optFlows = buildYearCashFlows(1.25);
 
     const consNPV = calculateNPV(consFlows);
     const optNPV = calculateNPV(optFlows);
@@ -1168,6 +1344,40 @@ export function runCalculations(inputs) {
   const capitalEfficiency = calculateCapitalEfficiency();
 
   // =====================================================================
+  // CAPITAL ALLOCATION COMPARISON (3D)
+  // Compare AI project IRR to alternative capital uses
+  // =====================================================================
+  function calculateCapitalAllocation() {
+    const aiIRR = scenarioResults.base.irr;
+    const validIRR = isFinite(aiIRR);
+    const vsStockBuyback = validIRR ? aiIRR - ALTERNATIVE_HURDLE_RATES.stockBuyback : null;
+    const vsMAndA = validIRR ? aiIRR - ALTERNATIVE_HURDLE_RATES.mAndAHurdleRate : null;
+    const vsTreasuryBond = validIRR ? aiIRR - ALTERNATIVE_HURDLE_RATES.treasuryBond : null;
+
+    let recommendation;
+    if (!validIRR || isNaN(aiIRR)) {
+      recommendation = 'Insufficient data';
+    } else if (aiIRR > ALTERNATIVE_HURDLE_RATES.mAndAHurdleRate) {
+      recommendation = 'Strong AI';
+    } else if (aiIRR > ALTERNATIVE_HURDLE_RATES.stockBuyback) {
+      recommendation = 'Marginal';
+    } else {
+      recommendation = 'Consider alternatives';
+    }
+
+    return {
+      aiProjectIRR: aiIRR,
+      vsStockBuyback,
+      vsMAndA,
+      vsTreasuryBond,
+      hurdleRates: ALTERNATIVE_HURDLE_RATES,
+      recommendation,
+    };
+  }
+
+  const capitalAllocation = calculateCapitalAllocation();
+
+  // =====================================================================
   // V3: GATE STRUCTURE — Phased deployment with go/no-go thresholds
   // =====================================================================
   function calculateGateStructure() {
@@ -1234,6 +1444,28 @@ export function runCalculations(inputs) {
   };
 
   // =====================================================================
+  // BREAK-EVEN ADOPTION RATE
+  // Binary search for the savings multiplier where NPV = 0.
+  // Since savings scale linearly with adoption rate, the break-even
+  // adoption rate = currentAdoptionRate × breakEvenMultiplier.
+  // =====================================================================
+  let breakEvenAdoptionRate = null;
+  {
+    let lo = 0.01, hi = 3.0;
+    for (let iter = 0; iter < 25; iter++) {
+      const mid = (lo + hi) / 2;
+      const testNPV = calculateNPV(buildYearCashFlows(mid));
+      if (testNPV >= 0) hi = mid;
+      else lo = mid;
+    }
+    const beRate = adoptionRate * hi;
+    if (beRate <= 0.99) {
+      breakEvenAdoptionRate = Math.round(beRate * 100) / 100;
+    }
+    // null if break-even requires > 99% adoption (infeasible)
+  }
+
+  // =====================================================================
   // RETURN
   // =====================================================================
   return {
@@ -1270,6 +1502,7 @@ export function runCalculations(inputs) {
     },
     valueBreakdown,
     opportunityCost,
+    competitiveErosion,
     revenueEnablement,
     rdTaxCredit,
     thresholdAnalysis,
@@ -1290,5 +1523,11 @@ export function runCalculations(inputs) {
     capitalEfficiency,
     gateStructure,
     executiveSummary,
+    // V4: Reviewer feedback outputs
+    doNothingProjection,
+    capitalAllocation,
+    wageInflationRate,
+    // V4.1: Break-even adoption rate
+    breakEvenAdoptionRate,
   };
 }

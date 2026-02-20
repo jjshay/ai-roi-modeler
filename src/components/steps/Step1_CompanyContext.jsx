@@ -24,11 +24,17 @@ const COMPANY_SIZES = [
 ];
 
 const ROLES = [
-  'C-Suite (CEO, CFO, COO, CTO, CIO)',
+  'CEO / President',
+  'Board Member / Advisor',
+  'COO / Chief of Staff',
+  'CFO / Finance Executive',
+  'CTO / CIO',
   'VP / SVP',
   'Director',
   'Head of Department',
+  'Finance / FP&A Team',
   'Manager',
+  'Analyst / IC',
   'Other',
 ];
 

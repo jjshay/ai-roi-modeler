@@ -31,8 +31,9 @@ export default function SegmentedSelect({
               aria-checked={isSelected}
               onClick={() => onChange(option.value)}
               className={`
-                flex-1 min-w-[120px] rounded-lg border-2 px-4 py-3
+                flex-1 min-w-[100px] min-h-[44px] rounded-lg border-2 px-4 py-3
                 text-sm font-medium transition-all duration-150
+                sm:min-w-[120px]
                 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
                 ${
                   isSelected

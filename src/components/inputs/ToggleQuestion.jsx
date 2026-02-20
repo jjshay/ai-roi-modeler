@@ -32,7 +32,7 @@ export default function ToggleQuestion({
           aria-checked={value === true}
           onClick={() => onChange(true)}
           className={`
-            flex-1 rounded-lg border-2 px-6 py-3 text-base font-semibold
+            flex-1 min-h-[44px] rounded-lg border-2 px-6 py-3.5 text-base font-semibold
             transition-all duration-150
             focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
             sm:py-4 sm:text-lg
@@ -52,7 +52,7 @@ export default function ToggleQuestion({
           aria-checked={value === false}
           onClick={() => onChange(false)}
           className={`
-            flex-1 rounded-lg border-2 px-6 py-3 text-base font-semibold
+            flex-1 min-h-[44px] rounded-lg border-2 px-6 py-3.5 text-base font-semibold
             transition-all duration-150
             focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
             sm:py-4 sm:text-lg

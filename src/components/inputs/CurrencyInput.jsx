@@ -53,14 +53,14 @@ export default function CurrencyInput({
       )}
 
       {presets.length > 0 && (
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Preset amounts">
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap" role="group" aria-label="Preset amounts">
           {presets.map((preset) => (
             <button
               key={preset}
               type="button"
               onClick={() => handlePresetClick(preset)}
               className={`
-                rounded-lg border-2 px-4 py-2 text-sm font-medium
+                min-h-[44px] rounded-lg border-2 px-4 py-2 text-sm font-medium
                 transition-all duration-150
                 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
                 ${
@@ -77,7 +77,7 @@ export default function CurrencyInput({
             type="button"
             onClick={handleCustomClick}
             className={`
-              rounded-lg border-2 px-4 py-2 text-sm font-medium
+              min-h-[44px] rounded-lg border-2 px-4 py-2 text-sm font-medium
               transition-all duration-150
               focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
               ${

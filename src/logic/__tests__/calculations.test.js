@@ -173,10 +173,11 @@ describe('Opportunity Cost of Inaction', () => {
     expect(yr1).toHaveProperty('complianceRisk');
   });
 
-  it('wage inflation = laborCost × 0.04 × year', () => {
+  it('wage inflation = laborCost × industry wage rate × year', () => {
     const r = runCalculations(BASE_INPUTS);
     const yr1 = r.opportunityCost.yearlyBreakdown[0];
-    expect(yr1.wageInflation).toBeCloseTo(r.currentState.annualLaborCost * 0.04, 0);
+    // Technology / Software uses 4.5% wage inflation
+    expect(yr1.wageInflation).toBeCloseTo(r.currentState.annualLaborCost * 0.045, 0);
   });
 });
 
@@ -467,11 +468,11 @@ describe('Scenario Analysis', () => {
     expect(r.scenarios.base.roic).toBeLessThanOrEqual(1.0);
   });
 
-  it('base case IRR is capped at 75% or N/A', () => {
+  it('base case IRR is capped at 200% or N/A', () => {
     const r = runCalculations(BASE_INPUTS);
-    // IRR may be NaN if solver can't converge (valid), or capped at 75%
+    // IRR may be NaN if solver can't converge (valid), or capped at 200%
     if (isFinite(r.scenarios.base.irr)) {
-      expect(r.scenarios.base.irr).toBeLessThanOrEqual(0.75);
+      expect(r.scenarios.base.irr).toBeLessThanOrEqual(2.0);
     } else {
       expect(isNaN(r.scenarios.base.irr)).toBe(true);
     }
@@ -684,9 +685,9 @@ describe('Sensitivity Analysis', () => {
     expect(r.sensitivity).toHaveProperty('doubleTimeline');
   });
 
-  it('has 6 extended sensitivity rows', () => {
+  it('has 7 extended sensitivity rows', () => {
     const r = runCalculations(BASE_INPUTS);
-    expect(r.extendedSensitivity).toHaveLength(6);
+    expect(r.extendedSensitivity).toHaveLength(7);
   });
 
   it('each extended row has npvLow and npvHigh', () => {
@@ -762,8 +763,8 @@ describe('Extreme inputs', () => {
     const r = runCalculations({ ...BASE_INPUTS, teamSize: 1000 });
     expect(r.scenarios.base.roic).toBeLessThanOrEqual(1.0);
     if (isFinite(r.scenarios.base.irr)) {
-      expect(r.scenarios.base.irr).toBeLessThanOrEqual(0.75);
-      expect(r.scenarios.base.irr).toBeGreaterThanOrEqual(-0.75);
+      expect(r.scenarios.base.irr).toBeLessThanOrEqual(2.0);
+      expect(r.scenarios.base.irr).toBeGreaterThanOrEqual(-1.0);
     }
     // Displaced FTEs should not exceed MAX_HEADCOUNT_REDUCTION cap (75%)
     expect(r.oneTimeCosts.displacedFTEs).toBeLessThanOrEqual(Math.floor(1000 * 0.75));
@@ -1080,5 +1081,255 @@ describe('Project Archetypes & Assumptions', () => {
   it('projectArchetype appears in revenueEnablement output when not eligible', () => {
     const r = runCalculations(BASE_INPUTS);
     expect(r.revenueEnablement.projectArchetype).toBe('internal-process-automation');
+  });
+});
+
+// =====================================================================
+// V4: Reviewer Feedback — New Feature Tests
+// =====================================================================
+
+describe('Symmetric Scenarios (V4)', () => {
+  it('Conservative uses 0.75x multiplier', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const consFlows = r.scenarios.conservative.projections;
+    const baseFlows = r.scenarios.base.projections;
+    // Gross savings in conservative should be ~75% of base
+    const ratio = consFlows[0].grossSavings / baseFlows[0].grossSavings;
+    expect(ratio).toBeCloseTo(0.75, 2);
+  });
+
+  it('Optimistic uses 1.25x multiplier', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const optFlows = r.scenarios.optimistic.projections;
+    const baseFlows = r.scenarios.base.projections;
+    const ratio = optFlows[0].grossSavings / baseFlows[0].grossSavings;
+    expect(ratio).toBeCloseTo(1.25, 2);
+  });
+});
+
+describe('IRR Display (V4)', () => {
+  it('IRR above 0.75 returns actual value up to 2.0', () => {
+    // Use inputs that would produce a high IRR
+    const r = runCalculations({ ...BASE_INPUTS, teamSize: 1000 });
+    if (isFinite(r.scenarios.base.irr)) {
+      expect(r.scenarios.base.irr).toBeLessThanOrEqual(2.0);
+    }
+  });
+
+  it('rawIrr > 2.0 sets irrCapped flag', () => {
+    const r = runCalculations(BASE_INPUTS);
+    // irrCapped should be true when rawIrr exceeds MAX_BASE_IRR (2.0)
+    expect(r.scenarios.base).toHaveProperty('irrCapped');
+    expect(typeof r.scenarios.base.irrCapped).toBe('boolean');
+  });
+});
+
+describe('Productivity Dip by Size (V4)', () => {
+  it('Startup gets shorter, shallower dip than Enterprise', () => {
+    const rStartup = runCalculations(STARTUP_INPUTS);
+    const rEnterprise = runCalculations(ENTERPRISE_INPUTS);
+    // With different sized teams we compare dip as fraction of labor cost
+    const startupDipFraction = rStartup.hiddenCosts.productivityDip / (STARTUP_INPUTS.teamSize * STARTUP_INPUTS.avgSalary);
+    const enterpriseDipFraction = rEnterprise.hiddenCosts.productivityDip / (ENTERPRISE_INPUTS.teamSize * ENTERPRISE_INPUTS.avgSalary);
+    // Enterprise should have higher dip fraction (longer months × higher rate)
+    expect(enterpriseDipFraction).toBeGreaterThan(startupDipFraction);
+  });
+
+  it('Mid-Market uses 3 months at 25% dip', () => {
+    const r = runCalculations(BASE_INPUTS); // Mid-Market
+    const expected = (BASE_INPUTS.teamSize * BASE_INPUTS.avgSalary / 12) * 3 * 0.25;
+    expect(r.hiddenCosts.productivityDip).toBeCloseTo(expected, 0);
+  });
+});
+
+describe('Industry Wage Inflation (V4)', () => {
+  it('Technology uses 4.5% wage inflation', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.wageInflationRate).toBe(0.045);
+  });
+
+  it('Government uses 3.0% wage inflation', () => {
+    const r = runCalculations(GOVERNMENT_INPUTS);
+    expect(r.wageInflationRate).toBe(0.03);
+  });
+
+  it('Healthcare uses 5.0% wage inflation', () => {
+    const r = runCalculations({ ...BASE_INPUTS, industry: 'Healthcare / Life Sciences' });
+    expect(r.wageInflationRate).toBe(0.05);
+  });
+});
+
+describe('Retained Talent Premium (V4)', () => {
+  it('included in ongoing costs', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.aiCostModel.retainedTalentPremium).toBeGreaterThan(0);
+    expect(r.aiCostModel.retainedTalentPremiumRate).toBe(0.10);
+  });
+
+  it('increases with more retained FTEs', () => {
+    const rSmall = runCalculations({ ...BASE_INPUTS, teamSize: 5 });
+    const rLarge = runCalculations({ ...BASE_INPUTS, teamSize: 50 });
+    expect(rLarge.aiCostModel.retainedTalentPremium).toBeGreaterThan(rSmall.aiCostModel.retainedTalentPremium);
+  });
+});
+
+describe('Agentic Compute Multiplier (V4)', () => {
+  it('agentic=true multiplies API cost', () => {
+    const rNormal = runCalculations(BASE_INPUTS);
+    const rAgentic = runCalculations({ ...BASE_INPUTS, isAgenticWorkflow: true });
+    // Agentic should have ~2.5x the API cost
+    expect(rAgentic.aiCostModel.annualApiCost).toBeGreaterThan(rNormal.aiCostModel.annualApiCost * 2);
+    expect(rAgentic.aiCostModel.isAgenticWorkflow).toBe(true);
+  });
+
+  it('default is non-agentic', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.aiCostModel.isAgenticWorkflow).toBe(false);
+  });
+});
+
+describe('Data Egress Costs (V4)', () => {
+  it('included in ongoing costs by company size', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.aiCostModel.dataTransferCostAnnual).toBe(3000 * 12); // Mid-Market
+  });
+
+  it('larger companies have higher data transfer costs', () => {
+    const rStartup = runCalculations(STARTUP_INPUTS);
+    const rEnterprise = runCalculations(ENTERPRISE_INPUTS);
+    expect(rEnterprise.aiCostModel.dataTransferCostAnnual).toBeGreaterThan(rStartup.aiCostModel.dataTransferCostAnnual);
+  });
+});
+
+describe('Break-Even Adoption Rate (V4)', () => {
+  it('calculated and positive for viable projects', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.thresholdAnalysis.breakevenAdoptionRate).toBeDefined();
+    if (r.thresholdAnalysis.breakevenAdoptionRate !== null) {
+      expect(r.thresholdAnalysis.breakevenAdoptionRate).toBeGreaterThan(0);
+    }
+  });
+
+  it('adoption margin is positive for viable projects', () => {
+    const r = runCalculations(BASE_INPUTS);
+    if (r.thresholdAnalysis.isViable && r.thresholdAnalysis.adoptionMargin !== null) {
+      expect(r.thresholdAnalysis.adoptionMargin).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('Revenue Displacement Risk (V4)', () => {
+  it('deducted from revenue enablement for eligible projects', () => {
+    const r = runCalculations(REVENUE_ELIGIBLE_INPUTS);
+    expect(r.revenueEnablement.eligible).toBe(true);
+    expect(r.revenueEnablement.displacementRisk).toBeGreaterThan(0);
+    // Total should be less than sum of components (displacement deducted)
+    const grossSum = r.revenueEnablement.timeToMarket + r.revenueEnablement.customerExperience + r.revenueEnablement.newCapability;
+    expect(r.revenueEnablement.totalAnnualRevenue).toBeLessThan(grossSum);
+  });
+});
+
+describe('Discount Rate Sensitivity (V4)', () => {
+  it('7th row in extendedSensitivity is Discount Rate', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.extendedSensitivity[6].label).toBe('Discount Rate');
+  });
+
+  it('NPV at low discount rate differs from NPV at high discount rate', () => {
+    const r = runCalculations(BASE_INPUTS);
+    const discRow = r.extendedSensitivity[6];
+    // npvLow = NPV when discount rate is at its lower bound (-3pp)
+    // npvHigh = NPV when discount rate is at its higher bound (+5pp)
+    // Both should be numbers and different from baseNPV
+    expect(typeof discRow.npvLow).toBe('number');
+    expect(typeof discRow.npvHigh).toBe('number');
+    expect(discRow.npvLow).not.toEqual(discRow.npvHigh);
+  });
+});
+
+describe('Payback in Sensitivity (V4)', () => {
+  it('each sensitivity row has paybackLow and paybackHigh', () => {
+    const r = runCalculations(BASE_INPUTS);
+    r.extendedSensitivity.forEach(row => {
+      expect(row).toHaveProperty('paybackLow');
+      expect(row).toHaveProperty('paybackHigh');
+      expect(typeof row.paybackLow).toBe('number');
+      expect(typeof row.paybackHigh).toBe('number');
+    });
+  });
+});
+
+describe('Do-Nothing Projection (V4)', () => {
+  it('returns year-by-year and cumulative costs', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.doNothingProjection).toBeDefined();
+    expect(r.doNothingProjection.yearByCost).toHaveLength(5);
+    expect(r.doNothingProjection.cumulative5Year).toBeGreaterThan(0);
+  });
+
+  it('vsAiProjectNPV = cumulative + baseNPV', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.doNothingProjection.vsAiProjectNPV).toBeCloseTo(
+      r.doNothingProjection.cumulative5Year + r.scenarios.base.npv, 0
+    );
+  });
+});
+
+describe('Capital Allocation Comparison (V4)', () => {
+  it('compares AI IRR vs buyback, M&A, treasury', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(r.capitalAllocation).toBeDefined();
+    expect(r.capitalAllocation).toHaveProperty('vsStockBuyback');
+    expect(r.capitalAllocation).toHaveProperty('vsMAndA');
+    expect(r.capitalAllocation).toHaveProperty('vsTreasuryBond');
+    expect(r.capitalAllocation).toHaveProperty('recommendation');
+  });
+
+  it('recommendation is one of the expected values', () => {
+    const r = runCalculations(BASE_INPUTS);
+    expect(['Strong AI', 'Marginal', 'Consider alternatives', 'Insufficient data']).toContain(
+      r.capitalAllocation.recommendation
+    );
+  });
+});
+
+describe('Compliance Escalation (V4)', () => {
+  it('year 5 compliance cost > year 1', () => {
+    const r = runCalculations(BASE_INPUTS);
+    // Year 5 ongoing should be higher due to both vendor escalation AND compliance escalation
+    expect(r.aiCostModel.ongoingCostsByYear[4]).toBeGreaterThan(r.aiCostModel.ongoingCostsByYear[0]);
+  });
+});
+
+describe('Backward Compatibility (V4)', () => {
+  it('inputs without new fields still produce valid results', () => {
+    // Use old-style inputs without retainedTalentPremiumRate, isAgenticWorkflow
+    const oldInputs = {
+      industry: 'Technology / Software',
+      companySize: 'Mid-Market (501-5,000)',
+      processType: 'Document Processing',
+      teamSize: 20,
+      avgSalary: 85000,
+      hoursPerWeek: 40,
+      errorRate: 0.15,
+      currentToolCosts: 50000,
+      changeReadiness: 3,
+      dataReadiness: 3,
+      execSponsor: true,
+      expectedTimeline: 6,
+      implementationBudget: 200000,
+      ongoingAnnualCost: 50000,
+      teamLocation: 'US - Major Tech Hub',
+      companyState: 'California',
+    };
+    const r = runCalculations(oldInputs);
+    expect(r.currentState.totalCurrentCost).toBeGreaterThan(0);
+    expect(r.scenarios.base.npv).toBeDefined();
+    expect(isFinite(r.scenarios.base.npv)).toBe(true);
+    // New fields should have sensible defaults
+    expect(r.aiCostModel.isAgenticWorkflow).toBe(false);
+    expect(r.aiCostModel.retainedTalentPremiumRate).toBe(0.10);
+    expect(r.doNothingProjection).toBeDefined();
+    expect(r.capitalAllocation).toBeDefined();
   });
 });

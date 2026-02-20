@@ -5,6 +5,7 @@
  * All calculated cells use real Excel formulas.
  */
 import ExcelJS from 'exceljs';
+import { getOutputTier, EXCEL_TABS } from '../utils/outputTier';
 
 // --- Styles ---
 const NAVY = '1B2A4A';
@@ -130,12 +131,16 @@ const LOCATIONS = [
 ];
 
 // =====================================================================
-export async function generateExcelModel(formData) {
+export async function generateExcelModel(formData, mcResults) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'AI ROI Calculator';
   wb.created = new Date();
 
-  // Create all 6 worksheets in tab order
+  // Determine which tabs to show based on role tier
+  const tier = getOutputTier(formData.role);
+  const includedTabs = EXCEL_TABS[tier] || EXCEL_TABS.detailed;
+
+  // Create all 6 worksheets in tab order (all needed for formula cross-refs)
   const I = wb.addWorksheet('Inputs', { tabColor: { argb: 'FF2196F3' } });
   const KF = wb.addWorksheet('Key Formulas', { tabColor: { argb: 'FF4CAF50' } });
   const SU = wb.addWorksheet('Summary', { tabColor: { argb: `FF${NAVY}` } });
@@ -233,7 +238,7 @@ export async function generateExcelModel(formData) {
     ['Retained Retraining Rate',0.03,PCT],['Tech Debt Rate',0.05,PCT],
     ['Adjacent Product Rate',0.25,PCT],['Revenue Risk Discount',0.50,PCT],
     ['R&D Qualification Rate',0.65,PCT],['Federal R&D Rate',0.065,PCT],
-    ['Max ROIC Cap',1.00,PCT],['Max IRR Cap',0.75,PCT],
+    ['Max ROIC Cap',1.00,PCT],['Max IRR Cap',2.00,PCT],
     ['Change Mgmt Rate',0.15,PCT],['Infra Cost Rate',0.12,PCT],
     ['Training Cost Rate',0.08,PCT],['PM Salary Factor',0.85,DEC],
   ];
@@ -350,6 +355,8 @@ export async function generateExcelModel(formData) {
   val(I, 33, 1, 'Include Capacity in NPV?'); val(I, 33, 2, formData.includeCapacityValue ? 'Yes' : 'No', null, inputFill);
   val(I, 34, 1, 'Include Risk Reduction in NPV?'); val(I, 34, 2, formData.includeRiskReduction ? 'Yes' : 'No', null, inputFill);
   val(I, 35, 1, 'Include Rev Acceleration in NPV?'); val(I, 35, 2, formData.includeRevenueAcceleration ? 'Yes' : 'No', null, inputFill);
+  val(I, 36, 1, 'Retained Talent Premium %'); val(I, 36, 2, formData.retainedTalentPremiumRate ?? 0.10, PCT, inputFill); note(I, 36, 3, 'Wage increase for retained staff');
+  val(I, 37, 1, 'Agentic AI Workflow?'); val(I, 37, 2, formData.isAgenticWorkflow ? 'Yes' : 'No', null, inputFill); note(I, 37, 3, 'Multi-step reasoning = 2.5x API calls');
 
   // Data validation dropdowns
   I.getRow(4).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$3:$A$12'] };
@@ -363,10 +370,11 @@ export async function generateExcelModel(formData) {
   I.getRow(33).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
   I.getRow(34).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
   I.getRow(35).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
+  I.getRow(37).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
 
-  val(I, 37, 1, 'Blue cells are editable inputs. Change any value to recalculate the entire model.', null, inputFill);
-  I.mergeCells(37, 1, 37, 3);
-  I.getRow(37).getCell(1).font = { ...fontBold, color: { argb: `FF${NAVY}` } };
+  val(I, 39, 1, 'Blue cells are editable inputs. Change any value to recalculate the entire model.', null, inputFill);
+  I.mergeCells(39, 1, 39, 3);
+  I.getRow(39).getCell(1).font = { ...fontBold, color: { argb: `FF${NAVY}` } };
   printSetup(I);
 
   // ===================================================================
@@ -468,13 +476,14 @@ export async function generateExcelModel(formData) {
   val(KF, 46, 1, 'Ongoing Labor');
   fml(KF, 46, 2, 'B45*B24', DOL);
   val(KF, 47, 1, 'Annual API Cost');
-  fml(KF, 47, 2, '(Inputs!B11*Inputs!B12*4.33*VLOOKUP(Inputs!B10,Lookups!A56:C63,3,FALSE)/1000)*VLOOKUP(Inputs!B10,Lookups!A56:B63,2,FALSE)*12', DOL);
+  fml(KF, 47, 2, '(Inputs!B11*Inputs!B12*IF(Inputs!B37="Yes",2.5,1)*4.33*VLOOKUP(Inputs!B10,Lookups!A56:C63,3,FALSE)/1000)*VLOOKUP(Inputs!B10,Lookups!A56:B63,2,FALSE)*12', DOL);
+  note(KF, 47, 3, 'Agentic workflows use 2.5x API calls');
   val(KF, 48, 1, 'License + Retraining');
   fml(KF, 48, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:F41,6,FALSE)+B42*Lookups!B88', DOL);
   val(KF, 49, 1, 'Compliance + Insurance');
   fml(KF, 49, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:I41,9,FALSE)+VLOOKUP(Inputs!B5,Lookups!A37:J41,10,FALSE)', DOL);
   val(KF, 50, 1, 'Computed Ongoing');
-  fml(KF, 50, 2, 'B46+B47+B48+B49', DOL);
+  fml(KF, 50, 2, 'B46+B47+B48+B49+B72+B73', DOL);
   val(KF, 51, 1, 'Base Ongoing Cost');
   fmlBold(KF, 51, 2, 'MAX(Inputs!B25,B50)', DOL, calcFill);
 
@@ -514,6 +523,15 @@ export async function generateExcelModel(formData) {
   note(KF, 68, 3, 'Upfront + Separation');
   val(KF, 69, 1, 'Discount Rate');
   fml(KF, 69, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:C41,3,FALSE)', PCT);
+
+  // --- Additional Ongoing Costs (rows 71-73) ---
+  sub(KF, 71, 'Additional Ongoing Costs (included in Computed Ongoing above)', 3);
+  val(KF, 72, 1, 'Retained Talent Premium');
+  fml(KF, 72, 2, 'B21*Inputs!B13*Inputs!B36', DOL);
+  note(KF, 72, 3, 'Retained FTEs × Salary × Premium Rate (Mercer 2025)');
+  val(KF, 73, 1, 'Data Transfer Cost');
+  fml(KF, 73, 2, 'IF(Inputs!B5="Startup (1-50)",2400,IF(Inputs!B5="SMB (51-500)",9600,IF(Inputs!B5="Mid-Market (501-5,000)",36000,IF(Inputs!B5="Enterprise (5,001-50,000)",144000,480000))))', DOL);
+  note(KF, 73, 3, 'Annual cloud egress/ingress (AWS/Azure/GCP 2025)');
   printSetup(KF);
 
   // ===================================================================
@@ -584,6 +602,29 @@ export async function generateExcelModel(formData) {
   fml(SU, 29, 2, "'Key Formulas'!B21", '0');
   val(SU, 30, 1, 'Confidence Level');
   fml(SU, 30, 2, 'IF(AND((Inputs!B18+Inputs!B19)/2>=4,Inputs!B20="Yes"),"High",IF((Inputs!B18+Inputs!B19)/2>=3,"Moderate","Conservative"))');
+
+  // --- Capital Allocation Comparison (rows 32-37) ---
+  sub(SU, 32, 'Capital Allocation Comparison', 4);
+  val(SU, 33, 1, 'AI Project IRR');
+  fml(SU, 33, 2, "'P&L & Cash Flow'!B28", PCT);
+  val(SU, 34, 1, 'vs Stock Buyback (8%)');
+  fml(SU, 34, 2, "'P&L & Cash Flow'!B28-0.08", PCT);
+  note(SU, 34, 3, 'Typical equity return benchmark');
+  val(SU, 35, 1, 'vs M&A Hurdle (15%)');
+  fml(SU, 35, 2, "'P&L & Cash Flow'!B28-0.15", PCT);
+  note(SU, 35, 3, 'Standard M&A return threshold');
+  val(SU, 36, 1, 'vs Treasury Bond (4.5%)');
+  fml(SU, 36, 2, "'P&L & Cash Flow'!B28-0.045", PCT);
+  note(SU, 36, 3, 'Risk-free rate benchmark');
+
+  // --- Cost of Inaction (rows 38-41) ---
+  sub(SU, 38, 'Cost of Inaction (Do-Nothing Scenario)', 4);
+  val(SU, 39, 1, '5-Year Do-Nothing Cost');
+  fml(SU, 39, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+Lookups!B86)^0+(1+Lookups!B86)^1+(1+Lookups!B86)^2+(1+Lookups!B86)^3+(1+Lookups!B86)^4)", DOL);
+  note(SU, 39, 3, 'Competitive penalty + compliance risk over 5 years');
+  val(SU, 40, 1, 'Net Advantage of AI Project');
+  fml(SU, 40, 2, "B39+'P&L & Cash Flow'!B27", DOL);
+  note(SU, 40, 3, 'Do-Nothing cost + AI project NPV');
 
   // Conditional formatting on NPV
   SU.addConditionalFormatting({
@@ -720,7 +761,7 @@ export async function generateExcelModel(formData) {
   sub(SE, 3, 'SCENARIO ANALYSIS', 8);
   tableHeaders(SE, 4, ['', 'Conservative', 'Base Case', 'Optimistic', '', '', '', '']);
   val(SE, 4, 1, 'Scenario Multiplier');
-  val(SE, 4, 2, 0.70, DEC); val(SE, 4, 3, 1.00, DEC); val(SE, 4, 4, 1.20, DEC);
+  val(SE, 4, 2, 0.75, DEC); val(SE, 4, 3, 1.00, DEC); val(SE, 4, 4, 1.25, DEC);
 
   sub(SE, 6, 'Year-by-Year Net Cash Flows', 4);
   val(SE, 7, 1, 'Year 0');
@@ -874,7 +915,90 @@ export async function generateExcelModel(formData) {
   fml(SE, 43, 2, 'B17', '0', warnFill);
   fml(SE, 43, 3, 'C17', '0', calcFill);
   fml(SE, 43, 4, 'D17', '0', resultFill);
+
+  // --- Discount Rate Sensitivity (rows 45-47) ---
+  sub(SE, 45, 'DISCOUNT RATE SENSITIVITY', 8);
+  tableHeaders(SE, 46, ['Variable', 'Base Value', 'Low', 'High', 'NPV Low', 'NPV High', 'Delta (-)', 'Delta (+)']);
+  val(SE, 47, 1, 'Discount Rate');
+  fml(SE, 47, 2, "'Key Formulas'!B69", PCT);
+  val(SE, 47, 3, '-3pp');
+  val(SE, 47, 4, '+5pp');
+  fml(SE, 47, 5, "-'Key Formulas'!B64+NPV('Key Formulas'!B69-0.03,'P&L & Cash Flow'!C21:G21)", DOL, warnFill);
+  fml(SE, 47, 6, "-'Key Formulas'!B64+NPV('Key Formulas'!B69+0.05,'P&L & Cash Flow'!C21:G21)", DOL, resultFill);
+  fml(SE, 47, 7, 'E47-$B$23', DOL, warnFill);
+  fml(SE, 47, 8, 'F47-$B$23', DOL, resultFill);
+
+  // --- Monte Carlo Simulation Summary (rows 49-56) ---
+  if (mcResults) {
+    sub(SE, 49, `MONTE CARLO SIMULATION (N=${mcResults.sampleSize})`, 8);
+    tableHeaders(SE, 50, ['Metric', 'P10', 'P25', 'P50 (Median)', 'P75', 'P90', 'Mean', 'Prob. Positive']);
+
+    // Row 51: NPV
+    val(SE, 51, 1, 'NPV');
+    val(SE, 51, 2, mcResults.npv.p10, DOL, warnFill);
+    val(SE, 51, 3, mcResults.npv.p25, DOL);
+    val(SE, 51, 4, mcResults.npv.p50, DOL, calcFill);
+    val(SE, 51, 5, mcResults.npv.p75, DOL);
+    val(SE, 51, 6, mcResults.npv.p90, DOL, resultFill);
+    val(SE, 51, 7, mcResults.npv.mean, DOL);
+    val(SE, 51, 8, mcResults.probabilityPositiveNPV, PCT, mcResults.probabilityPositiveNPV >= 0.70 ? calcFill : warnFill);
+
+    // Row 52: IRR
+    val(SE, 52, 1, 'IRR');
+    val(SE, 52, 2, mcResults.irr.p10, PCT, warnFill);
+    val(SE, 52, 3, mcResults.irr.p25, PCT);
+    val(SE, 52, 4, mcResults.irr.p50, PCT, calcFill);
+    val(SE, 52, 5, mcResults.irr.p75, PCT);
+    val(SE, 52, 6, mcResults.irr.p90, PCT, resultFill);
+    val(SE, 52, 7, mcResults.irr.mean, PCT);
+
+    // Row 53: ROIC
+    val(SE, 53, 1, 'ROIC');
+    val(SE, 53, 2, mcResults.roic.p10, PCT, warnFill);
+    val(SE, 53, 3, mcResults.roic.p25, PCT);
+    val(SE, 53, 4, mcResults.roic.p50, PCT, calcFill);
+    val(SE, 53, 5, mcResults.roic.p75, PCT);
+    val(SE, 53, 6, mcResults.roic.p90, PCT, resultFill);
+    val(SE, 53, 7, mcResults.roic.mean, PCT);
+
+    // Row 54: Payback (months)
+    val(SE, 54, 1, 'Payback (months)');
+    val(SE, 54, 2, Math.round(mcResults.payback.p10), NUM, resultFill);
+    val(SE, 54, 3, Math.round(mcResults.payback.p25), NUM);
+    val(SE, 54, 4, Math.round(mcResults.payback.p50), NUM, calcFill);
+    val(SE, 54, 5, Math.round(mcResults.payback.p75), NUM);
+    val(SE, 54, 6, Math.round(mcResults.payback.p90), NUM, warnFill);
+    val(SE, 54, 7, Math.round(mcResults.payback.mean), NUM);
+
+    // Row 56: Tail Risk / VaR
+    if (mcResults.tailRisk) {
+      sub(SE, 56, 'TAIL RISK METRICS', 8);
+      val(SE, 57, 1, 'P5 Worst Case (NPV)');
+      val(SE, 57, 2, mcResults.tailRisk.p5Npv, DOL, warnFill);
+      val(SE, 57, 4, 'P(Capital Loss >50%)');
+      val(SE, 57, 5, mcResults.tailRisk.probCapitalLoss50, PCT, warnFill);
+      val(SE, 57, 7, 'P(Payback >60mo)');
+      val(SE, 57, 8, mcResults.tailRisk.probPaybackOver60, PCT, warnFill);
+    }
+
+    // Row 59: Methodology note
+    note(SE, 59, 1, `Monte Carlo: ${mcResults.sampleSize} correlated iterations varying automation potential, change readiness, implementation budget, ongoing costs, cash realization, and error rate.`);
+  }
+
   printSetup(SE);
+
+  // Hide tabs not included in the user's tier
+  const allSheets = [
+    { ws: I,  name: 'Inputs' },
+    { ws: KF, name: 'Key Formulas' },
+    { ws: PL, name: 'P&L & Cash Flow' },
+    { ws: SE, name: 'Sensitivity' },
+  ];
+  for (const { ws, name } of allSheets) {
+    if (!includedTabs.includes(name)) {
+      ws.state = 'hidden';
+    }
+  }
 
   // ===================================================================
   // DOWNLOAD

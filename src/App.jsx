@@ -40,6 +40,9 @@ const DEFAULT_FORM_DATA = {
   includeCapacityValue: false,
   includeRiskReduction: false,
   includeRevenueAcceleration: false,
+  // V4: Reviewer feedback additions
+  retainedTalentPremiumRate: null,  // defaults to 0.10 in calculations
+  isAgenticWorkflow: false,
 };
 
 const ANALYSIS_STEPS = [
@@ -55,7 +58,7 @@ function AnalyzingScreen({ onComplete }) {
   const [activeStep, setActiveStep] = useState(0);
 
   useEffect(() => {
-    const stepDuration = 500; // ms per step
+    const stepDuration = 300; // ms per step (faster per reviewer feedback)
     const timer = setInterval(() => {
       setActiveStep((prev) => {
         if (prev >= ANALYSIS_STEPS.length - 1) {
@@ -246,16 +249,16 @@ export default function App() {
   const handleWizardComplete = useCallback(() => setScreen('analyzing'), []);
   const handleAnalysisComplete = useCallback(() => setScreen('results'), []);
   const handleDownload = useCallback(
-    async (results, recommendation) => {
+    async (results, recommendation, mcResults) => {
       const { default: generateReport } = await import('./pdf/generateReport');
-      generateReport(formData, results, recommendation);
+      generateReport(formData, results, recommendation, mcResults);
     },
     [formData]
   );
 
-  const handleDownloadExcel = useCallback(async () => {
+  const handleDownloadExcel = useCallback(async (mcResults) => {
     const { generateExcelModel } = await import('./excel/generateExcelModel');
-    generateExcelModel(formData);
+    generateExcelModel(formData, mcResults);
   }, [formData]);
 
   const handleEditInputs = useCallback(() => setScreen('wizard'), []);

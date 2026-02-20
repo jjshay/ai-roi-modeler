@@ -1,15 +1,18 @@
 import { formatCompact } from '../utils/formatters';
 
-export function getRecommendation(results) {
+export function getRecommendation(results, tier = 'detailed') {
   const conservativeNPV = results.scenarios.conservative.npv;
   const baseNPV = results.scenarios.base.npv;
   const oppCost = results.opportunityCost;
+
+  // Build the base recommendation object, then adapt language to tier
+  let rec;
 
   if (conservativeNPV > 0) {
     const oppCostNote = oppCost
       ? ` Delaying 12 months would cost an estimated ${formatCompact(oppCost.costOfWaiting12Months)} in forgone savings, wage inflation, and competitive erosion.`
       : '';
-    return {
+    rec = {
       verdict: 'STRONG',
       headline: 'Strong case to proceed',
       summary:
@@ -24,10 +27,8 @@ export function getRecommendation(results) {
         'Establish measurement framework before implementation begins',
       ],
     };
-  }
-
-  if (baseNPV > 0) {
-    return {
+  } else if (baseNPV > 0) {
+    rec = {
       verdict: 'MODERATE',
       headline: 'Favorable case with manageable risk',
       summary:
@@ -40,10 +41,8 @@ export function getRecommendation(results) {
         'Plan for scale only after pilot validates assumptions',
       ],
     };
-  }
-
-  if (results.scenarios.optimistic.npv > 0) {
-    return {
+  } else if (results.scenarios.optimistic.npv > 0) {
+    rec = {
       verdict: 'CAUTIOUS',
       headline: 'Proceed with caution',
       summary:
@@ -56,19 +55,100 @@ export function getRecommendation(results) {
         'Revisit the full business case after 90 days of pilot data',
       ],
     };
+  } else {
+    rec = {
+      verdict: 'WEAK',
+      headline: 'Current economics do not support this investment',
+      summary:
+        'At this scale and readiness level, the investment is unlikely to generate positive returns. Consider foundational improvements first.',
+      steps: [
+        'Consider alternative approaches to process improvement',
+        'Invest in data readiness and infrastructure first',
+        'Build executive buy-in with education about AI capabilities',
+        'Address change management fundamentals before technology investment',
+        'Revisit in 6-12 months after foundational improvements',
+      ],
+    };
   }
 
+  // Adapt to tier
+  if (tier === 'executive') {
+    rec = adaptForExecutive(rec, results);
+  } else if (tier === 'detailed') {
+    rec = adaptForDetailed(rec, results);
+  }
+  // 'financial' tier uses the default language as-is
+
+  return rec;
+}
+
+function adaptForExecutive(rec, results) {
+  const baseScenario = results.scenarios.base;
+  const totalInvestment = (results.totalInvestment || 0) + (results.aiCostModel?.totalOngoing5Year || 0);
+
+  const execSummaries = {
+    STRONG: `Conservative projections show positive returns. Recommend authorizing a 90-day pilot with ${formatCompact(totalInvestment)} total 5-year commitment.`,
+    MODERATE: `Base case is positive (${formatCompact(baseScenario.npv)} NPV). Recommend a phased pilot to validate before full commitment.`,
+    CAUTIOUS: `Returns are scenario-dependent. Recommend a limited proof-of-concept before further investment.`,
+    WEAK: `Current economics do not support this investment at this scale. Recommend foundational improvements first.`,
+  };
+
+  const execSteps = {
+    STRONG: [
+      'Authorize 90-day pilot with defined success criteria',
+      'Assign executive sponsor and governance structure',
+    ],
+    MODERATE: [
+      'Approve limited pilot with constrained budget',
+      'Re-evaluate after 90 days with actual performance data',
+    ],
+    CAUTIOUS: [
+      'Defer full commitment; approve small proof-of-concept only',
+      'Invest in data readiness and process standardization first',
+    ],
+    WEAK: [
+      'Redirect budget to foundational data and process improvements',
+      'Revisit AI investment in 6-12 months',
+    ],
+  };
+
   return {
-    verdict: 'WEAK',
-    headline: 'Current economics do not support this investment',
-    summary:
-      'At this scale and readiness level, the investment is unlikely to generate positive returns. Consider foundational improvements first.',
+    ...rec,
+    summary: execSummaries[rec.verdict] || rec.summary,
+    steps: execSteps[rec.verdict] || rec.steps.slice(0, 2),
+  };
+}
+
+function adaptForDetailed(rec, results) {
+  const baseScenario = results.scenarios.base;
+  const totalInvestment = (results.totalInvestment || 0) + (results.aiCostModel?.totalOngoing5Year || 0);
+  const netReturn = (baseScenario.projections || []).reduce((s, yr) => s + yr.grossSavings, 0) - totalInvestment;
+
+  // Add specific dollar thresholds and metric targets to steps
+  const detailedExtras = {
+    STRONG: [
+      `Target: ${formatCompact(netReturn)} net return over 5 years at base case`,
+      `Break-even by month ${baseScenario.paybackMonths || 'N/A'}; NPV ${formatCompact(baseScenario.npv)}`,
+    ],
+    MODERATE: [
+      `Base NPV: ${formatCompact(baseScenario.npv)}; pilot budget should not exceed ${formatCompact(totalInvestment * 0.15)}`,
+      `Target adoption rate: ${Math.round((results.riskAdjustments?.adoptionRate || 0.7) * 100)}% to achieve positive returns`,
+    ],
+    CAUTIOUS: [
+      `Pilot budget cap: ${formatCompact(Math.min(50000, totalInvestment * 0.1))}; measure automation accuracy and adoption`,
+      `Break-even requires optimistic scenario: validate key assumptions with real data`,
+    ],
+    WEAK: [
+      `Current gap: ${formatCompact(Math.abs(baseScenario.npv))} negative NPV at base case`,
+      `Minimum viable team size for positive ROI: ~${Math.max(Math.ceil((results.formData?.teamSize || 10) * 1.5), 20)} people`,
+    ],
+  };
+
+  return {
+    ...rec,
     steps: [
-      'Consider alternative approaches to process improvement',
-      'Invest in data readiness and infrastructure first',
-      'Build executive buy-in with education about AI capabilities',
-      'Address change management fundamentals before technology investment',
-      'Revisit in 6-12 months after foundational improvements',
+      ...rec.steps,
+      ...(detailedExtras[rec.verdict] || []),
     ],
   };
 }

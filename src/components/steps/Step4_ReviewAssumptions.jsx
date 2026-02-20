@@ -116,6 +116,38 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
           />
         </div>
 
+        {/* Retained Talent Premium */}
+        <div>
+          <SliderInput
+            label="Talent Retention Premium"
+            value={Math.round((formData.retainedTalentPremiumRate ?? 0.10) * 100)}
+            onChange={(v) => updateField('retainedTalentPremiumRate', v / 100)}
+            min={0}
+            max={20}
+            step={1}
+            suffix="%"
+            helperText="Wage increase to retain top performers during AI transition. Default: 10%"
+          />
+        </div>
+
+        {/* Agentic AI Workflow Toggle */}
+        <div className="flex items-center gap-3 rounded-xl border border-navy/10 bg-navy/5 px-4 py-3">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.isAgenticWorkflow || false}
+              onChange={(e) => updateField('isAgenticWorkflow', e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
+            />
+            <div>
+              <span className="text-sm font-medium text-navy">Agentic AI Workflow?</span>
+              <p className="text-xs text-gray-500">
+                Multi-step reasoning chains use 2-5x more API calls per task
+              </p>
+            </div>
+          </label>
+        </div>
+
         {/* Revenue Eligible toggle — only for customer-facing / revenue archetypes */}
         {showRevenue && (
           <div className="flex items-center gap-3 rounded-xl border border-navy/10 bg-navy/5 px-4 py-3">

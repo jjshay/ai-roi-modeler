@@ -47,7 +47,7 @@ export default function StarRating({
               onMouseEnter={() => setHoveredIndex(star - 1)}
               onMouseLeave={() => setHoveredIndex(null)}
               className={`
-                rounded-md p-1 text-3xl transition-all duration-150
+                min-h-[44px] rounded-md p-1 text-3xl transition-all duration-150
                 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
                 sm:text-4xl
                 ${isFilled ? 'text-gold drop-shadow-sm' : 'text-gray-300 hover:text-gold/50'}
@@ -57,7 +57,7 @@ export default function StarRating({
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
                 fill="currentColor"
-                className="h-8 w-8 sm:h-10 sm:w-10"
+                className="h-9 w-9 sm:h-10 sm:w-10"
                 aria-hidden="true"
               >
                 <path

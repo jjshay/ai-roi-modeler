@@ -73,25 +73,36 @@ export default function SliderInput({
           .slider-gold::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
-            width: 24px;
-            height: 24px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             background: #c9a227;
             border: 3px solid #ffffff;
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-            margin-top: -8px;
+            margin-top: -12px;
             cursor: pointer;
             transition: transform 0.15s ease;
           }
           .slider-gold::-moz-range-thumb {
-            width: 24px;
-            height: 24px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             background: #c9a227;
             border: 3px solid #ffffff;
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
             cursor: pointer;
             transition: transform 0.15s ease;
+          }
+          @media (min-width: 640px) {
+            .slider-gold::-webkit-slider-thumb {
+              width: 24px;
+              height: 24px;
+              margin-top: -8px;
+            }
+            .slider-gold::-moz-range-thumb {
+              width: 24px;
+              height: 24px;
+            }
           }
           .slider-gold::-webkit-slider-thumb:hover {
             transform: scale(1.15);

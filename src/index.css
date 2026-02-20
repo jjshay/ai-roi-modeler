@@ -42,3 +42,9 @@
     -moz-appearance: textfield;
   }
 }
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+}
