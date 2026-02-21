@@ -68,6 +68,7 @@ import {
   ALTERNATIVE_HURDLE_RATES,
   AI_ADOPTION_RATE_BY_INDUSTRY,
   MARGIN_COMPRESSION_BY_INDUSTRY,
+  SALARY_RANGES_BY_INDUSTRY,
 } from './benchmarks';
 
 export function runCalculations(inputs) {
@@ -154,8 +155,15 @@ export function runCalculations(inputs) {
 
   // =====================================================================
   // DISPLACED / RETAINED FTEs (needed for ongoing cost model)
+  // Reviewer fix P1: If team spends <50% time on process, headcount reduction
+  // is unrealistic (employees have other responsibilities). Switch to
+  // capacity reallocation mode where savings come from efficiency only.
   // =====================================================================
-  const rawDisplacedFTEs = Math.round(teamSize * automationPotential * adoptionRate);
+  const processAllocation = hoursPerWeek / 40; // fraction of time on this process
+  const headcountFeasible = processAllocation >= 0.50;
+  const rawDisplacedFTEs = headcountFeasible
+    ? Math.round(teamSize * automationPotential * adoptionRate)
+    : 0; // no headcount reduction when <50% allocation
   const maxDisplaced = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
   const displacedFTEs = Math.min(rawDisplacedFTEs, maxDisplaced);
   const retainedFTEs = teamSize - displacedFTEs;
@@ -239,11 +247,16 @@ export function runCalculations(inputs) {
   const dataTransferCostAnnual = dataTransferCostMonthly * 12;
 
   // Base year-1 ongoing cost (core AI ops + maintenance/compliance/insurance)
+  // Retained Talent Premium is a workforce planning cost, NOT an AI operating cost —
+  // separated out so it doesn't inflate ongoing AI costs (reviewer fix P0)
   const coreOngoingCost = ongoingAiLaborCost + annualApiCost + annualLicenseCost + annualAdjacentCost;
   const computedOngoingCost = coreOngoingCost + modelRetrainingCost + annualComplianceCostVal
     + retainedRetrainingCost + techDebtCost + cyberInsuranceCost
-    + retainedTalentPremium + dataTransferCostAnnual;
-  const baseOngoingCost = Math.max(ongoingAnnualCost, computedOngoingCost);
+    + dataTransferCostAnnual;
+  // Use computed ongoing if user didn't provide a value; never silently override user input
+  const userProvidedOngoing = inputs.ongoingAnnualCost != null;
+  const baseOngoingCost = userProvidedOngoing ? ongoingAnnualCost : computedOngoingCost;
+  const ongoingCostOverridden = !userProvidedOngoing && computedOngoingCost > ongoingAnnualCost;
 
   // 5-year ongoing costs with tapered vendor escalation + compliance escalation
   // Years 1-2: 12% increase, Years 3-4: 7% (stabilized)
@@ -285,9 +298,12 @@ export function runCalculations(inputs) {
     cyberInsuranceCost,
     retainedTalentPremium,
     retainedTalentPremiumRate,
+    retainedTalentPremiumNote: 'Workforce planning cost — not included in AI ongoing costs',
     dataTransferCostAnnual,
     isAgenticWorkflow,
     computedOngoingCost,
+    userProvidedOngoing,
+    ongoingCostOverridden,
     baseOngoingCost,
     ongoingCostsByYear,
     totalOngoing5Year,
@@ -344,6 +360,8 @@ export function runCalculations(inputs) {
     displacedFTEs,
     retainedFTEs,
     maxHeadcountReduction: MAX_HEADCOUNT_REDUCTION,
+    processAllocation,
+    headcountFeasible,
     separationMultiplier,
     separationCostPerFTE,
     totalSeparationCost,
@@ -403,22 +421,28 @@ export function runCalculations(inputs) {
   const errorReductionGross = annualReworkCost * automationPotential;
   const toolReplacementGross = currentToolCosts * toolReplacementRate;
 
+  // Enhancement savings = what you get Year 1 (no headcount reduction yet)
+  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross;
+  const enhancementRiskAdjusted = enhancementGross * riskMultiplier;
+
   // =====================================================================
   // ANNUAL SAVINGS (gross metrics for reference)
   // Uses decomposed value breakdown to avoid applying automation % to tool costs
   // =====================================================================
   const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross;
-  const riskAdjustedSavings = grossAnnualSavings * riskMultiplier;
+  // Risk multiplier applies only to enhancement savings, not headcount (reviewer fix P1)
+  const riskAdjustedSavings = headcountSavingsGross + enhancementRiskAdjusted;
   const netAnnualSavings = riskAdjustedSavings - baseOngoingCost;
 
-  // Enhancement savings = what you get Year 1 (no headcount reduction yet)
-  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross;
-  const enhancementRiskAdjusted = enhancementGross * riskMultiplier;
-
+  // De-duplicated risk architecture (reviewer fix P1):
+  // - Enhancement savings (efficiency + error + tool): apply riskMultiplier + adoption ramp
+  // - Headcount savings: apply ONLY the HR phasing schedule (it already gates realization)
+  //   Risk multiplier is NOT applied to headcount because the phasing schedule IS the
+  //   operational reality of adoption friction for headcount changes.
   const valueBreakdown = {
     headcount: {
       gross: headcountSavingsGross,
-      riskAdjusted: headcountSavingsGross * riskMultiplier,
+      riskAdjusted: headcountSavingsGross, // no risk multiplier — gated by HR schedule
     },
     efficiency: {
       gross: efficiencySavingsGross,
@@ -433,7 +457,7 @@ export function runCalculations(inputs) {
       riskAdjusted: toolReplacementGross * riskMultiplier,
     },
     totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross,
-    totalRiskAdjusted: (headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross) * riskMultiplier,
+    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross) * riskMultiplier,
     // Per-employee productivity gain in Year 1 (enhancement phase, before any layoffs)
     perEmployeeGain: teamSize > 0
       ? enhancementRiskAdjusted / teamSize
@@ -1429,10 +1453,36 @@ export function runCalculations(inputs) {
       npvHigh: row.npvHigh,
     }));
 
+  // Gross ROI = benefits vs capital only (excluding opex) — the "CFO marketing number"
+  const grossROI = totalInvestment > 0
+    ? (total5YearGrossSavings - totalInvestment) / totalInvestment
+    : 0;
+  // Net ROI = full cash flows including opex (the real picture)
+  const netROI = totalInvestment > 0
+    ? total5YearNetSavings / totalInvestment
+    : 0;
+
+  // Savings bridge — waterfall from gross to net (reviewer fix P1)
+  const total5YearOngoing = baseProj.reduce((sum, yr) => sum + yr.ongoingCost, 0);
+  const total5YearSeparation = baseProj.reduce((sum, yr) => sum + yr.separationCost, 0);
+  const savingsBridge = {
+    grossSavings: total5YearGrossSavings,
+    lessOngoingCosts: -total5YearOngoing,
+    lessSeparationCosts: -total5YearSeparation,
+    netCashFlow: total5YearNetSavings,
+    lessUpfrontInvestment: -upfrontInvestment,
+    netReturn: total5YearNetSavings - upfrontInvestment,
+    grossROI,
+    netROI,
+  };
+
   const executiveSummary = {
     simpleROI,
+    grossROI,
+    netROI,
     total5YearGrossSavings,
     total5YearNetSavings,
+    savingsBridge,
     topLevers,
     keyAssumptions: {
       automationPotential,
@@ -1440,6 +1490,8 @@ export function runCalculations(inputs) {
       riskMultiplier,
       discountRate,
       timelineMonths: adjustedTimeline,
+      headcountFeasible,
+      processAllocation,
     },
   };
 
@@ -1463,6 +1515,117 @@ export function runCalculations(inputs) {
       breakEvenAdoptionRate = Math.round(beRate * 100) / 100;
     }
     // null if break-even requires > 99% adoption (infeasible)
+  }
+
+  // =====================================================================
+  // PATH TO POSITIVE — prescriptive break-even levers (reviewer fix P2)
+  // For each lever, binary-search for the value that makes NPV ≥ 0
+  // =====================================================================
+  const baseNPVForPath = scenarioResults.base.npv;
+  const pathToPositive = { currentNPV: baseNPVForPath, levers: [] };
+
+  if (baseNPVForPath < 0) {
+    // Lever A: Reduce ongoing costs — find break-even ongoing cost
+    {
+      let lo = 0, hi = baseOngoingCost;
+      for (let i = 0; i < 25; i++) {
+        const mid = (lo + hi) / 2;
+        const modOngoing = ongoingCostsByYear.map((c, yr) => mid * (c / baseOngoingCost));
+        const npv = sensitivityNPV(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, modOngoing, upfrontInvestment);
+        if (npv >= 0) lo = mid; else hi = mid;
+      }
+      const targetOngoing = Math.round(hi);
+      const reduction = baseOngoingCost - targetOngoing;
+      if (reduction > 0 && targetOngoing > 0) {
+        pathToPositive.levers.push({
+          lever: 'Reduce ongoing AI costs',
+          target: `$${targetOngoing.toLocaleString()}/yr`,
+          change: `-$${Math.round(reduction).toLocaleString()}/yr (${Math.round(reduction / baseOngoingCost * 100)}% reduction)`,
+        });
+      }
+    }
+
+    // Lever B: Increase automation potential — find break-even automation %
+    {
+      let lo = automationPotential, hi = 1.0;
+      for (let i = 0; i < 25; i++) {
+        const mid = (lo + hi) / 2;
+        const modVal = valueFromCurrentCost(totalCurrentCost, mid, teamSize);
+        const npv = sensitivityNPV(modVal.enhancementRA, modVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+        if (npv >= 0) hi = mid; else lo = mid;
+      }
+      if (hi <= 0.95 && hi > automationPotential) {
+        pathToPositive.levers.push({
+          lever: 'Increase automation potential',
+          target: `${Math.round(hi * 100)}%`,
+          change: `+${Math.round((hi - automationPotential) * 100)}pp (from ${Math.round(automationPotential * 100)}%)`,
+        });
+      }
+    }
+
+    // Lever C: Increase team scope
+    {
+      let lo = teamSize, hi = teamSize * 3;
+      for (let i = 0; i < 25; i++) {
+        const mid = Math.round((lo + hi) / 2);
+        const modCost = mid * avgSalary + mid * avgSalary * errorRate + currentToolCosts;
+        const modVal = valueFromCurrentCost(modCost, undefined, mid);
+        const npv = sensitivityNPV(modVal.enhancementRA, modVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+        if (npv >= 0) hi = mid; else lo = mid;
+      }
+      const targetTeam = Math.ceil(hi);
+      if (targetTeam > teamSize && targetTeam <= teamSize * 2.5) {
+        pathToPositive.levers.push({
+          lever: 'Expand scope (team size)',
+          target: `${targetTeam} FTEs`,
+          change: `+${targetTeam - teamSize} FTEs (from ${teamSize})`,
+        });
+      }
+    }
+
+    // Lever D: Include capacity value in NPV
+    if (!capacityCreationPathway.includeInNPV && capacityCreationPathway.totalAnnualValue > 0) {
+      const capacityAnnual = capacityCreationPathway.totalAnnualValue;
+      let capacityNPVBoost = 0;
+      for (let yr = 0; yr < DCF_YEARS; yr++) {
+        capacityNPVBoost += (capacityAnnual * ADOPTION_RAMP[yr]) / Math.pow(1 + discountRate, yr + 1);
+      }
+      if (baseNPVForPath + capacityNPVBoost >= 0) {
+        pathToPositive.levers.push({
+          lever: 'Monetize freed capacity',
+          target: `$${Math.round(capacityAnnual).toLocaleString()}/yr`,
+          change: `+$${Math.round(capacityNPVBoost).toLocaleString()} NPV (capacity value currently excluded)`,
+        });
+      }
+    }
+  }
+
+  // =====================================================================
+  // INPUT VALIDATION WARNINGS (reviewer fix P2)
+  // =====================================================================
+  const inputWarnings = [];
+  const salaryRange = SALARY_RANGES_BY_INDUSTRY[industry] || SALARY_RANGES_BY_INDUSTRY['Other'];
+  if (avgSalary < salaryRange.low) {
+    inputWarnings.push({
+      field: 'avgSalary',
+      severity: 'warning',
+      message: `Salary ($${avgSalary.toLocaleString()}) is below typical range for ${industry} ($${salaryRange.low.toLocaleString()}–$${salaryRange.high.toLocaleString()}). This may understate savings potential.`,
+      suggestedValue: salaryRange.typical,
+    });
+  }
+  if (!headcountFeasible) {
+    inputWarnings.push({
+      field: 'hoursPerWeek',
+      severity: 'info',
+      message: `Team spends ${Math.round(processAllocation * 100)}% of time on this process. Headcount reduction is unlikely — model uses capacity reallocation instead.`,
+    });
+  }
+  if (!userProvidedOngoing && computedOngoingCost > ongoingAnnualCost) {
+    inputWarnings.push({
+      field: 'ongoingAnnualCost',
+      severity: 'info',
+      message: `Model-estimated ongoing cost ($${Math.round(computedOngoingCost).toLocaleString()}) differs from default ($${Math.round(ongoingAnnualCost).toLocaleString()}). Using model estimate.`,
+    });
   }
 
   // =====================================================================
@@ -1529,5 +1692,9 @@ export function runCalculations(inputs) {
     wageInflationRate,
     // V4.1: Break-even adoption rate
     breakEvenAdoptionRate,
+    // V4.2: Reviewer fixes — validation, bridge, path to positive
+    inputWarnings,
+    savingsBridge,
+    pathToPositive,
   };
 }

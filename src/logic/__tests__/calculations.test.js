@@ -553,8 +553,8 @@ describe('AI Cost Model', () => {
 
   it('uses tapered escalation schedule', () => {
     const r = runCalculations(BASE_INPUTS);
-    expect(r.aiCostModel.escalationSchedule).toEqual([0, 0.12, 0.12, 0.07, 0.07]);
-    // Year 3-4 escalation should be lower than Year 1-2
+    expect(r.aiCostModel.escalationSchedule).toEqual([0, 0.08, 0.04, 0, -0.03]);
+    // Year 3-5 escalation should taper down as system matures
     const yr2Escalation = r.aiCostModel.ongoingCostsByYear[2] / r.aiCostModel.ongoingCostsByYear[1];
     const yr4Escalation = r.aiCostModel.ongoingCostsByYear[4] / r.aiCostModel.ongoingCostsByYear[3];
     expect(yr4Escalation).toBeLessThan(yr2Escalation);
@@ -668,7 +668,7 @@ describe('Vendor Lock-In', () => {
     const r = runCalculations(BASE_INPUTS);
     expect(['Low', 'Medium', 'High']).toContain(r.vendorLockIn.level);
     expect(r.vendorLockIn.switchingCost).toBeGreaterThan(0);
-    expect(r.vendorLockIn.escalationSchedule).toEqual([0, 0.12, 0.12, 0.07, 0.07]);
+    expect(r.vendorLockIn.escalationSchedule).toEqual([0, 0.08, 0.04, 0, -0.03]);
     expect(r.vendorLockIn.year5OngoingCost).toBeGreaterThan(0);
     expect(r.vendorLockIn.totalOngoing5Year).toBeGreaterThan(0);
   });

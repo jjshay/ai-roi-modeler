@@ -343,13 +343,17 @@ export const CULTURAL_RESISTANCE_RATE = 0.12; // 12% of implementation cost
 // AI vendors trend higher due to compute cost pass-through and feature gating
 export const AI_COST_ESCALATION_RATE = 0.12; // deprecated — use AI_COST_ESCALATION_SCHEDULE
 
-// AI vendor cost escalation schedule — higher early, stabilizing later
-// Years 1-2: 12% (aggressive lock-in pricing), Years 3-5: 7% (stabilized)
-export const AI_COST_ESCALATION_SCHEDULE = [0, 0.12, 0.12, 0.07, 0.07];
+// AI vendor cost escalation schedule — high ramp-up, tapering as system matures
+// Year 1: 0% (baseline), Year 2: 8% (scaling up), Year 3: 4% (stabilizing),
+// Year 4: 0% (mature), Year 5: -3% (efficiency gains from optimized inference)
+// Source: Gartner 2025 — AI operating costs typically decrease after Year 2 as
+// models are optimized and inference pricing falls ~40% annually
+export const AI_COST_ESCALATION_SCHEDULE = [0, 0.08, 0.04, 0, -0.03];
 
 // Annual model retraining / drift monitoring as % of implementation cost
 // LLMs and ML models degrade over time; retraining needed annually
-export const MODEL_RETRAINING_RATE = 0.07; // 7% of implementation cost annually
+// Reduced from 7% to 5% — combined with TECH_DEBT_RATE (3%) = 8% total (reviewer fix P1)
+export const MODEL_RETRAINING_RATE = 0.05; // 5% of implementation cost annually
 
 // Annual compliance & audit recertification cost by company size
 // One-time audit is modeled separately; this is the annual refresh
@@ -366,7 +370,8 @@ export const ANNUAL_COMPLIANCE_COST = {
 export const RETAINED_RETRAINING_RATE = 0.03; // 3% of retained employees' total salary
 
 // Technical debt / integration maintenance as % of implementation cost annually
-export const TECH_DEBT_RATE = 0.05; // 5% of implementation cost annually
+// Reduced from 5% to 3% — combined with MODEL_RETRAINING_RATE (5%) = 8% total (reviewer fix P1)
+export const TECH_DEBT_RATE = 0.03; // 3% of implementation cost annually
 
 // Cyber insurance premium increase for AI adoption
 export const CYBER_INSURANCE_INCREASE = {
@@ -790,6 +795,23 @@ export const DATA_TRANSFER_COST_MONTHLY = {
   'Mid-Market (501-5,000)': 3000,
   'Enterprise (5,001-50,000)': 12000,
   'Large Enterprise (50,000+)': 40000,
+};
+
+// ---------------------------------------------------------------------------
+// Salary Validation Ranges by Industry — typical fully-loaded cost ranges
+// Source: BLS OES 2025, Glassdoor 2025 — used for input validation warnings
+// ---------------------------------------------------------------------------
+export const SALARY_RANGES_BY_INDUSTRY = {
+  'Technology / Software': { low: 110000, high: 200000, typical: 150000 },
+  'Financial Services / Banking': { low: 120000, high: 200000, typical: 160000 },
+  'Healthcare / Life Sciences': { low: 90000, high: 180000, typical: 130000 },
+  'Manufacturing / Industrial': { low: 70000, high: 140000, typical: 100000 },
+  'Retail / E-Commerce': { low: 60000, high: 130000, typical: 90000 },
+  'Professional Services / Consulting': { low: 100000, high: 190000, typical: 140000 },
+  'Media / Entertainment': { low: 80000, high: 160000, typical: 110000 },
+  'Energy / Utilities': { low: 90000, high: 170000, typical: 125000 },
+  'Government / Public Sector': { low: 70000, high: 140000, typical: 100000 },
+  'Other': { low: 70000, high: 160000, typical: 110000 },
 };
 
 // ---------------------------------------------------------------------------
