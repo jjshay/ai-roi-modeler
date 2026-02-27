@@ -88,6 +88,30 @@ export const PROJECT_ARCHETYPES = [
     tags: ['Internal', 'Data'],
     sourceProcessTypes: ['Research & Intelligence', 'Document Processing', 'Content Creation'],
   },
+  {
+    id: 'finance-accounting-ai',
+    label: 'Finance & Accounting AI',
+    icon: '\ud83d\udcb0',
+    description: 'Automate AP/AR, reconciliation, financial close, expense management, and audit prep',
+    tags: ['Internal', 'Operations', 'Data'],
+    sourceProcessTypes: ['Document Processing', 'Data Analysis & Reporting'],
+  },
+  {
+    id: 'legal-contract-ai',
+    label: 'Legal & Contract AI',
+    icon: '\u2696\ufe0f',
+    description: 'Accelerate contract review, legal research, clause extraction, and compliance documentation',
+    tags: ['Internal', 'Operations'],
+    sourceProcessTypes: ['Document Processing', 'Quality & Compliance', 'Research & Intelligence'],
+  },
+  {
+    id: 'it-operations-aiops',
+    label: 'IT Operations & AIOps',
+    icon: '\ud83d\udd27',
+    description: 'Optimize monitoring, incident response, infrastructure management, and IT service delivery',
+    tags: ['Internal', 'Operations', 'Engineering'],
+    sourceProcessTypes: ['Workflow Automation', 'Data Analysis & Reporting'],
+  },
 ];
 
 // Lookup map for quick access
