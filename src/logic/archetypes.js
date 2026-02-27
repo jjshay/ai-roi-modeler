@@ -56,6 +56,38 @@ export const PROJECT_ARCHETYPES = [
     tags: ['Internal', 'Operations', 'Data'],
     sourceProcessTypes: ['Quality & Compliance', 'Document Processing'],
   },
+  {
+    id: 'software-engineering-ai',
+    label: 'Software & Engineering AI',
+    icon: '\ud83d\udcbb',
+    description: 'Accelerate development with AI-assisted coding, testing, code review, and DevOps',
+    tags: ['Internal', 'Engineering'],
+    sourceProcessTypes: ['Software Development', 'Quality & Compliance'],
+  },
+  {
+    id: 'hr-talent-ai',
+    label: 'HR & Talent AI',
+    icon: '\ud83d\udc65',
+    description: 'Transform recruiting, onboarding, performance management, and workforce planning',
+    tags: ['Internal', 'Operations'],
+    sourceProcessTypes: ['HR & Talent Management', 'Document Processing'],
+  },
+  {
+    id: 'supply-chain-ai',
+    label: 'Supply Chain & Logistics AI',
+    icon: '\ud83d\udce6',
+    description: 'Optimize demand forecasting, inventory management, routing, and supplier operations',
+    tags: ['Operations', 'Data'],
+    sourceProcessTypes: ['Supply Chain & Logistics', 'Data Analysis & Reporting'],
+  },
+  {
+    id: 'knowledge-management-ai',
+    label: 'Knowledge Management AI',
+    icon: '\ud83e\udde0',
+    description: 'Capture institutional knowledge, power enterprise search, and automate documentation',
+    tags: ['Internal', 'Data'],
+    sourceProcessTypes: ['Research & Intelligence', 'Document Processing', 'Content Creation'],
+  },
 ];
 
 // Lookup map for quick access

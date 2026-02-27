@@ -9,6 +9,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.65,
     'Content Creation': 0.40,
     'Quality & Compliance': 0.50,
+    'Software Development': 0.55,
+    'HR & Talent Management': 0.45,
+    'Supply Chain & Logistics': 0.40,
     'Other': 0.40,
   },
   'Financial Services / Banking': {
@@ -19,6 +22,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.55,
     'Content Creation': 0.35,
     'Quality & Compliance': 0.60,
+    'Software Development': 0.45,
+    'HR & Talent Management': 0.40,
+    'Supply Chain & Logistics': 0.30,
     'Other': 0.35,
   },
   'Healthcare / Life Sciences': {
@@ -29,6 +35,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.40,
     'Content Creation': 0.25,
     'Quality & Compliance': 0.50,
+    'Software Development': 0.40,
+    'HR & Talent Management': 0.35,
+    'Supply Chain & Logistics': 0.45,
     'Other': 0.30,
   },
   'Manufacturing / Industrial': {
@@ -39,6 +48,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.60,
     'Content Creation': 0.30,
     'Quality & Compliance': 0.55,
+    'Software Development': 0.40,
+    'HR & Talent Management': 0.35,
+    'Supply Chain & Logistics': 0.55,
     'Other': 0.35,
   },
   'Retail / E-Commerce': {
@@ -49,6 +61,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.60,
     'Content Creation': 0.45,
     'Quality & Compliance': 0.45,
+    'Software Development': 0.45,
+    'HR & Talent Management': 0.40,
+    'Supply Chain & Logistics': 0.60,
     'Other': 0.40,
   },
   'Professional Services / Consulting': {
@@ -59,6 +74,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.45,
     'Content Creation': 0.40,
     'Quality & Compliance': 0.40,
+    'Software Development': 0.50,
+    'HR & Talent Management': 0.40,
+    'Supply Chain & Logistics': 0.30,
     'Other': 0.35,
   },
   'Media / Entertainment': {
@@ -69,6 +87,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.45,
     'Content Creation': 0.50,
     'Quality & Compliance': 0.35,
+    'Software Development': 0.45,
+    'HR & Talent Management': 0.35,
+    'Supply Chain & Logistics': 0.30,
     'Other': 0.35,
   },
   'Energy / Utilities': {
@@ -79,6 +100,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.50,
     'Content Creation': 0.25,
     'Quality & Compliance': 0.55,
+    'Software Development': 0.35,
+    'HR & Talent Management': 0.30,
+    'Supply Chain & Logistics': 0.50,
     'Other': 0.30,
   },
   'Government / Public Sector': {
@@ -89,6 +113,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.35,
     'Content Creation': 0.20,
     'Quality & Compliance': 0.45,
+    'Software Development': 0.30,
+    'HR & Talent Management': 0.30,
+    'Supply Chain & Logistics': 0.35,
     'Other': 0.25,
   },
   'Other': {
@@ -99,6 +126,9 @@ export const AUTOMATION_POTENTIAL = {
     'Workflow Automation': 0.45,
     'Content Creation': 0.30,
     'Quality & Compliance': 0.40,
+    'Software Development': 0.40,
+    'HR & Talent Management': 0.35,
+    'Supply Chain & Logistics': 0.40,
     'Other': 0.30,
   },
 };
@@ -229,6 +259,9 @@ export const API_COST_PER_1K_REQUESTS = {
   'Workflow Automation': 5,         // ~0.5K tokens/request avg (orchestration, routing)
   'Content Creation': 20,           // ~4K tokens/request avg (long outputs)
   'Quality & Compliance': 12,       // ~2K tokens/request avg (structured checks)
+  'Software Development': 30,       // ~6K tokens/request avg (code gen, long context windows)
+  'HR & Talent Management': 10,     // ~2K tokens/request avg (resume parsing, matching)
+  'Supply Chain & Logistics': 12,   // ~2K tokens/request avg (forecasting, optimization)
   'Other': 10,
 };
 
@@ -242,6 +275,9 @@ export const REQUESTS_PER_PERSON_HOUR = {
   'Workflow Automation': 30,
   'Content Creation': 10,
   'Quality & Compliance': 15,
+  'Software Development': 20,       // code completions, test gen, reviews
+  'HR & Talent Management': 15,     // resume screens, scheduling, matching
+  'Supply Chain & Logistics': 10,   // forecasts, route optimization, alerts
   'Other': 12,
 };
 
@@ -301,6 +337,9 @@ export const TOOL_REPLACEMENT_RATE = {
   'Workflow Automation': 0.65,
   'Content Creation': 0.45,
   'Quality & Compliance': 0.50,
+  'Software Development': 0.50,     // replaces some IDE tools, testing frameworks, SAST
+  'HR & Talent Management': 0.45,   // replaces ATS screening, scheduling tools
+  'Supply Chain & Logistics': 0.40, // replaces some demand planning, routing tools
   'Other': 0.40,
 };
 
