@@ -1061,7 +1061,8 @@ export function runCalculations(inputs) {
     const customerExpRev = userAnnualRevenue * revenueUpliftData.customerExperience * REVENUE_RISK_DISCOUNT * riskMultiplier;
     const newCapabilityRev = userAnnualRevenue * revenueUpliftData.newCapability * REVENUE_RISK_DISCOUNT * riskMultiplier;
     // Revenue displacement risk — chance AI degrades customer experience initially
-    const displacementRisk = userAnnualRevenue * REVENUE_DISPLACEMENT_RISK_RATE * riskMultiplier;
+    // Apply same REVENUE_RISK_DISCOUNT as uplift so downside uncertainty is symmetric
+    const displacementRisk = userAnnualRevenue * REVENUE_DISPLACEMENT_RISK_RATE * REVENUE_RISK_DISCOUNT * riskMultiplier;
     const grossRevenue = timeToMarketRev + customerExpRev + newCapabilityRev;
     revenueEnablement = {
       eligible: true,

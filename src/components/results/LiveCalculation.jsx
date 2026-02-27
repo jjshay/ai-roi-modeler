@@ -420,18 +420,22 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
   const [activeScenario, setActiveScenario] = useState('base');
   const scenario = results.scenarios[activeScenario];
   const totalGrossSavings = scenario.projections.reduce((sum, yr) => sum + yr.grossSavings, 0);
-  const totalInvestment = results.totalInvestment + results.aiCostModel.totalOngoing5Year;
+  const totalNetCashFlows = scenario.projections.reduce((sum, yr) => sum + yr.netCashFlow, 0);
+  // Capital deployed = upfront + separation (what the CFO actually writes checks for)
+  const capitalDeployed = results.investment?.totalInvestment || results.totalInvestment || 0;
+  // Total cost of ownership = capital + 5-year operating costs (for the overview bar)
+  const totalCostOfOwnership = capitalDeployed + results.aiCostModel.totalOngoing5Year;
 
-  // Calculate ROI percentage for ring
-  const roiPercent = totalInvestment > 0
-    ? Math.min(((totalGrossSavings - totalInvestment) / totalInvestment + 1) * 50, 100)
+  // Use scenario ROIC directly — same number shown in Financial Detail
+  const scenarioROI = scenario.roic;
+
+  // Calculate ROI percentage for ring (based on TCO for visual comparison)
+  const roiPercent = totalCostOfOwnership > 0
+    ? Math.min(((totalGrossSavings - totalCostOfOwnership) / totalCostOfOwnership + 1) * 50, 100)
     : 50;
 
   // Simplified to 2 states: positive ROI (green) or negative (red)
-  const isPositiveROI = totalGrossSavings > totalInvestment;
-  const scenarioROI = totalInvestment > 0
-    ? (totalGrossSavings - totalInvestment) / totalInvestment
-    : 0;
+  const isPositiveROI = scenarioROI >= 0;
 
   // Top levers count based on tier
   const leverCount = typeof effectiveShow('topLevers') === 'number' ? effectiveShow('topLevers') : 3;
@@ -517,8 +521,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </h1>
           <p className="text-white/80 text-sm max-w-md mx-auto">
             {isPositiveROI
-              ? `Expected ${formatCurrency(totalGrossSavings - totalInvestment)} net return over 5 years`
-              : `Current scenario shows ${formatCurrency(totalInvestment - totalGrossSavings)} shortfall. See suggestions below.`
+              ? `Expected ${formatCurrency(totalNetCashFlows - capitalDeployed)} net return over 5 years`
+              : `Current scenario shows ${formatCurrency(capitalDeployed - totalNetCashFlows)} shortfall. See suggestions below.`
             }
           </p>
         </motion.div>
@@ -553,9 +557,9 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {/* Executive Scorecard — 3 Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
           <MetricCard
-            label="5-Year ROI"
+            label="5-Year ROIC"
             value={formatPercent(scenarioROI)}
-            subtext={`Invest ${formatCompact(totalInvestment)}, save ${formatCompact(totalGrossSavings)}`}
+            subtext={`${formatCompact(capitalDeployed)} capital deployed`}
             color={scenarioROI >= 0 ? 'green' : 'red'}
             delay={0.2}
           />
@@ -566,10 +570,10 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             delay={0.3}
           />
           <MetricCard
-            label="5-Year Net Savings"
-            value={formatCompact(totalGrossSavings - totalInvestment)}
-            subtext="Gross savings minus total investment"
-            color={totalGrossSavings > totalInvestment ? 'green' : 'red'}
+            label="5-Year Net Return"
+            value={formatCompact(totalNetCashFlows - capitalDeployed)}
+            subtext={`Net cash flows minus ${formatCompact(capitalDeployed)} capital`}
+            color={totalNetCashFlows > capitalDeployed ? 'green' : 'red'}
             delay={0.4}
           />
         </div>
@@ -798,7 +802,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
 
         {/* What Would Make This Work - shown only for negative ROI */}
-        {effectiveShow('whatWouldMakeItWork') && totalGrossSavings < totalInvestment && (
+        {effectiveShow('whatWouldMakeItWork') && totalNetCashFlows < capitalDeployed && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -864,37 +868,41 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
         {/* Investment Overview (ring + bar) */}
         {effectiveShow('investmentOverview') && (
-          <CollapsibleSection title="Investment Overview" subtitle="Total investment vs 5-year gross savings" defaultOpen={effectiveAutoExpand.includes('investmentOverview')}>
+          <CollapsibleSection title="Investment Overview" subtitle="Capital deployed vs 5-year gross savings" defaultOpen={effectiveAutoExpand.includes('investmentOverview')}>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-8 mb-6">
               <div className="relative">
                 <ProgressRing
                   percent={roiPercent}
-                  color={totalGrossSavings > totalInvestment ? '#10B981' : '#EF4444'}
+                  color={totalNetCashFlows > capitalDeployed ? '#10B981' : '#EF4444'}
                 />
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-gray-500 text-xs">Net Return</span>
                   <span className={`font-mono text-xl font-bold ${
-                    totalGrossSavings > totalInvestment ? 'text-emerald-600' : 'text-red-500'
+                    totalNetCashFlows > capitalDeployed ? 'text-emerald-600' : 'text-red-500'
                   }`}>
-                    {formatCurrency(totalGrossSavings - totalInvestment)}
+                    {formatCurrency(totalNetCashFlows - capitalDeployed)}
                   </span>
                 </div>
               </div>
 
               <div className="flex sm:flex-col gap-6 sm:gap-4">
                 <div className="text-center sm:text-left">
-                  <p className="text-gray-500 text-xs">Total Investment</p>
-                  <p className="font-mono text-xl font-bold text-red-500">{formatCurrency(totalInvestment)}</p>
+                  <p className="text-gray-500 text-xs">Capital Deployed</p>
+                  <p className="font-mono text-xl font-bold text-red-500">{formatCurrency(capitalDeployed)}</p>
                 </div>
                 <div className="text-center sm:text-left">
-                  <p className="text-gray-500 text-xs">5-Year Savings</p>
+                  <p className="text-gray-500 text-xs">5-Year Operating Costs</p>
+                  <p className="font-mono text-lg font-bold text-red-400">{formatCurrency(results.aiCostModel.totalOngoing5Year)}</p>
+                </div>
+                <div className="text-center sm:text-left">
+                  <p className="text-gray-500 text-xs">5-Year Gross Savings</p>
                   <p className="font-mono text-xl font-bold text-emerald-600">{formatCurrency(totalGrossSavings)}</p>
                 </div>
               </div>
             </div>
 
             <CostVsSavingsBar
-              totalCost={totalInvestment}
+              totalCost={totalCostOfOwnership}
               totalSavings={totalGrossSavings}
               delay={0}
             />
