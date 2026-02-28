@@ -222,23 +222,23 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   y = bodyText(doc, summaryText, MARGIN, y, { maxWidth: CONTENT_W });
   y += 4;
 
-  // --- Simple ROI hero box ---
+  // --- ROIC hero box (aligned with web app) ---
   const exec = results.executiveSummary;
   const base = results.scenarios.base;
-  const roiPositive = exec.simpleROI >= 0;
+  const roiPositive = base.roic >= 0;
   const heroBoxH = 22;
   drawRoundedRect(doc, MARGIN, y, CONTENT_W, heroBoxH, 3, roiPositive ? GREEN : RED);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(...WHITE);
-  doc.text(formatPercent(exec.simpleROI), MARGIN + 8, y + 10);
+  doc.text(formatPercent(base.roic), MARGIN + 8, y + 10);
   doc.setFontSize(11);
-  doc.text('5-Year ROI', MARGIN + 8, y + 18);
+  doc.text('5-Year ROIC', MARGIN + 8, y + 18);
   // Subtext on right
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(
-    `Invest ${formatCompactValue(results.totalInvestment)}, save ${formatCompactValue(exec.total5YearGrossSavings)} over 5 years`,
+    `${formatCompactValue(results.totalInvestment)} capital deployed`,
     PAGE_W - MARGIN - 4, y + 10, { align: 'right' }
   );
   y += heroBoxH + 4;
