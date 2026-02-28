@@ -70,15 +70,25 @@ import {
   MARGIN_COMPRESSION_BY_INDUSTRY,
   SALARY_RANGES_BY_INDUSTRY,
 } from './benchmarks';
+import { mapArchetypeInputs } from './archetypeInputs';
 
 export function runCalculations(inputs) {
   // =====================================================================
+  // ARCHETYPE INPUT OVERRIDES (optional — refines base variables)
+  // =====================================================================
+  let _archetypeOverrides = {};
+  if (inputs.archetypeInputs && inputs.projectArchetype) {
+    _archetypeOverrides = mapArchetypeInputs(inputs.projectArchetype, inputs.archetypeInputs) || {};
+  }
+
+  // =====================================================================
   // CONTEXT-AWARE DEFAULTS (for null/undefined values)
+  // Archetype overrides refine hoursPerWeek and errorRate if provided
   // =====================================================================
   const teamSize = Math.max(1, Math.min(inputs.teamSize || 10, 100000));
   const avgSalary = Math.max(10000, Math.min(inputs.avgSalary || 100000, 10000000));
-  const hoursPerWeek = Math.max(1, Math.min(inputs.hoursPerWeek || 20, 80));
-  const errorRate = Math.max(0, Math.min(inputs.errorRate ?? 0.10, 1));
+  const hoursPerWeek = Math.max(1, Math.min(_archetypeOverrides.hoursPerWeek ?? inputs.hoursPerWeek ?? 20, 80));
+  const errorRate = Math.max(0, Math.min(_archetypeOverrides.errorRate ?? inputs.errorRate ?? 0.10, 1));
   const currentToolCosts = Math.max(0, inputs.currentToolCosts || 0);
   const companySize = inputs.companySize || 'Mid-Market (501-5,000)';
   const industry = inputs.industry || 'Other';
@@ -126,7 +136,7 @@ export function runCalculations(inputs) {
   // =====================================================================
   // INDUSTRY BENCHMARKS
   // =====================================================================
-  const automationPotential = assumptions.automationPotential ?? getAutomationPotential(industry, processType);
+  const automationPotential = assumptions.automationPotential ?? _archetypeOverrides.automationPotential ?? getAutomationPotential(industry, processType);
   const industrySuccessRate = getIndustrySuccessRate(industry);
 
   // =====================================================================

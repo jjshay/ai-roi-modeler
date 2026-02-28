@@ -170,6 +170,6 @@ export const PDF_PAGES = {
  */
 export const EXCEL_TABS = {
   executive: ['Summary'],
-  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity'],
-  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'Key Formulas', 'Lookups'],
+  financial: ['Summary', 'Inputs', 'Archetype Detail', 'P&L & Cash Flow', 'Sensitivity'],
+  detailed:  ['Summary', 'Inputs', 'Archetype Detail', 'P&L & Cash Flow', 'Sensitivity', 'Key Formulas', 'Lookups'],
 };

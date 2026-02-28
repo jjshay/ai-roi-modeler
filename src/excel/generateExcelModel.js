@@ -1,11 +1,13 @@
 /**
  * AI ROI Calculator — Presentation-Ready Excel Model
- * 6 tabs: Inputs, Key Formulas, Summary, P&L & Cash Flow, Sensitivity, Lookups
+ * 7 tabs: Inputs, Archetype Detail, Key Formulas, Summary, P&L & Cash Flow, Sensitivity, Lookups
  * Color coded: Blue=Inputs, Green=Formulas, Black=Results
  * All calculated cells use real Excel formulas.
  */
 import ExcelJS from 'exceljs';
 import { getOutputTier, EXCEL_TABS } from '../utils/outputTier';
+import { ARCHETYPE_INPUT_SCHEMAS, ARCHETYPE_INPUT_MAP, CLASSIFICATION_PROFILES, CLASSIFICATION_QUESTIONS, getArchetypeInputDefaults } from '../logic/archetypeInputs';
+import { PROJECT_ARCHETYPES } from '../logic/archetypes';
 
 // --- Styles ---
 const NAVY = '1B2A4A';
@@ -140,8 +142,9 @@ export async function generateExcelModel(formData, mcResults) {
   const tier = getOutputTier(formData.role);
   const includedTabs = EXCEL_TABS[tier] || EXCEL_TABS.detailed;
 
-  // Create all 6 worksheets in tab order (all needed for formula cross-refs)
+  // Create all 7 worksheets in tab order (all needed for formula cross-refs)
   const I = wb.addWorksheet('Inputs', { tabColor: { argb: 'FF2196F3' } });
+  const AD = wb.addWorksheet('Archetype Detail', { tabColor: { argb: 'FF7C4DFF' } });
   const KF = wb.addWorksheet('Key Formulas', { tabColor: { argb: 'FF4CAF50' } });
   const SU = wb.addWorksheet('Summary', { tabColor: { argb: `FF${NAVY}` } });
   const PL = wb.addWorksheet('P&L & Cash Flow', { tabColor: { argb: `FF${NAVY}` } });
@@ -312,6 +315,21 @@ export async function generateExcelModel(formData, mcResults) {
     dataRow(L, 192 + i, [ind, ...CYCLE_TIMES[i]], [null, DEC, PCT]);
   });
 
+  // Archetype List (R203-R216) — for dropdown on Inputs tab + Archetype Detail
+  hdr(L, 203, 'ARCHETYPE LIST', 2);
+  tableHeaders(L, 204, ['Archetype ID', 'Label']);
+  PROJECT_ARCHETYPES.forEach((a, i) => {
+    dataRow(L, 205 + i, [a.id, a.label]);
+  });
+
+  // Classification Scoring Matrix (R218-R231)
+  hdr(L, 218, 'CLASSIFICATION SCORING MATRIX', 7);
+  tableHeaders(L, 219, ['Archetype ID', ...CLASSIFICATION_QUESTIONS.map(q => q.label)]);
+  PROJECT_ARCHETYPES.forEach((a, i) => {
+    const profile = CLASSIFICATION_PROFILES[a.id] || [3,3,3,3,3,3];
+    dataRow(L, 220 + i, [a.id, ...profile], [null, '0', '0', '0', '0', '0', '0']);
+  });
+
   // Hide the Lookups tab
   L.state = 'hidden';
 
@@ -363,7 +381,7 @@ export async function generateExcelModel(formData, mcResults) {
   I.getRow(5).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$37:$A$41'] };
   I.getRow(6).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$45:$A$52'] };
   I.getRow(7).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$67:$A$79'] };
-  I.getRow(10).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$56:$A$63'] };
+  I.getRow(10).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$205:$A$216'] };
   I.getRow(18).getCell(2).dataValidation = { type: 'list', formulae: ['"1,2,3,4,5"'] };
   I.getRow(19).getCell(2).dataValidation = { type: 'list', formulae: ['"1,2,3,4,5"'] };
   I.getRow(20).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
@@ -378,7 +396,125 @@ export async function generateExcelModel(formData, mcResults) {
   printSetup(I);
 
   // ===================================================================
-  // TAB 2: KEY FORMULAS — Essential calculation chain (green font)
+  // TAB 2: ARCHETYPE DETAIL — Granular inputs per archetype
+  // ===================================================================
+  const inactiveInputFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+  const inactiveFont = { name: 'Calibri', size: 10, color: { argb: 'FF999999' } };
+  cols(AD, [35, 22, 50]);
+  hdr(AD, 1, 'ARCHETYPE DETAIL — Granular Inputs', 3);
+  colorLegend(AD, 2);
+
+  // Active archetype display (row 3)
+  sub(AD, 3, 'Active Archetype', 3);
+  val(AD, 4, 1, 'Selected Archetype');
+  fml(AD, 4, 2, 'Inputs!B10', null, calcFill);
+  note(AD, 4, 3, 'Change on Inputs tab to switch archetype sections');
+
+  // Determine which archetype is active from formData
+  const activeArchetypeId = formData.projectArchetype || formData.processType || 'internal-process-automation';
+  const archetypeInputValues = formData.archetypeInputs || {};
+
+  // Build all 12 archetype sections (each ~12 rows: subheader + 8 inputs + 2-3 computed + blank)
+  let adRow = 6;
+  const archetypeSectionRows = {}; // track start/end rows per archetype
+
+  for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
+    const isActive = schema.id === activeArchetypeId;
+    const sectionStart = adRow;
+
+    // Section subheader
+    sub(AD, adRow, `${schema.id.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}`, 3);
+    adRow++;
+
+    // Input rows
+    const inputDefaults = getArchetypeInputDefaults(schema.id);
+    const userValues = archetypeInputValues[schema.id] || {};
+
+    for (const input of schema.inputs) {
+      const cellValue = userValues[input.key] ?? inputDefaults[input.key] ?? input.default;
+      const fill = isActive ? inputFill : inactiveInputFill;
+      val(AD, adRow, 1, input.label);
+      val(AD, adRow, 2, cellValue, input.format === '$#,##0' ? DOL : input.format === '0.0%' || input.type === 'percent' ? PCT : input.format || NUM, fill);
+      note(AD, adRow, 3, input.note);
+      if (!isActive) {
+        AD.getRow(adRow).getCell(1).font = inactiveFont;
+        AD.getRow(adRow).getCell(3).font = { ...font9i, color: { argb: 'FFBBBBBB' } };
+      }
+      adRow++;
+    }
+
+    // Computed output rows (informational only in this tab)
+    for (const mapping of schema.computedMappings) {
+      val(AD, adRow, 1, `→ ${mapping.mapsTo}`);
+      AD.getRow(adRow).getCell(1).font = isActive ? greenFontBold : inactiveFont;
+      // Compute the value from defaults if active
+      if (isActive) {
+        const vals = { ...inputDefaults, ...userValues };
+        try {
+          const computed = mapping.jsMap(vals);
+          val(AD, adRow, 2, computed, mapping.mapsTo.includes('hours') ? NUM : mapping.mapsTo.includes('revenue') || mapping.mapsTo.includes('risk') ? DOL : PCT, calcFill);
+        } catch {
+          val(AD, adRow, 2, 'N/A', null, calcFill);
+        }
+      } else {
+        val(AD, adRow, 2, '', null, inactiveInputFill);
+      }
+      note(AD, adRow, 3, mapping.note || `Refines ${mapping.mapsTo} in DCF`);
+      if (!isActive) AD.getRow(adRow).getCell(3).font = { ...font9i, color: { argb: 'FFBBBBBB' } };
+      adRow++;
+    }
+
+    const sectionEnd = adRow - 1;
+    archetypeSectionRows[schema.id] = { start: sectionStart, end: sectionEnd };
+    adRow++; // blank separator row
+  }
+
+  // --- Mapping Summary (bottom of Archetype Detail tab) ---
+  const summaryStart = adRow;
+  sub(AD, adRow, 'MAPPING SUMMARY — Active Archetype Overrides', 3);
+  adRow++;
+
+  // Pre-compute mapping values from the active archetype
+  const activeSchema = ARCHETYPE_INPUT_MAP[activeArchetypeId];
+  const activeDefaults = activeSchema ? getArchetypeInputDefaults(activeArchetypeId) : {};
+  const activeUserVals = archetypeInputValues[activeArchetypeId] || {};
+  const activeMerged = { ...activeDefaults, ...activeUserVals };
+
+  const summaryMappings = [
+    'automationPotential', 'errorRate', 'hoursPerWeek', 'toolReplacementRate', 'revenueImpact', 'riskReduction',
+  ];
+
+  for (const targetVar of summaryMappings) {
+    val(AD, adRow, 1, `Adjusted ${targetVar}`);
+    if (activeSchema) {
+      const mapping = activeSchema.computedMappings.find(m => m.mapsTo === targetVar);
+      if (mapping) {
+        try {
+          const computed = mapping.jsMap(activeMerged);
+          const fmt = targetVar.includes('hours') ? NUM : targetVar.includes('revenue') || targetVar.includes('risk') ? DOL : PCT;
+          val(AD, adRow, 2, computed, fmt, calcFill);
+          note(AD, adRow, 3, 'From archetype detail inputs');
+        } catch {
+          val(AD, adRow, 2, 'N/A', null, calcFill);
+          note(AD, adRow, 3, 'Not available for this archetype');
+        }
+      } else {
+        val(AD, adRow, 2, 'N/A', null, inactiveInputFill);
+        note(AD, adRow, 3, 'Not applicable to this archetype');
+      }
+    } else {
+      val(AD, adRow, 2, 'N/A', null, inactiveInputFill);
+    }
+    adRow++;
+  }
+
+  // Store the summary row numbers for bridge formulas
+  const adSummaryRow = summaryStart + 1; // first data row of summary
+
+  printSetup(AD);
+
+  // ===================================================================
+  // TAB 3: KEY FORMULAS — Essential calculation chain (green font)
   // ===================================================================
   cols(KF, [35, 22, 50]);
   hdr(KF, 1, 'KEY FORMULAS — Calculation Chain', 3);
@@ -532,6 +668,30 @@ export async function generateExcelModel(formData, mcResults) {
   val(KF, 73, 1, 'Data Transfer Cost');
   fml(KF, 73, 2, 'IF(Inputs!B5="Startup (1-50)",2400,IF(Inputs!B5="SMB (51-500)",9600,IF(Inputs!B5="Mid-Market (501-5,000)",36000,IF(Inputs!B5="Enterprise (5,001-50,000)",144000,480000))))', DOL);
   note(KF, 73, 3, 'Annual cloud egress/ingress (AWS/Azure/GCP 2025)');
+
+  // --- Archetype Detail Refinement Bridge (rows 75-82) ---
+  sub(KF, 75, 'Archetype Detail Refinement', 3);
+  val(KF, 76, 1, 'Has Archetype Detail?');
+  fml(KF, 76, 2, `IF(COUNTA('Archetype Detail'!B${adSummaryRow}:B${adSummaryRow + 5})>0,"Yes","No")`, null, calcFill);
+  note(KF, 76, 3, 'Detects if archetype inputs have been filled');
+  val(KF, 77, 1, 'Adj Automation Potential');
+  fml(KF, 77, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow}),'Archetype Detail'!B${adSummaryRow},B4),B4)`, PCT, calcFill);
+  note(KF, 77, 3, 'Uses archetype-refined value if available');
+  val(KF, 78, 1, 'Adj Error Rate');
+  fml(KF, 78, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 1}),'Archetype Detail'!B${adSummaryRow + 1},Inputs!B14),Inputs!B14)`, PCT, calcFill);
+  note(KF, 78, 3, 'Uses archetype-refined value if available');
+  val(KF, 79, 1, 'Adj Hours/Week');
+  fml(KF, 79, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 2}),'Archetype Detail'!B${adSummaryRow + 2},Inputs!B12),Inputs!B12)`, NUM, calcFill);
+  note(KF, 79, 3, 'Uses archetype-refined value if available');
+  val(KF, 80, 1, 'Adj Tool Replace %');
+  fml(KF, 80, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 3}),'Archetype Detail'!B${adSummaryRow + 3},VLOOKUP(Inputs!B10,Lookups!A56:D63,4,FALSE)),VLOOKUP(Inputs!B10,Lookups!A56:D63,4,FALSE))`, PCT, calcFill);
+  val(KF, 81, 1, 'Revenue Impact');
+  fml(KF, 81, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 4}),'Archetype Detail'!B${adSummaryRow + 4},0),0)`, DOL, calcFill);
+  note(KF, 81, 3, 'Archetype-specific annual revenue impact');
+  val(KF, 82, 1, 'Risk Reduction Factor');
+  fml(KF, 82, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 5}),'Archetype Detail'!B${adSummaryRow + 5},0),0)`, DOL, calcFill);
+  note(KF, 82, 3, 'Archetype-specific annual risk reduction');
+
   printSetup(KF);
 
   // ===================================================================
@@ -990,6 +1150,7 @@ export async function generateExcelModel(formData, mcResults) {
   // Hide tabs not included in the user's tier
   const allSheets = [
     { ws: I,  name: 'Inputs' },
+    { ws: AD, name: 'Archetype Detail' },
     { ws: KF, name: 'Key Formulas' },
     { ws: PL, name: 'P&L & Cash Flow' },
     { ws: SE, name: 'Sensitivity' },
