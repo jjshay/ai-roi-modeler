@@ -115,7 +115,7 @@ export function runMonteCarlo(formData, iterations = 500) {
     // Use base-case scenario from each iteration
     const base = result.scenarios.base;
     npvArr.push(base.npv);
-    if (isFinite(base.irr)) irrArr.push(base.irr);
+    irrArr.push(isFinite(base.irr) ? base.irr : -1.0); // -100% sentinel for non-converging IRR
     paybackArr.push(base.paybackMonths);
     roicArr.push(base.roic);
     upfrontArr.push(result.upfrontInvestment || 0);

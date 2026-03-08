@@ -52,7 +52,7 @@ export const ENTERPRISE_INPUTS = {
   industry: 'Financial Services / Banking',
   companySize: 'Enterprise (5,001-50,000)',
   processType: 'Quality & Compliance',
-  projectArchetype: 'risk-compliance-ai',
+  projectArchetype: 'risk-compliance-legal-ai',
   assumptions: {
     automationPotential: 0.58,
     adoptionRate: 0.70,
@@ -73,7 +73,7 @@ export const ENTERPRISE_INPUTS = {
   expectedTimeline: 12,
   implementationBudget: 2000000,
   ongoingAnnualCost: 400000,
-  teamLocation: 'US - Other',
+  teamLocation: 'Remote / Distributed',
   companyState: 'New York',
 };
 
@@ -103,14 +103,14 @@ export const GOVERNMENT_INPUTS = {
   expectedTimeline: 18,
   implementationBudget: 500000,
   ongoingAnnualCost: 100000,
-  teamLocation: 'US - Other',
+  teamLocation: 'Remote / Distributed',
   companyState: 'Virginia',
 };
 
 // Non-US team (no R&D credit)
 export const NON_US_INPUTS = {
   ...BASE_INPUTS,
-  teamLocation: 'UK / Western Europe',
+  teamLocation: 'Offshore - Employee',
   companyState: 'Other / Not Sure',
 };
 

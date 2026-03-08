@@ -1,10 +1,9 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import SegmentedSelect from '../inputs/SegmentedSelect';
 import CurrencyInput from '../inputs/CurrencyInput';
 import SliderInput from '../inputs/SliderInput';
-import ToggleQuestion from '../inputs/ToggleQuestion';
-import { formatCurrency, formatPercent } from '../../utils/formatters';
+import { formatCurrency } from '../../utils/formatters';
+import { getArchetypeById } from '../../logic/archetypes';
 import {
   getRealisticTimeline,
   AI_TEAM_SALARY,
@@ -37,7 +36,9 @@ function computeSuggestedValues(formData) {
   const suggestedTimeline = getRealisticTimeline(industry, companySize);
 
   // Compute implementation cost based on team size and context
-  const aiSalary = AI_TEAM_SALARY[teamLocation] || 135000;
+  const aiSalary = teamLocation === 'Blended'
+    ? (formData.blendedAISalary || 169500)
+    : (AI_TEAM_SALARY[teamLocation] || 135000);
   const maxTeam = MAX_IMPL_TEAM[companySize] || 10;
   const sizeMult = SIZE_MULTIPLIER[companySize] || 1.0;
   const dataCostMult = DATA_COST_MULTIPLIER[dataReadiness] || 1.10;
@@ -86,14 +87,6 @@ function computeSuggestedValues(formData) {
   };
 }
 
-const BUDGET_OPTIONS = [
-  { label: '$25K - $50K', sublabel: 'Pilot / POC', value: 37500 },
-  { label: '$50K - $150K', sublabel: 'Department rollout', value: 100000 },
-  { label: '$150K - $500K', sublabel: 'Enterprise implementation', value: 325000 },
-  { label: '$500K - $1M', sublabel: 'Full transformation', value: 750000 },
-  { label: '$1M+', sublabel: 'Multi-year program', value: 1500000 },
-];
-
 const TIMELINE_OPTIONS = [
   { months: '1-3 months', label: 'Aggressive', value: 2 },
   { months: '3-6 months', label: 'Typical', value: 4.5 },
@@ -113,9 +106,10 @@ function computeScopePreview(formData) {
   const teamLocation = formData.teamLocation || 'US - Major Tech Hub';
   const dataReadiness = formData.dataReadiness || 3;
   const expectedTimeline = formData.expectedTimeline || 6;
-  const budget = formData.implementationBudget || 100000;
 
-  const aiSalary = AI_TEAM_SALARY[teamLocation] || 135000;
+  const aiSalary = teamLocation === 'Blended'
+    ? (formData.blendedAISalary || 169500)
+    : (AI_TEAM_SALARY[teamLocation] || 135000);
   const maxTeam = MAX_IMPL_TEAM[companySize] || 10;
   const sizeMult = SIZE_MULTIPLIER[companySize] || 1.0;
   const dataCostMult = DATA_COST_MULTIPLIER[dataReadiness] || 1.10;
@@ -144,10 +138,6 @@ function computeScopePreview(formData) {
   const contingency = computedImplCost * CONTINGENCY_RATE;
   const licenseCost = PLATFORM_LICENSE_COST[companySize] || 48000;
 
-  const adjustedBudget = budget * dataCostMult;
-  const realisticCost = Math.max(adjustedBudget, computedImplCost);
-  const gap = computedImplCost - adjustedBudget;
-
   return {
     aiSalary,
     engineers,
@@ -161,8 +151,6 @@ function computeScopePreview(formData) {
     securityCost,
     contingency,
     licenseCost,
-    realisticCost,
-    gap,
     adjustedTimeline,
     teamLocation,
     companySize,
@@ -181,12 +169,11 @@ export default function Step5_AIInvestment({ formData, updateField }) {
     formData.hoursPerWeek
   ]);
 
-  // Auto-fill suggested values if not already set
+  // Auto-fill values from computed benchmarks — budget is always model-driven
   useEffect(() => {
     if (!hasAutoFilled) {
-      if (formData.implementationBudget === null || formData.implementationBudget === undefined) {
-        updateField('implementationBudget', suggested.suggestedBudget);
-      }
+      // Budget is always computed from staffing model, not user-entered
+      updateField('implementationBudget', suggested.suggestedBudget);
       if (formData.expectedTimeline === null || formData.expectedTimeline === undefined) {
         updateField('expectedTimeline', suggested.suggestedTimeline);
       }
@@ -209,10 +196,7 @@ export default function Step5_AIInvestment({ formData, updateField }) {
     [],
   );
 
-  const handleBudget = (val) => {
-    updateField('implementationBudget', val);
-    autoAdvance(1);
-  };
+  const isQuick = formData.wizardMode === 'quick';
 
   const handleTimeline = (val) => {
     updateField('expectedTimeline', val);
@@ -235,9 +219,10 @@ export default function Step5_AIInvestment({ formData, updateField }) {
     : null;
 
   const scope = useMemo(
-    () => formData.implementationBudget ? computeScopePreview(formData) : null,
-    [formData.implementationBudget, formData.teamSize, formData.companySize,
-     formData.teamLocation, formData.dataReadiness, formData.expectedTimeline],
+    () => computeScopePreview(formData),
+    [formData.teamSize, formData.companySize,
+     formData.teamLocation, formData.dataReadiness, formData.expectedTimeline,
+     formData.blendedAISalary],
   );
 
   return (
@@ -246,15 +231,10 @@ export default function Step5_AIInvestment({ formData, updateField }) {
         Let's model the AI investment
       </h2>
       <div className="mb-4 h-1 w-16 rounded bg-gold" />
-      <p className="mb-8 text-sm leading-relaxed text-gray-600">
-        Based on your team size, readiness, and industry, we've pre-filled realistic
-        estimates below. Adjust if you have specific budget constraints.
-      </p>
-
       <AnimatePresence mode="wait">
         {subStep === 0 && (
           <motion.div
-            key="budget"
+            key="computedCost"
             variants={slideVariants}
             initial="enter"
             animate="center"
@@ -262,62 +242,44 @@ export default function Step5_AIInvestment({ formData, updateField }) {
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
             <div className="space-y-4">
-              <SegmentedSelect
-                label="What's your estimated AI implementation budget?"
-                options={BUDGET_OPTIONS}
-                value={formData.implementationBudget}
-                onChange={handleBudget}
-              />
+              <p className="text-base font-semibold text-navy sm:text-lg">
+                Here's what the AI implementation will cost
+              </p>
+              <p className="text-sm text-gray-500">
+                Computed from your team size, location, readiness scores, and industry benchmarks.
+              </p>
 
               {scope && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="rounded-xl border border-navy/10 bg-navy/5 p-4 space-y-3"
-                >
-                  <p className="text-sm font-semibold text-navy">
-                    What This Gets You
-                  </p>
-
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between items-baseline">
-                      <span className="text-navy/80">AI team</span>
-                      <span className="font-medium text-navy">{scope.engineers} engineer{scope.engineers > 1 ? 's' : ''} + {scope.pms} PM for {scope.adjustedTimeline} months</span>
+                      <span className="text-emerald-800/80">AI team</span>
+                      <span className="font-medium text-emerald-800">{scope.engineers} engineer{scope.engineers > 1 ? 's' : ''} + {scope.pms} PM for {scope.adjustedTimeline} months</span>
                     </div>
                     <div className="flex justify-between items-baseline">
-                      <span className="text-navy/80">Engineer rate</span>
-                      <span className="font-medium text-navy">{formatCurrency(scope.aiSalary)}/yr ({scope.teamLocation})</span>
+                      <span className="text-emerald-800/80">Engineer rate</span>
+                      <span className="font-medium text-emerald-800">{formatCurrency(scope.aiSalary)}/yr ({scope.teamLocation === 'Blended' ? 'Blended' : scope.teamLocation})</span>
                     </div>
                     <div className="flex justify-between items-baseline">
-                      <span className="text-navy/80">Includes</span>
-                      <span className="text-navy/70 text-right text-xs max-w-[60%]">Infrastructure setup, team training, platform licensing</span>
+                      <span className="text-emerald-800/80">Includes</span>
+                      <span className="text-emerald-700/70 text-right text-xs max-w-[60%]">Infrastructure setup, team training, platform licensing</span>
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-baseline border-t border-navy/10 pt-2">
-                    <span className="text-navy font-medium text-sm">Computed cost</span>
-                    <span className="font-mono font-bold text-navy">{formatCurrency(scope.computedImplCost)}</span>
+                  <div className="flex justify-between items-baseline border-t border-emerald-200 pt-2">
+                    <span className="text-emerald-800 font-medium text-base">Estimated Implementation Cost</span>
+                    <span className="font-mono font-bold text-emerald-800 text-xl">{formatCurrency(scope.computedImplCost)}</span>
                   </div>
-
-                  {scope.gap > 0 ? (
-                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-                      <p className="text-sm font-medium text-amber-700">
-                        Your budget is {formatCurrency(scope.gap)} short of the computed cost
-                      </p>
-                      <p className="text-xs text-amber-600 mt-0.5">
-                        The model uses the higher figure. Consider phased rollout or adjusting scope.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
-                      <p className="text-sm font-medium text-emerald-700">
-                        Budget covers the computed implementation cost
-                      </p>
-                    </div>
-                  )}
-                </motion.div>
+                </div>
               )}
+
+              <button
+                type="button"
+                onClick={() => autoAdvance(1)}
+                className="mt-2 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                Continue
+              </button>
             </div>
           </motion.div>
         )}
@@ -371,21 +333,21 @@ export default function Step5_AIInvestment({ formData, updateField }) {
               </div>
 
               {selectedTimeline != null && (
-                <div className="rounded-xl border border-navy/10 bg-navy/5 p-4 space-y-2">
-                  <p className="text-sm font-semibold text-navy">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-emerald-800">
                     Reality Check
                   </p>
-                  <div className="space-y-1 text-sm text-navy/80">
+                  <div className="space-y-1 text-sm text-emerald-800/80">
                     <p>
                       Based on <span className="font-medium">{industry}</span> companies
                       of your size, the typical timeline is{' '}
-                      <span className="font-bold text-navy">{realisticMonths} months</span>.
+                      <span className="font-bold text-emerald-800">{realisticMonths} months</span>.
                     </p>
                     <p>
                       Your selected timeline:{' '}
                       <span className="font-medium">{selectedTimeline} months</span>.
                     </p>
-                    <p className="pt-1 font-semibold text-navy">
+                    <p className="pt-1 font-semibold text-emerald-800">
                       Adjusted estimate: {adjustedTimeline} months
                     </p>
                   </div>
@@ -417,6 +379,25 @@ export default function Step5_AIInvestment({ formData, updateField }) {
                 Rule of thumb: ongoing costs are typically 20-35% of initial implementation
                 budget per year
               </p>
+
+              {/* Input Summary Card */}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+                <p className="text-sm font-semibold text-emerald-800">Your inputs at a glance</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <span className="text-emerald-700/60">Industry</span>
+                  <span className="font-medium text-emerald-800 text-right">{formData.industry || '--'}</span>
+                  <span className="text-emerald-700/60">Company size</span>
+                  <span className="font-medium text-emerald-800 text-right">{formData.companySize || '--'}</span>
+                  <span className="text-emerald-700/60">Project type</span>
+                  <span className="font-medium text-emerald-800 text-right">{getArchetypeById(formData.projectArchetype)?.label || '--'}</span>
+                  <span className="text-emerald-700/60">Team size</span>
+                  <span className="font-medium text-emerald-800 text-right">{formData.teamSize || '--'} people</span>
+                  <span className="text-emerald-700/60">Avg salary</span>
+                  <span className="font-medium text-emerald-800 text-right">{formData.avgSalary ? formatCurrency(formData.avgSalary) : '--'}</span>
+                  <span className="text-emerald-700/60">Readiness</span>
+                  <span className="font-medium text-emerald-800 text-right">Change: {formData.changeReadiness}/5, Data: {formData.dataReadiness}/5</span>
+                </div>
+              </div>
 
               <button
                 type="button"
@@ -524,8 +505,8 @@ export default function Step5_AIInvestment({ formData, updateField }) {
               )}
 
               {/* Value Pathway Toggles */}
-              <div className="rounded-xl border border-navy/10 bg-navy/5 p-4 space-y-3">
-                <p className="text-sm font-semibold text-navy">Include in NPV calculation?</p>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
+                <p className="text-sm font-semibold text-emerald-800">Include in NPV calculation?</p>
                 <p className="text-xs text-gray-500 -mt-1">
                   By default, only cost savings are included. Toggle these to add broader value.
                 </p>

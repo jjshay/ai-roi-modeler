@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 
 export default function CardSelector({
   label,
@@ -8,6 +8,11 @@ export default function CardSelector({
   helperText,
 }) {
   const id = useId();
+  const [hoveredValue, setHoveredValue] = useState(null);
+
+  const hoveredOption = hoveredValue != null
+    ? options.find(o => o.value === hoveredValue)
+    : null;
 
   return (
     <fieldset className="w-full space-y-3" role="radiogroup" aria-labelledby={`${id}-label`}>
@@ -20,7 +25,7 @@ export default function CardSelector({
         </legend>
       )}
 
-      <div className="grid grid-cols-1 gap-3 min-[375px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[375px]:grid-cols-2 sm:grid-cols-3">
         {options.map((option) => {
           const isSelected = value === option.value;
           return (
@@ -30,6 +35,8 @@ export default function CardSelector({
               role="radio"
               aria-checked={isSelected}
               onClick={() => onChange(option.value)}
+              onMouseEnter={() => setHoveredValue(option.value)}
+              onMouseLeave={() => setHoveredValue(null)}
               className={`
                 flex flex-col items-center gap-2 rounded-xl border-2 p-4
                 text-center transition-all duration-150
@@ -66,6 +73,12 @@ export default function CardSelector({
           );
         })}
       </div>
+
+      {hoveredOption?.example && (
+        <p className="rounded-lg bg-navy/5 px-3 py-2 text-xs italic text-navy/70 transition-all" aria-live="polite">
+          {hoveredOption.example}
+        </p>
+      )}
 
       {helperText && (
         <p className="text-sm text-gray-500">{helperText}</p>

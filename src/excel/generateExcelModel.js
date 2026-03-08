@@ -1,6 +1,6 @@
 /**
  * AI ROI Calculator — Presentation-Ready Excel Model
- * 7 tabs: Inputs, Archetype Detail, Key Formulas, Summary, P&L & Cash Flow, Sensitivity, Lookups
+ * 9 tabs: Inputs, Archetype Detail, Key Formulas, Summary, P&L & Cash Flow, Sensitivity, V5 Analysis, Lookups, Assumption Definitions + Model Audit
  * Color coded: Blue=Inputs, Green=Formulas, Black=Results
  * All calculated cells use real Excel formulas.
  */
@@ -19,12 +19,20 @@ const inputFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6
 const calcFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
 const resultFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const warnFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } };
+const goldFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC9A227' } };
+const goldFont   = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1B2A4A' } };
+const thinBorder = {
+  top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+  bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+  left: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+  right: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+};
 const font10 = { name: 'Calibri', size: 10 };
 const font9i = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF666666' } };
 const fontBold = { name: 'Calibri', size: 10, bold: true };
 const outputFont = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
 const outputFont10 = { name: 'Calibri', size: 10, color: { argb: 'FFFFFFFF' } };
-const inputFont = { name: 'Calibri', size: 10, color: { argb: 'FF1B2A4A' } };
+const inputFont = { name: 'Calibri', size: 10, color: { argb: 'FF0000FF' } };
 const greenFont = { name: 'Calibri', size: 10, color: { argb: 'FF2E7D32' } };
 const greenFontBold = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
 const PCT = '0.0%', DOL = '$#,##0', DOL2 = '$#,##0.00', NUM = '#,##0', DEC = '0.000';
@@ -128,12 +136,11 @@ const SIZES = [
   'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)',
 ];
 const LOCATIONS = [
-  'US - Major Tech Hub', 'US - Other', 'UK / Western Europe', 'Canada / Australia',
-  'Remote / Distributed', 'Eastern Europe', 'Latin America', 'India / South Asia',
+  'US - Major Tech Hub', 'Remote / Distributed', 'Offshore - Employee', 'Offshore - Contractor', 'Blended',
 ];
 
 // =====================================================================
-export async function generateExcelModel(formData, mcResults) {
+export async function generateExcelModel(formData, mcResults, results) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'AI ROI Calculator';
   wb.created = new Date();
@@ -142,14 +149,17 @@ export async function generateExcelModel(formData, mcResults) {
   const tier = getOutputTier(formData.role);
   const includedTabs = EXCEL_TABS[tier] || EXCEL_TABS.detailed;
 
-  // Create all 7 worksheets in tab order (all needed for formula cross-refs)
+  // Create all 10 worksheets in tab order (all needed for formula cross-refs)
   const I = wb.addWorksheet('Inputs', { tabColor: { argb: 'FF2196F3' } });
   const AD = wb.addWorksheet('Archetype Detail', { tabColor: { argb: 'FF7C4DFF' } });
   const KF = wb.addWorksheet('Key Formulas', { tabColor: { argb: 'FF4CAF50' } });
   const SU = wb.addWorksheet('Summary', { tabColor: { argb: `FF${NAVY}` } });
   const PL = wb.addWorksheet('P&L & Cash Flow', { tabColor: { argb: `FF${NAVY}` } });
   const SE = wb.addWorksheet('Sensitivity', { tabColor: { argb: 'FFFF9800' } });
+  const V5 = wb.addWorksheet('V5 Analysis', { tabColor: { argb: 'FF00897B' } });
   const L = wb.addWorksheet('Lookups', { tabColor: { argb: 'FF9E9E9E' } });
+  const AU = wb.addWorksheet('Model Audit', { tabColor: { argb: 'FFE53935' } });
+  const DF = wb.addWorksheet('Assumption Definitions', { tabColor: { argb: 'FF6A1B9A' } });
 
   // ===================================================================
   // TAB 6: LOOKUPS — All reference tables (EXACT same cell positions)
@@ -210,10 +220,11 @@ export async function generateExcelModel(formData, mcResults) {
     dataRow(L, 37 + i, d, [null, DEC, PCT, '0', DEC, DOL, DOL, DOL, DOL, DOL, PCT]);
   });
 
-  // AI Team Salary (R43-R52)
+  // AI Team Salary (R43-R48)
   hdr(L, 43, 'AI TEAM SALARY', 2);
   tableHeaders(L, 44, ['Location', 'Salary']);
-  const SAL = [215000,155000,150000,140000,145000,80000,55000,40000];
+  const blendedSal = formData.blendedAISalary || 169500;
+  const SAL = [225000, 150000, 55000, 40000, blendedSal];
   LOCATIONS.forEach((loc, i) => { dataRow(L, 45 + i, [loc, SAL[i]], [null, DOL]); });
 
   // Process Type Master (R54-R63)
@@ -245,7 +256,7 @@ export async function generateExcelModel(formData, mcResults) {
     ['Change Mgmt Rate',0.15,PCT],['Infra Cost Rate',0.12,PCT],
     ['Training Cost Rate',0.08,PCT],['PM Salary Factor',0.85,DEC],
   ];
-  CONSTS.forEach((c, i) => { val(L, 82 + i, 1, c[0]); val(L, 82 + i, 2, c[1], c[2]); });
+  CONSTS.forEach((c, i) => { val(L, 82 + i, 1, c[0]); val(L, 82 + i, 2, c[1], c[2], inputFill); });
 
   // Schedules (R102-R108)
   hdr(L, 102, 'YEAR-BY-YEAR SCHEDULES', 6);
@@ -254,7 +265,11 @@ export async function generateExcelModel(formData, mcResults) {
     [1,0,0,0.75,0,1.000],[2,0.20,0.20,0.90,0.12,1.120],
     [3,0.25,0.45,1.00,0.12,1.2544],[4,0.20,0.65,1.00,0.07,1.342208],[5,0.10,0.75,1.00,0.07,1.436163],
   ];
-  SCHED.forEach((s, i) => { dataRow(L, 104 + i, s, ['0', PCT, PCT, PCT, PCT, DEC]); });
+  SCHED.forEach((s, i) => {
+    dataRow(L, 104 + i, s, ['0', PCT, PCT, PCT, PCT, DEC]);
+    // Color schedule values as input cells for auditability
+    for (let c = 2; c <= 6; c++) L.getRow(104 + i).getCell(c).fill = inputFill;
+  });
 
   // Revenue Eligible Processes (R110-R114)
   hdr(L, 110, 'REVENUE ELIGIBLE PROCESSES', 1);
@@ -315,11 +330,12 @@ export async function generateExcelModel(formData, mcResults) {
     dataRow(L, 192 + i, [ind, ...CYCLE_TIMES[i]], [null, DEC, PCT]);
   });
 
-  // Archetype List (R203-R216) — for dropdown on Inputs tab + Archetype Detail
-  hdr(L, 203, 'ARCHETYPE LIST', 2);
-  tableHeaders(L, 204, ['Archetype ID', 'Label']);
+  // Archetype List (R203-R210) — for dropdown on Inputs tab + Archetype Detail
+  // Column C = primary process type — used to translate archetype ID → process type for MATCH
+  hdr(L, 203, 'ARCHETYPE LIST', 3);
+  tableHeaders(L, 204, ['Archetype ID', 'Label', 'Primary Process Type']);
   PROJECT_ARCHETYPES.forEach((a, i) => {
-    dataRow(L, 205 + i, [a.id, a.label]);
+    dataRow(L, 205 + i, [a.id, a.label, a.sourceProcessTypes[0] || 'Other']);
   });
 
   // Classification Scoring Matrix (R218-R231)
@@ -333,55 +349,185 @@ export async function generateExcelModel(formData, mcResults) {
   // Hide the Lookups tab
   L.state = 'hidden';
 
+  // Protect formula/output sheets to prevent accidental overwrites
+  // Inputs and Archetype Detail remain editable
+  KF.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+  SU.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+  PL.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+  SE.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+  V5.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+  L.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+  AU.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+
   // ===================================================================
-  // TAB 1: INPUTS — Pre-filled from formData
+  // TAB 1: INPUTS — Consolidated, numbered, key-driver-highlighted
+  // Column A = ID + Label, Column B = Value (SAME positions as before),
+  // Column C = Plain-English description, Column D = Impact level.
+  // All Inputs!B__ references from other tabs remain valid.
   // ===================================================================
-  cols(I, [35, 28, 45]);
-  hdr(I, 1, 'USER INPUTS', 3);
-  colorLegend(I, 2);
 
-  sub(I, 3, 'Company Context', 3);
-  val(I, 4, 1, 'Industry'); val(I, 4, 2, formData.industry || 'Technology / Software', null, inputFill); note(I, 4, 3, 'Select from dropdown');
-  val(I, 5, 1, 'Company Size'); val(I, 5, 2, formData.companySize || 'Mid-Market (501-5,000)', null, inputFill); note(I, 5, 3, 'Select from dropdown');
-  val(I, 6, 1, 'Team Location'); val(I, 6, 2, formData.teamLocation || 'US - Major Tech Hub', null, inputFill); note(I, 6, 3, 'Select from dropdown');
-  val(I, 7, 1, 'State (for R&D credit)'); val(I, 7, 2, formData.companyState || 'Other / Not Sure', null, inputFill); note(I, 7, 3, 'US only -- optional');
+  // Styles for key drivers vs standard inputs
+  const keyFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB8D4E8' } }; // deeper blue for key drivers
+  const stdFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF4F9' } }; // very light blue for standard
+  const keyFont = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0000FF' } };  // bold blue
+  const stdInputFont = { name: 'Calibri', size: 10, color: { argb: 'FF0000FF' } };          // blue
+  const idFont  = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF546E7A' } };
+  const descFont = { name: 'Calibri', size: 9, color: { argb: 'FF757575' } };
+  const impactKeyFont = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF0000FF' } };
+  const impactStdFont = { name: 'Calibri', size: 9, color: { argb: 'FF90A4AE' } };
 
-  sub(I, 9, 'Project Details', 3);
-  val(I, 10, 1, 'Project Archetype'); val(I, 10, 2, formData.projectArchetype || formData.processType || 'internal-process-automation', null, inputFill); note(I, 10, 3, 'Archetype ID');
-  val(I, 11, 1, 'Team Size (FTEs)'); val(I, 11, 2, formData.teamSize || 10, NUM, inputFill); note(I, 11, 3, 'Number of people');
-  val(I, 12, 1, 'Hours per Week (per person)'); val(I, 12, 2, formData.hoursPerWeek || 40, NUM, inputFill); note(I, 12, 3, 'Avg hours worked');
-  val(I, 13, 1, 'Avg Fully-Loaded Salary'); val(I, 13, 2, formData.avgSalary || 200000, DOL, inputFill); note(I, 13, 3, 'Annual salary + benefits');
-  val(I, 14, 1, 'Error / Rework Rate'); val(I, 14, 2, formData.errorRate ?? 0.10, PCT, inputFill); note(I, 14, 3, '% requiring rework');
-  val(I, 15, 1, 'Current Tool Costs (annual)'); val(I, 15, 2, formData.currentToolCosts || 0, DOL, inputFill); note(I, 15, 3, 'Licenses, SaaS fees');
+  // Helper: write an input row with ID, value, description, impact
+  function inp(ws, r, id, v, fmt, isKey, desc, impact) {
+    const fill = isKey ? keyFill : stdFill;
+    const vFont = isKey ? keyFont : stdInputFont;
+    // Col A: ID
+    ws.getRow(r).getCell(1).value = id;
+    ws.getRow(r).getCell(1).font = idFont;
+    // Col B: Value
+    const cell = ws.getRow(r).getCell(2);
+    cell.value = v;
+    cell.font = vFont;
+    cell.fill = fill;
+    if (fmt) cell.numFmt = fmt;
+    // Col C: Description
+    ws.getRow(r).getCell(3).value = desc || '';
+    ws.getRow(r).getCell(3).font = descFont;
+    // Col D: Impact
+    if (impact) {
+      ws.getRow(r).getCell(4).value = impact;
+      ws.getRow(r).getCell(4).font = isKey ? impactKeyFont : impactStdFont;
+    }
+  }
 
-  sub(I, 17, 'Organization Readiness', 3);
-  val(I, 18, 1, 'Change Readiness (1-5)'); val(I, 18, 2, formData.changeReadiness || 3, '0', inputFill); note(I, 18, 3, '1=Low, 5=Champion');
-  val(I, 19, 1, 'Data Readiness (1-5)'); val(I, 19, 2, formData.dataReadiness || 3, '0', inputFill); note(I, 19, 3, '1=Messy, 5=Governed');
-  val(I, 20, 1, 'Executive Sponsor?'); val(I, 20, 2, formData.execSponsor === false ? 'No' : 'Yes', null, inputFill); note(I, 20, 3, 'Yes or No');
+  cols(I, [8, 28, 52, 18]);
+  hdr(I, 1, 'MODEL INPUTS — Your Assumptions', 4);
 
-  sub(I, 22, 'AI Investment', 3);
-  val(I, 23, 1, 'Implementation Budget'); val(I, 23, 2, formData.implementationBudget || 100000, DOL, inputFill);
-  val(I, 24, 1, 'Expected Timeline (months)'); val(I, 24, 2, formData.expectedTimeline || 4.5, '0.0', inputFill);
-  val(I, 25, 1, 'Ongoing Annual Cost'); val(I, 25, 2, formData.ongoingAnnualCost || 25000, DOL, inputFill);
-  val(I, 26, 1, 'Vendors to Replace'); val(I, 26, 2, formData.vendorsReplaced || 0, '0', inputFill);
-  val(I, 27, 1, 'Vendor Termination Cost'); val(I, 27, 2, formData.vendorTerminationCost || 0, DOL, inputFill);
+  // Legend row
+  {
+    const lr = I.getRow(2);
+    lr.height = 18;
+    lr.getCell(1).value = 'KEY DRIVER';
+    lr.getCell(1).fill = keyFill;
+    lr.getCell(1).font = { ...idFont, bold: true, color: { argb: 'FF0000FF' } };
+    I.mergeCells(2, 1, 2, 2);
+    lr.getCell(3).value = 'Blue text = editable input. Highlighted = biggest impact on your ROI. Change any value to recalculate.';
+    lr.getCell(3).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF546E7A' } };
+    I.mergeCells(2, 3, 2, 4);
+  }
 
-  sub(I, 29, 'Advanced Value Modeling', 3);
-  val(I, 30, 1, 'Cash Realization %'); val(I, 30, 2, formData.cashRealizationPct ?? 0.40, PCT, inputFill); note(I, 30, 3, '% of efficiency gains as cash');
-  val(I, 31, 1, 'Annual Revenue'); val(I, 31, 2, formData.annualRevenue || 0, DOL, inputFill); note(I, 31, 3, 'For revenue acceleration');
-  val(I, 32, 1, 'Contribution Margin'); val(I, 32, 2, formData.contributionMargin ?? 0.30, PCT, inputFill); note(I, 32, 3, 'Gross margin on revenue');
-  val(I, 33, 1, 'Include Capacity in NPV?'); val(I, 33, 2, formData.includeCapacityValue ? 'Yes' : 'No', null, inputFill);
-  val(I, 34, 1, 'Include Risk Reduction in NPV?'); val(I, 34, 2, formData.includeRiskReduction ? 'Yes' : 'No', null, inputFill);
-  val(I, 35, 1, 'Include Rev Acceleration in NPV?'); val(I, 35, 2, formData.includeRevenueAcceleration ? 'Yes' : 'No', null, inputFill);
-  val(I, 36, 1, 'Retained Talent Premium %'); val(I, 36, 2, formData.retainedTalentPremiumRate ?? 0.10, PCT, inputFill); note(I, 36, 3, 'Wage increase for retained staff');
-  val(I, 37, 1, 'Agentic AI Workflow?'); val(I, 37, 2, formData.isAgenticWorkflow ? 'Yes' : 'No', null, inputFill); note(I, 37, 3, 'Multi-step reasoning = 2.5x API calls');
+  // ---------------------------------------------------------------
+  // 1. THE BIG THREE — Key Drivers (highlighted)
+  // ---------------------------------------------------------------
+  sub(I, 3, '1. COMPANY CONTEXT — Who are you?', 4);
 
-  // Data validation dropdowns
+  inp(I, 4, '1a', formData.industry || 'Technology / Software', null, false,
+    'Your industry — sets automation benchmarks & risk profiles', '');
+
+  inp(I, 5, '1b', formData.companySize || 'Mid-Market (501-5,000)', null, false,
+    'Company size — affects discount rate, compliance costs, and team capacity', '');
+
+  inp(I, 6, '1c', formData.teamLocation || 'US - Major Tech Hub', null, false,
+    'Where your AI team is based — sets engineering salary benchmarks', '');
+
+  inp(I, 7, '1d', formData.companyState || 'Other / Not Sure', null, false,
+    'US state for R&D tax credit (optional)', '');
+
+  // Row 8: blank
+  // ---------------------------------------------------------------
+  // 2. PROJECT SCOPE — What are you automating?
+  // ---------------------------------------------------------------
+  sub(I, 9, '2. PROJECT SCOPE — What are you automating?', 4);
+
+  inp(I, 10, '2a', formData.projectArchetype || formData.processType || 'internal-process-automation', null, true,
+    'Type of AI project — determines automation potential (the #3 biggest lever)', 'KEY DRIVER');
+
+  inp(I, 11, '2b', formData.teamSize || 10, NUM, true,
+    'How many people currently do this work? More people = more savings from AI', 'KEY DRIVER #1');
+
+  inp(I, 12, '2c', formData.hoursPerWeek || 40, NUM, false,
+    'Average hours per person per week spent on this process', '');
+
+  inp(I, 13, '2d', formData.avgSalary || 200000, DOL, true,
+    'Fully-loaded annual cost per person (salary + benefits + overhead). Multiply base salary by 1.3-1.5x', 'KEY DRIVER #2');
+
+  inp(I, 14, '2e', formData.errorRate ?? 0.10, PCT, false,
+    'What % of work requires rework or correction? Higher = more savings from AI accuracy', '');
+
+  inp(I, 15, '2f', formData.currentToolCosts || 0, DOL, false,
+    'Annual spend on current software/tools for this process (licenses, SaaS, maintenance)', '');
+
+  // Row 16: blank
+  // ---------------------------------------------------------------
+  // 3. ORGANIZATION READINESS — How prepared are you?
+  // ---------------------------------------------------------------
+  sub(I, 17, '3. ORGANIZATION READINESS — How prepared are you?', 4);
+
+  inp(I, 18, '3a', formData.changeReadiness || 3, '0', false,
+    'How open is your team to new tools? 1=Resistant, 3=Neutral, 5=Champion. Affects adoption speed', 'High Impact');
+
+  inp(I, 19, '3b', formData.dataReadiness || 3, '0', false,
+    'How clean and accessible is your data? 1=Messy/siloed, 3=Usable, 5=Governed/API-ready', 'High Impact');
+
+  inp(I, 20, '3c', formData.execSponsor === false ? 'No' : 'Yes', null, false,
+    'Do you have a C-level or VP sponsor? Projects with exec support succeed 2x more often', 'High Impact');
+
+  // Row 21: blank
+  // ---------------------------------------------------------------
+  // 4. AI INVESTMENT — What will it cost?
+  // ---------------------------------------------------------------
+  sub(I, 22, '4. AI INVESTMENT — What will it cost?', 4);
+
+  inp(I, 23, '4a', formData.implementationBudget || 100000, DOL, false,
+    'Total budget for building/deploying the AI solution (engineering, setup, integration)', '');
+
+  inp(I, 24, '4b', formData.expectedTimeline || 4.5, '0.0', false,
+    'How many months to go live? Shorter timelines increase engineering cost', '');
+
+  inp(I, 25, '4c', formData.ongoingAnnualCost || 25000, DOL, false,
+    'Annual cost to run the AI after launch (API fees, hosting, maintenance, monitoring)', '');
+
+  inp(I, 26, '4d', formData.vendorsReplaced || 0, '0', false,
+    'How many existing software vendors or service contracts will AI replace?', '');
+
+  inp(I, 27, '4e', formData.vendorTerminationCost || 0, DOL, false,
+    'One-time cost to exit those vendor contracts (early termination fees, migration)', '');
+
+  // Row 28: blank
+  // ---------------------------------------------------------------
+  // 5. ADVANCED (Optional) — Fine-tune the model
+  // ---------------------------------------------------------------
+  sub(I, 29, '5. ADVANCED (Optional) — Fine-tune the model', 4);
+
+  inp(I, 30, '5a', formData.cashRealizationPct ?? 0.40, PCT, false,
+    'What % of efficiency gains translate to actual cash savings? (vs. just "freed up time")', '');
+
+  inp(I, 31, '5b', formData.annualRevenue || 0, DOL, false,
+    'Your company annual revenue — used for revenue acceleration estimates', '');
+
+  inp(I, 32, '5c', formData.contributionMargin ?? 0.30, PCT, false,
+    'Gross profit margin on revenue — how much of each new dollar is profit', '');
+
+  inp(I, 33, '5d', formData.includeCapacityValue ? 'Yes' : 'No', null, false,
+    'Count freed-up employee time as value in the ROI calculation?', '');
+
+  inp(I, 34, '5e', formData.includeRiskReduction ? 'Yes' : 'No', null, false,
+    'Count reduced compliance/regulatory risk as value in the ROI calculation?', '');
+
+  inp(I, 35, '5f', formData.includeRevenueAcceleration ? 'Yes' : 'No', null, false,
+    'Count revenue acceleration (faster time-to-market, better CX) in the ROI?', '');
+
+  inp(I, 36, '5g', formData.retainedTalentPremiumRate ?? 0.10, PCT, false,
+    'Wage increase for employees you keep (to retain top talent during AI transition)', '');
+
+  inp(I, 37, '5h', formData.isAgenticWorkflow ? 'Yes' : 'No', null, false,
+    'Is this a multi-step AI agent workflow? Uses 2-5x more API calls = higher ongoing cost', '');
+
+  // Data validation dropdowns (same cell positions as before)
   I.getRow(4).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$3:$A$12'] };
   I.getRow(5).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$37:$A$41'] };
-  I.getRow(6).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$45:$A$52'] };
+  I.getRow(6).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$45:$A$49'] };
   I.getRow(7).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$67:$A$79'] };
-  I.getRow(10).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$205:$A$216'] };
+  I.getRow(10).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$205:$A$210'] };
   I.getRow(18).getCell(2).dataValidation = { type: 'list', formulae: ['"1,2,3,4,5"'] };
   I.getRow(19).getCell(2).dataValidation = { type: 'list', formulae: ['"1,2,3,4,5"'] };
   I.getRow(20).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
@@ -390,9 +536,84 @@ export async function generateExcelModel(formData, mcResults) {
   I.getRow(35).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
   I.getRow(37).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
 
-  val(I, 39, 1, 'Blue cells are editable inputs. Change any value to recalculate the entire model.', null, inputFill);
-  I.mergeCells(39, 1, 39, 3);
-  I.getRow(39).getCell(1).font = { ...fontBold, color: { argb: `FF${NAVY}` } };
+  // ---------------------------------------------------------------
+  // 6. ARCHETYPE FINE-TUNING — Active archetype inputs surfaced here
+  // ---------------------------------------------------------------
+  {
+    const activeId = formData.projectArchetype || formData.processType || 'internal-process-automation';
+    const archInfo = PROJECT_ARCHETYPES.find(a => a.id === activeId);
+    const archSchema = ARCHETYPE_INPUT_MAP[activeId];
+    const archDefaults = archSchema ? getArchetypeInputDefaults(activeId) : {};
+    const archUserVals = (formData.archetypeInputs || {})[activeId] || formData.archetypeInputs || {};
+
+    sub(I, 39, `6. ARCHETYPE FINE-TUNING — ${archInfo?.label || activeId}`, 4);
+
+    let atRow = 40;
+    let atIdx = 0;
+    if (archSchema) {
+      for (const input of archSchema.inputs) {
+        const cellValue = archUserVals[input.key] ?? archDefaults[input.key] ?? input.default;
+        const letter = String.fromCharCode(97 + atIdx); // a, b, c, ...
+        const fmt = input.type === 'percent' ? PCT : input.format === '$#,##0' ? DOL : input.format || NUM;
+        inp(I, atRow, `6${letter}`, cellValue, fmt, false, input.note || input.label, '');
+        atIdx++;
+        atRow++;
+      }
+
+      // Computed outputs from archetype
+      for (const mapping of archSchema.computedMappings) {
+        const merged = { ...archDefaults, ...archUserVals };
+        let computed;
+        try { computed = mapping.jsMap(merged); } catch { computed = 'N/A'; }
+        const mFmt = mapping.mapsTo.includes('hours') ? NUM : mapping.mapsTo.includes('revenue') || mapping.mapsTo.includes('risk') ? DOL : PCT;
+        val(I, atRow, 1, '');
+        const cCell = I.getRow(atRow).getCell(2);
+        if (typeof computed === 'number') {
+          cCell.value = computed;
+          cCell.numFmt = mFmt;
+        } else {
+          cCell.value = computed;
+        }
+        cCell.fill = calcFill;
+        cCell.font = greenFontBold;
+        I.getRow(atRow).getCell(3).value = `Computed: ${mapping.mapsTo} (feeds into DCF engine)`;
+        I.getRow(atRow).getCell(3).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF2E7D32' } };
+        atRow++;
+      }
+    } else {
+      val(I, atRow, 1, '');
+      I.getRow(atRow).getCell(3).value = 'Select a project archetype above to see fine-tuning inputs.';
+      I.getRow(atRow).getCell(3).font = descFont;
+      atRow++;
+    }
+
+    // Footer
+    atRow += 1;
+    I.getRow(atRow).getCell(1).value = 'HOW TO READ THIS TAB';
+    I.getRow(atRow).getCell(1).font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF546E7A' } };
+    atRow++;
+    I.getRow(atRow).getCell(1).value = '';
+    I.getRow(atRow).getCell(2).value = 'KEY DRIVER';
+    I.getRow(atRow).getCell(2).fill = keyFill;
+    I.getRow(atRow).getCell(2).font = impactKeyFont;
+    I.getRow(atRow).getCell(3).value = 'These 3 inputs drive 80%+ of your ROI. Start here.';
+    I.getRow(atRow).getCell(3).font = descFont;
+    atRow++;
+    I.getRow(atRow).getCell(1).value = '';
+    I.getRow(atRow).getCell(2).value = 'Standard Input';
+    I.getRow(atRow).getCell(2).fill = stdFill;
+    I.getRow(atRow).getCell(2).font = stdInputFont;
+    I.getRow(atRow).getCell(3).value = 'These inputs matter but have less impact. Defaults are reasonable for most cases.';
+    I.getRow(atRow).getCell(3).font = descFont;
+    atRow++;
+    I.getRow(atRow).getCell(1).value = '';
+    I.getRow(atRow).getCell(2).value = 'Computed';
+    I.getRow(atRow).getCell(2).fill = calcFill;
+    I.getRow(atRow).getCell(2).font = greenFontBold;
+    I.getRow(atRow).getCell(3).value = 'Calculated by the model — not editable. Shows how your inputs feed the engine.';
+    I.getRow(atRow).getCell(3).font = descFont;
+  }
+
   printSetup(I);
 
   // ===================================================================
@@ -414,7 +635,7 @@ export async function generateExcelModel(formData, mcResults) {
   const activeArchetypeId = formData.projectArchetype || formData.processType || 'internal-process-automation';
   const archetypeInputValues = formData.archetypeInputs || {};
 
-  // Build all 12 archetype sections (each ~12 rows: subheader + 8 inputs + 2-3 computed + blank)
+  // Build all 6 archetype sections (each ~12 rows: subheader + 8 inputs + 2-3 computed + blank)
   let adRow = 6;
   const archetypeSectionRows = {}; // track start/end rows per archetype
 
@@ -523,8 +744,8 @@ export async function generateExcelModel(formData, mcResults) {
   // --- Industry & Readiness (rows 3-9) ---
   sub(KF, 3, 'Industry & Readiness', 3);
   val(KF, 4, 1, 'Automation Potential');
-  fml(KF, 4, 2, 'INDEX(Lookups!B3:I12,MATCH(Inputs!B4,Lookups!A3:A12,0),MATCH(Inputs!B10,Lookups!B2:I2,0))', PCT);
-  note(KF, 4, 3, 'INDEX/MATCH: Industry x Process Type');
+  fml(KF, 4, 2, 'INDEX(Lookups!B3:I12,MATCH(Inputs!B4,Lookups!A3:A12,0),MATCH(B10,Lookups!B2:I2,0))', PCT);
+  note(KF, 4, 3, 'INDEX/MATCH: Industry x Process Type (B10 = derived process type)');
   val(KF, 5, 1, 'Industry Success Rate');
   fml(KF, 5, 2, 'VLOOKUP(Inputs!B4,Lookups!A16:B25,2,FALSE)', PCT);
   val(KF, 6, 1, 'Adoption Rate');
@@ -537,6 +758,9 @@ export async function generateExcelModel(formData, mcResults) {
   val(KF, 9, 1, 'Risk Multiplier');
   fml(KF, 9, 2, '(B8+B5)/2', PCT);
   note(KF, 9, 3, '(OrgReadiness + IndustrySuccess) / 2');
+  val(KF, 10, 1, 'Process Type (derived)');
+  fml(KF, 10, 2, 'VLOOKUP(Inputs!B10,Lookups!A205:C210,3,FALSE)', null, calcFill);
+  note(KF, 10, 3, 'Maps archetype ID → primary process type');
 
   // --- Current State (rows 11-15) ---
   sub(KF, 11, 'Current State', 3);
@@ -553,7 +777,7 @@ export async function generateExcelModel(formData, mcResults) {
   // --- FTE Displacement (rows 17-21) ---
   sub(KF, 17, 'FTE Displacement', 3);
   val(KF, 18, 1, 'Raw Displaced');
-  fml(KF, 18, 2, 'ROUND(Inputs!B11*B4*B6,0)', '0');
+  fml(KF, 18, 2, 'ROUND(Inputs!B11*B77*B6,0)', '0');
   val(KF, 19, 1, 'Max Displaced');
   fml(KF, 19, 2, 'FLOOR(Inputs!B11*Lookups!B83,1)', '0');
   note(KF, 19, 3, '75% cap');
@@ -565,7 +789,7 @@ export async function generateExcelModel(formData, mcResults) {
   // --- Implementation Cost (rows 23-33) ---
   sub(KF, 23, 'Implementation Cost', 3);
   val(KF, 24, 1, 'AI Team Salary');
-  fml(KF, 24, 2, 'VLOOKUP(Inputs!B6,Lookups!A45:B52,2,FALSE)', DOL);
+  fml(KF, 24, 2, 'VLOOKUP(Inputs!B6,Lookups!A45:B49,2,FALSE)', DOL);
   val(KF, 25, 1, 'Scope Engineers');
   fml(KF, 25, 2, 'MAX(1,CEILING(Inputs!B11/12,1))', '0');
   val(KF, 26, 1, 'Timeline Pressure');
@@ -612,7 +836,7 @@ export async function generateExcelModel(formData, mcResults) {
   val(KF, 46, 1, 'Ongoing Labor');
   fml(KF, 46, 2, 'B45*B24', DOL);
   val(KF, 47, 1, 'Annual API Cost');
-  fml(KF, 47, 2, '(Inputs!B11*Inputs!B12*IF(Inputs!B37="Yes",2.5,1)*4.33*VLOOKUP(Inputs!B10,Lookups!A56:C63,3,FALSE)/1000)*VLOOKUP(Inputs!B10,Lookups!A56:B63,2,FALSE)*12', DOL);
+  fml(KF, 47, 2, '(Inputs!B11*Inputs!B12*IF(Inputs!B37="Yes",2.5,1)*4.33*VLOOKUP(B10,Lookups!A56:C63,3,FALSE)/1000)*VLOOKUP(B10,Lookups!A56:B63,2,FALSE)*12', DOL);
   note(KF, 47, 3, 'Agentic workflows use 2.5x API calls');
   val(KF, 48, 1, 'License + Retraining');
   fml(KF, 48, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:F41,6,FALSE)+B42*Lookups!B88', DOL);
@@ -628,11 +852,11 @@ export async function generateExcelModel(formData, mcResults) {
   val(KF, 54, 1, 'Headcount Savings (Risk-Adj)');
   fml(KF, 54, 2, 'B20*Inputs!B13*B9', DOL);
   val(KF, 55, 1, 'Efficiency Savings (Risk-Adj)');
-  fml(KF, 55, 2, 'MAX(0,(B13*B4)-B20*Inputs!B13)*B9', DOL);
+  fml(KF, 55, 2, 'MAX(0,(B13*B77)-B20*Inputs!B13)*B9', DOL);
   val(KF, 56, 1, 'Error Reduction (Risk-Adj)');
-  fml(KF, 56, 2, 'B14*B4*B9', DOL);
+  fml(KF, 56, 2, '(B13*B78)*B77*B9', DOL);
   val(KF, 57, 1, 'Tool Replacement (Risk-Adj)');
-  fml(KF, 57, 2, 'Inputs!B15*VLOOKUP(Inputs!B10,Lookups!A56:D63,4,FALSE)*B9', DOL);
+  fml(KF, 57, 2, 'Inputs!B15*B80*B9', DOL);
   val(KF, 58, 1, 'Enhancement Savings (RA)');
   fml(KF, 58, 2, 'B55+B56+B57', DOL);
   note(KF, 58, 3, 'Efficiency + Error + Tool');
@@ -641,7 +865,7 @@ export async function generateExcelModel(formData, mcResults) {
   val(KF, 60, 1, 'Net Annual Benefit');
   fmlBold(KF, 60, 2, 'B59-B51', DOL, calcFill);
   val(KF, 61, 1, 'Gross Annual Savings');
-  fml(KF, 61, 2, 'B15*B4', DOL);
+  fml(KF, 61, 2, 'Inputs!B15*B80', DOL);
 
   // --- Investment Summary (rows 63-69) ---
   sub(KF, 63, 'Investment Summary', 3);
@@ -684,7 +908,7 @@ export async function generateExcelModel(formData, mcResults) {
   fml(KF, 79, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 2}),'Archetype Detail'!B${adSummaryRow + 2},Inputs!B12),Inputs!B12)`, NUM, calcFill);
   note(KF, 79, 3, 'Uses archetype-refined value if available');
   val(KF, 80, 1, 'Adj Tool Replace %');
-  fml(KF, 80, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 3}),'Archetype Detail'!B${adSummaryRow + 3},VLOOKUP(Inputs!B10,Lookups!A56:D63,4,FALSE)),VLOOKUP(Inputs!B10,Lookups!A56:D63,4,FALSE))`, PCT, calcFill);
+  fml(KF, 80, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 3}),'Archetype Detail'!B${adSummaryRow + 3},VLOOKUP(B10,Lookups!A56:D63,4,FALSE)),VLOOKUP(B10,Lookups!A56:D63,4,FALSE))`, PCT, calcFill);
   val(KF, 81, 1, 'Revenue Impact');
   fml(KF, 81, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 4}),'Archetype Detail'!B${adSummaryRow + 4},0),0)`, DOL, calcFill);
   note(KF, 81, 3, 'Archetype-specific annual revenue impact');
@@ -801,7 +1025,7 @@ export async function generateExcelModel(formData, mcResults) {
   cols(PL, [35, 18, 18, 18, 18, 18, 18]);
   hdr(PL, 1, 'P&L & CASH FLOW — 5-Year DCF', 7);
   colorLegend(PL, 2);
-  tableHeaders(PL, 3, ['', 'Year 0', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']);
+  tableHeaders(PL, 3, ['', 'FY 0', 'FY 1', 'FY 2', 'FY 3', 'FY 4', 'FY 5']);
 
   // --- Parameters (rows 4-9) ---
   sub(PL, 4, 'PARAMETERS', 7);
@@ -863,7 +1087,11 @@ export async function generateExcelModel(formData, mcResults) {
   val(PL, 23, 1, 'PRESENT VALUE'); PL.getRow(23).getCell(1).font = fontBold;
   for (let y = 0; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
-    fmlBold(PL, 23, y + 2, `${c}21*${c}22`, DOL);
+    const cell = PL.getRow(23).getCell(y + 2);
+    cell.value = { formula: `${c}21*${c}22` };
+    cell.numFmt = DOL;
+    cell.fill = goldFill;
+    cell.font = goldFont;
   }
   val(PL, 24, 1, 'CUMULATIVE');
   fml(PL, 24, 2, 'B21', DOL);
@@ -875,14 +1103,14 @@ export async function generateExcelModel(formData, mcResults) {
 
   // --- Financial Metrics (rows 27-30) ---
   sub(PL, 26, 'FINANCIAL METRICS', 7);
-  val(PL, 27, 1, 'Net Present Value (NPV)');
-  fmlBold(PL, 27, 2, 'SUM(B23:G23)', DOL);
-  val(PL, 28, 1, 'IRR');
-  fmlBold(PL, 28, 2, 'IFERROR(MIN(MAX(IRR(B21:G21),Lookups!B96*-1),Lookups!B96),"N/A")', PCT);
-  val(PL, 29, 1, 'Payback (months)');
-  fml(PL, 29, 2, 'IF(B24>=0,0,IF(C24>=0,ROUND(-B24/C21*12,0),IF(D24>=0,ROUND(12+(-C24/D21*12),0),IF(E24>=0,ROUND(24+(-D24/E21*12),0),IF(F24>=0,ROUND(36+(-E24/F21*12),0),IF(G24>=0,ROUND(48+(-F24/G21*12),0),61))))))', '0');
-  val(PL, 30, 1, 'ROIC');
-  fmlBold(PL, 30, 2, "(SUM(C21:G21)-'Key Formulas'!B64)/'Key Formulas'!B68", PCT);
+  val(PL, 27, 1, 'Net Present Value (NPV)'); PL.getRow(27).getCell(1).font = fontBold;
+  { const cell = PL.getRow(27).getCell(2); cell.value = { formula: 'SUM(B23:G23)' }; cell.numFmt = DOL; cell.fill = goldFill; cell.font = goldFont; }
+  val(PL, 28, 1, 'IRR'); PL.getRow(28).getCell(1).font = fontBold;
+  { const cell = PL.getRow(28).getCell(2); cell.value = { formula: 'IFERROR(MIN(MAX(IRR(B21:G21),Lookups!B96*-1),Lookups!B96),"N/A")' }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
+  val(PL, 29, 1, 'Payback (months)'); PL.getRow(29).getCell(1).font = fontBold;
+  { const cell = PL.getRow(29).getCell(2); cell.value = { formula: 'IF(B24>=0,0,IF(C24>=0,ROUND(-B24/C21*12,0),IF(D24>=0,ROUND(12+(-C24/D21*12),0),IF(E24>=0,ROUND(24+(-D24/E21*12),0),IF(F24>=0,ROUND(36+(-E24/F21*12),0),IF(G24>=0,ROUND(48+(-F24/G21*12),0),61))))))' }; cell.numFmt = '0'; cell.fill = goldFill; cell.font = goldFont; }
+  val(PL, 30, 1, 'ROIC'); PL.getRow(30).getCell(1).font = fontBold;
+  { const cell = PL.getRow(30).getCell(2); cell.value = { formula: "(SUM(C21:G21)-'Key Formulas'!B64)/'Key Formulas'!B68" }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
 
   // --- ROIC Calculation Walkthrough (rows 32-38) ---
   sub(PL, 32, 'ROIC CALCULATION WALKTHROUGH', 7);
@@ -901,8 +1129,8 @@ export async function generateExcelModel(formData, mcResults) {
   val(PL, 37, 1, 'E. Net Return');
   fmlBold(PL, 37, 2, "B35-'Key Formulas'!B64", DOL, calcFill);
   note(PL, 37, 3, 'C - Upfront Investment');
-  val(PL, 38, 1, 'F. ROIC = E / D');
-  fmlBold(PL, 38, 2, 'IF(B36>0,B37/B36,0)', PCT);
+  val(PL, 38, 1, 'F. ROIC = E / D'); PL.getRow(38).getCell(1).font = fontBold;
+  { const cell = PL.getRow(38).getCell(2); cell.value = { formula: 'IF(B36>0,B37/B36,0)' }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
   note(PL, 38, 3, 'Net Return / Total Capital Deployed');
 
   // ROIC note
@@ -924,11 +1152,11 @@ export async function generateExcelModel(formData, mcResults) {
   val(SE, 4, 2, 0.75, DEC); val(SE, 4, 3, 1.00, DEC); val(SE, 4, 4, 1.25, DEC);
 
   sub(SE, 6, 'Year-by-Year Net Cash Flows', 4);
-  val(SE, 7, 1, 'Year 0');
+  val(SE, 7, 1, 'FY 0');
   for (let s = 0; s < 3; s++) fml(SE, 7, s + 2, "-'Key Formulas'!B64", DOL);
 
   for (let y = 1; y <= 5; y++) {
-    val(SE, 7 + y, 1, `Year ${y}`);
+    val(SE, 7 + y, 1, `FY ${y}`);
     for (let s = 0; s < 3; s++) {
       const m = `$${String.fromCharCode(66 + s)}$4`;
       const f = `('Key Formulas'!$B$58*Lookups!$D$${103 + y}*${m}*(1+Lookups!$B$86)^${y - 1}` +
@@ -1147,13 +1375,947 @@ export async function generateExcelModel(formData, mcResults) {
 
   printSetup(SE);
 
+  // ===================================================================
+  // TAB 7: V5 ANALYSIS — Workforce Alternatives, Break-Even Units, Cost Model
+  // ===================================================================
+  cols(V5, [32, 22, 22, 22, 22, 22]);
+  hdr(V5, 1, 'V5 ANALYSIS — CAPITAL ALLOCATION & UNIT ECONOMICS', 6);
+  colorLegend(V5, 2);
+
+  // --- Workforce Alternatives (rows 3-22) ---
+  sub(V5, 3, 'CAPITAL ALLOCATION: AI vs. ALTERNATIVES', 6);
+
+  if (results?.workforceAlternatives) {
+    const wa = results.workforceAlternatives;
+
+    tableHeaders(V5, 4, ['Strategy', 'Key Metric', '5-Year Economics', 'ROI', 'Risk Level', 'Timeframe']);
+
+    const fmt$ = (v) => typeof v === 'number' ? v : 0;
+    const fmtPct = (v) => typeof v === 'number' ? v : 0;
+
+    dataRow(V5, 5,
+      [wa.aiInvestment.label, fmt$(wa.aiInvestment.upfrontCost), fmt$(wa.aiInvestment.annual5YearNet), fmtPct(wa.aiInvestment.roi), wa.aiInvestment.riskLevel, `${wa.aiInvestment.paybackMonths} mo payback`],
+      [null, DOL, DOL, PCT, null, null]);
+    V5.getRow(5).getCell(1).fill = calcFill;
+    V5.getRow(5).getCell(1).font = greenFontBold;
+
+    dataRow(V5, 6,
+      [wa.hiring.label, fmt$(wa.hiring.annualCost), fmt$(wa.hiring.total5YearCost), fmtPct(wa.hiring.roi), wa.hiring.riskLevel, `${wa.hiring.rampMonths} mo ramp`],
+      [null, DOL, DOL, PCT, null, null]);
+
+    dataRow(V5, 7,
+      [wa.outsourcing.label, fmt$(wa.outsourcing.annualCost), fmt$(wa.outsourcing.total5YearNet), fmtPct(wa.outsourcing.roi), wa.outsourcing.riskLevel, `${wa.outsourcing.transitionMonths} mo transition`],
+      [null, DOL, DOL, PCT, null, null]);
+
+    dataRow(V5, 8,
+      [wa.statusQuo.label, fmt$(wa.statusQuo.annualCost), fmt$(wa.statusQuo.total5YearCost), fmtPct(wa.statusQuo.competitiveErosionRate), wa.statusQuo.riskLevel, 'N/A'],
+      [null, DOL, DOL, PCT, null, null]);
+    V5.getRow(8).getCell(1).fill = warnFill;
+
+    // Detailed breakdown headers
+    sub(V5, 10, 'DETAILED BREAKDOWN — AI AUTOMATION', 6);
+    val(V5, 11, 1, 'Upfront Investment'); val(V5, 11, 2, fmt$(wa.aiInvestment.upfrontCost), DOL, inputFill);
+    val(V5, 12, 1, '5-Year Net Return'); val(V5, 12, 2, fmt$(wa.aiInvestment.annual5YearNet), DOL, calcFill);
+    val(V5, 13, 1, 'ROI'); val(V5, 13, 2, fmtPct(wa.aiInvestment.roi), PCT, calcFill);
+    val(V5, 14, 1, 'NPV'); val(V5, 14, 2, fmt$(wa.aiInvestment.npv), DOL, resultFill);
+    V5.getRow(14).getCell(2).font = outputFont10;
+
+    sub(V5, 16, 'DETAILED BREAKDOWN — HIRE MORE STAFF', 6);
+    val(V5, 17, 1, 'FTEs Needed'); val(V5, 17, 2, wa.hiring.ftesNeeded, NUM, inputFill);
+    val(V5, 18, 1, 'Annual Cost (fully loaded)'); val(V5, 18, 2, fmt$(wa.hiring.annualCost), DOL, inputFill);
+    val(V5, 19, 1, 'Turnover Cost'); val(V5, 19, 2, fmt$(wa.hiring.turnoverCost), DOL);
+    val(V5, 20, 1, '5-Year Total Cost'); val(V5, 20, 2, fmt$(wa.hiring.total5YearCost), DOL, warnFill);
+
+    sub(V5, 22, 'DETAILED BREAKDOWN — OUTSOURCE / BPO', 6);
+    val(V5, 23, 1, 'Annual Cost'); val(V5, 23, 2, fmt$(wa.outsourcing.annualCost), DOL, inputFill);
+    val(V5, 24, 1, 'Annual Savings'); val(V5, 24, 2, fmt$(wa.outsourcing.annualSavings), DOL, calcFill);
+    val(V5, 25, 1, 'Quality Impact'); val(V5, 25, 2, wa.outsourcing.qualityImpact);
+    val(V5, 26, 1, 'Transition Period'); val(V5, 26, 2, `${wa.outsourcing.transitionMonths} months`);
+
+    sub(V5, 28, 'DETAILED BREAKDOWN — STATUS QUO (DO NOTHING)', 6);
+    val(V5, 29, 1, 'Annual Cost'); val(V5, 29, 2, fmt$(wa.statusQuo.annualCost), DOL, inputFill);
+    val(V5, 30, 1, '5-Year Total Cost'); val(V5, 30, 2, fmt$(wa.statusQuo.total5YearCost), DOL, warnFill);
+    val(V5, 31, 1, 'Opportunity Cost'); val(V5, 31, 2, fmt$(wa.statusQuo.opportunityCost), DOL, warnFill);
+    val(V5, 32, 1, 'Competitive Erosion Rate'); val(V5, 32, 2, fmtPct(wa.statusQuo.competitiveErosionRate), PCT, warnFill);
+  } else {
+    note(V5, 4, 1, 'Workforce alternatives data not available for this configuration.');
+  }
+
+  // --- Break-Even Unit Economics (rows 34+) ---
+  let beRow = 35;
+  sub(V5, beRow - 1, 'BREAK-EVEN UNIT ECONOMICS', 6);
+
+  if (results?.breakEvenUnits && results.breakEvenUnits.length > 0) {
+    const items = results.breakEvenUnits;
+    const isFloor = items[0]?.direction === 'floor';
+
+    note(V5, beRow, 1, isFloor
+      ? 'Minimum input values before NPV turns negative (safety margin from current values)'
+      : 'Target input values needed for NPV to turn positive');
+    beRow += 1;
+
+    tableHeaders(V5, beRow, [
+      'Input Variable', 'Current Value', 'Break-Even Value',
+      isFloor ? 'Safety Margin' : 'Gap to Target', 'Direction', '',
+    ]);
+    beRow += 1;
+
+    items.forEach((item) => {
+      const fmtVal = (v, type) => {
+        if (type === 'percent') return v;
+        return v;
+      };
+      const curFmt = item.type === 'percent' ? PCT : NUM;
+      const beFmt = item.type === 'percent' ? PCT : NUM;
+      dataRow(V5, beRow, [
+        item.label,
+        fmtVal(item.currentValue, item.type),
+        fmtVal(item.breakEvenValue, item.type),
+        item.marginPct / 100,
+        isFloor ? 'Floor' : 'Target',
+        '',
+      ], [null, curFmt, beFmt, PCT, null, null]);
+
+      // Color the margin cell based on health
+      const marginCell = V5.getRow(beRow).getCell(4);
+      if (isFloor) {
+        marginCell.fill = item.marginPct > 30 ? calcFill : item.marginPct > 10 ? inputFill : warnFill;
+      } else {
+        marginCell.fill = inputFill;
+      }
+      marginCell.font = fontBold;
+      beRow += 1;
+    });
+  } else {
+    note(V5, beRow, 1, 'Break-even unit economics not available. Requires archetype-specific inputs.');
+    beRow += 1;
+  }
+
+  // --- Consulting Assumptions (Token Economics, Drift, Agent) ---
+  beRow += 2;
+  sub(V5, beRow, 'AI COST MODEL & TECHNICAL ASSUMPTIONS', 6);
+  beRow += 1;
+
+  const ca = results?.consultingAssumptions || {};
+  val(V5, beRow, 1, 'Model Tier'); val(V5, beRow, 2, ca.modelTier || 'standard'); beRow++;
+  val(V5, beRow, 1, 'Token-Based Costing'); val(V5, beRow, 2, ca.useTokenModel ? 'Enabled' : 'Disabled'); beRow++;
+  val(V5, beRow, 1, 'LLM Calls Per Task'); val(V5, beRow, 2, ca.llmCallsPerTask || 3, NUM); beRow++;
+  val(V5, beRow, 1, 'Prompt Caching Rate'); val(V5, beRow, 2, ca.promptCachingRate || 0, PCT); beRow++;
+  val(V5, beRow, 1, 'Model Drift Rate'); val(V5, beRow, 2, ca.modelDriftRate || 0.03, PCT, warnFill); beRow++;
+  val(V5, beRow, 1, 'Agentic Workflow'); val(V5, beRow, 2, ca.isAgenticWorkflow ? 'Yes' : 'No'); beRow++;
+  if (ca.isAgenticWorkflow) {
+    val(V5, beRow, 1, 'Agent Complexity'); val(V5, beRow, 2, ca.agentComplexity || 'standard'); beRow++;
+  }
+
+  // Drift schedule
+  beRow += 1;
+  sub(V5, beRow, 'MODEL DRIFT SCHEDULE', 6);
+  beRow += 1;
+  const driftRate = ca.modelDriftRate || 0.03;
+  tableHeaders(V5, beRow, ['Year', 'Drift Factor', 'Effective Benefit', 'Cumulative Reduction', '', '']);
+  beRow += 1;
+  for (let yr = 0; yr < 5; yr++) {
+    const factor = Math.pow(1 - driftRate, yr);
+    dataRow(V5, beRow, [
+      `FY ${yr + 1}`, factor, factor, 1 - factor, '', '',
+    ], [null, DEC, PCT, PCT, null, null]);
+    beRow++;
+  }
+
+  note(V5, beRow + 1, 1, 'Model drift rate based on Stanford HAI research. Drift compounds annually and reduces projected benefits in years 2-5.');
+
+  printSetup(V5);
+
+  // ===================================================================
+  // TAB 8: MODEL AUDIT — All-formula validation tab
+  // Every value in col B is a formula referencing other tabs.
+  // Every status in col D is an IF formula returning "ok" / "ERROR" / "—".
+  // ===================================================================
+  const okFill    = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+  const errFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } };
+  const okFont    = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
+  const errFont   = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFC62828' } };
+
+  cols(AU, [42, 28, 28, 12]);
+  hdr(AU, 1, 'MODEL AUDIT — Output Validation (All Formulas)', 4);
+  tableHeaders(AU, 2, ['Check', 'Value', 'Condition', 'Status']);
+
+  // Helper: write a formula-based audit row
+  // valFormula: Excel formula for the value cell (col B)
+  // condition: descriptive text (col C)
+  // statusFormula: Excel formula that returns "ok", "ERROR", or "—" (col D)
+  // valFmt: optional number format for the value cell
+  let auRow = 3;
+
+  function auditFml(label, valFormula, valFmt, condition, statusFormula) {
+    const r = auRow;
+    val(AU, r, 1, label);
+    AU.getRow(r).getCell(1).font = font10;
+
+    // Value (formula)
+    fml(AU, r, 2, valFormula, valFmt || null, null);
+    AU.getRow(r).getCell(2).fill = calcFill;
+
+    // Condition (text)
+    val(AU, r, 3, condition);
+    AU.getRow(r).getCell(3).font = font9i;
+
+    // Status (formula) — conditional formatting via cell formula
+    fml(AU, r, 4, statusFormula, null, null);
+    AU.getRow(r).getCell(4).alignment = { horizontal: 'center' };
+    // Font/fill will be set via conditional formatting rules at the end
+
+    auRow++;
+    return r;
+  }
+
+  function auditSection(title) {
+    sub(AU, auRow, title, 4);
+    auRow++;
+  }
+
+  // Track first and last data rows for conditional formatting + summary
+  const auDataStart = 3;
+
+  // =========================
+  // SECTION: INPUT VALIDATION
+  // =========================
+  auditSection('INPUT VALIDATION');
+
+  auditFml('Industry', 'Inputs!B4', null,
+    'Not empty',
+    'IF(LEN(Inputs!B4)>0,"ok","ERROR")');
+
+  auditFml('Company Size', 'Inputs!B5', null,
+    'Not empty',
+    'IF(LEN(Inputs!B5)>0,"ok","ERROR")');
+
+  auditFml('Team Size', 'Inputs!B11', NUM,
+    '> 0',
+    'IF(AND(ISNUMBER(Inputs!B11),Inputs!B11>0),"ok","ERROR")');
+
+  auditFml('Avg Salary', 'Inputs!B13', DOL,
+    '> 0',
+    'IF(AND(ISNUMBER(Inputs!B13),Inputs!B13>0),"ok","ERROR")');
+
+  auditFml('Error Rate', 'Inputs!B14', PCT,
+    '0% - 50%',
+    'IF(AND(ISNUMBER(Inputs!B14),Inputs!B14>=0,Inputs!B14<=0.5),"ok","ERROR")');
+
+  auditFml('Implementation Budget', 'Inputs!B23', DOL,
+    '> 0',
+    'IF(AND(ISNUMBER(Inputs!B23),Inputs!B23>0),"ok","ERROR")');
+
+  auditFml('Expected Timeline', 'Inputs!B24', '0.0',
+    '> 0',
+    'IF(AND(ISNUMBER(Inputs!B24),Inputs!B24>0),"ok","ERROR")');
+
+  auditFml('Ongoing Annual Cost', 'Inputs!B25', DOL,
+    '> 0',
+    'IF(AND(ISNUMBER(Inputs!B25),Inputs!B25>0),"ok","ERROR")');
+
+  auditFml('Change Readiness', 'Inputs!B18', '0',
+    '1 - 5',
+    'IF(AND(ISNUMBER(Inputs!B18),Inputs!B18>=1,Inputs!B18<=5),"ok","ERROR")');
+
+  auditFml('Data Readiness', 'Inputs!B19', '0',
+    '1 - 5',
+    'IF(AND(ISNUMBER(Inputs!B19),Inputs!B19>=1,Inputs!B19<=5),"ok","ERROR")');
+
+  auditFml('Cash Realization %', 'Inputs!B30', PCT,
+    '0% - 100%',
+    'IF(AND(ISNUMBER(Inputs!B30),Inputs!B30>=0,Inputs!B30<=1),"ok","ERROR")');
+
+  // =========================
+  // SECTION: KEY FORMULAS / ASSUMPTIONS
+  // =========================
+  auditSection('KEY FORMULAS & ASSUMPTIONS');
+
+  auditFml('Automation Potential', "'Key Formulas'!B4", PCT,
+    '0% - 95%',
+    "IF(AND(ISNUMBER('Key Formulas'!B4),'Key Formulas'!B4>=0,'Key Formulas'!B4<=0.95),\"ok\",\"ERROR\")");
+
+  auditFml('Adoption Rate', "'Key Formulas'!B6", PCT,
+    '> 0 and <= 1',
+    "IF(AND(ISNUMBER('Key Formulas'!B6),'Key Formulas'!B6>0,'Key Formulas'!B6<=1),\"ok\",\"ERROR\")");
+
+  auditFml('Risk Multiplier', "'Key Formulas'!B9", PCT,
+    '> 0 and <= 1',
+    "IF(AND(ISNUMBER('Key Formulas'!B9),'Key Formulas'!B9>0,'Key Formulas'!B9<=1),\"ok\",\"ERROR\")");
+
+  auditFml('Discount Rate', "'Key Formulas'!B69", PCT,
+    '5% - 20%',
+    "IF(AND(ISNUMBER('Key Formulas'!B69),'Key Formulas'!B69>=0.05,'Key Formulas'!B69<=0.2),\"ok\",\"ERROR\")");
+
+  auditFml('Displaced FTEs', "'Key Formulas'!B20", '0',
+    '0 - Team Size',
+    "IF(AND(ISNUMBER('Key Formulas'!B20),'Key Formulas'!B20>=0,'Key Formulas'!B20<=Inputs!B11),\"ok\",\"ERROR\")");
+
+  auditFml('Retained FTEs', "'Key Formulas'!B21", '0',
+    '>= 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B21),'Key Formulas'!B21>=0),\"ok\",\"ERROR\")");
+
+  auditFml('Displaced + Retained = Team', "'Key Formulas'!B20+'Key Formulas'!B21", '0',
+    '= Team Size',
+    "IF(ABS('Key Formulas'!B20+'Key Formulas'!B21-Inputs!B11)<1,\"ok\",\"ERROR\")");
+
+  auditFml('Impl Engineers', "'Key Formulas'!B29", '0',
+    '>= 1',
+    "IF(AND(ISNUMBER('Key Formulas'!B29),'Key Formulas'!B29>=1),\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: CURRENT STATE
+  // =========================
+  auditSection('CURRENT STATE');
+
+  auditFml('Annual Labor Cost', "'Key Formulas'!B13", DOL,
+    '> 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B13),'Key Formulas'!B13>0),\"ok\",\"ERROR\")");
+
+  auditFml('Rework Cost', "'Key Formulas'!B14", DOL,
+    '>= 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B14),'Key Formulas'!B14>=0),\"ok\",\"ERROR\")");
+
+  auditFml('Total Current Cost', "'Key Formulas'!B15", DOL,
+    '>= Labor Cost',
+    "IF(AND(ISNUMBER('Key Formulas'!B15),'Key Formulas'!B15>='Key Formulas'!B13),\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: INVESTMENT COSTS
+  // =========================
+  auditSection('INVESTMENT COSTS');
+
+  auditFml('Realistic Impl Cost', "'Key Formulas'!B42", DOL,
+    '> 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B42),'Key Formulas'!B42>0),\"ok\",\"ERROR\")");
+
+  auditFml('One-Time Costs', "'Key Formulas'!B40", DOL,
+    '>= 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B40),'Key Formulas'!B40>=0),\"ok\",\"ERROR\")");
+
+  auditFml('Upfront Investment', "'Key Formulas'!B64", DOL,
+    '> 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B64),'Key Formulas'!B64>0),\"ok\",\"ERROR\")");
+
+  auditFml('Separation Cost', "'Key Formulas'!B67", DOL,
+    '>= 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B67),'Key Formulas'!B67>=0),\"ok\",\"ERROR\")");
+
+  auditFml('Total Investment', "'Key Formulas'!B68", DOL,
+    '>= Upfront',
+    "IF(AND(ISNUMBER('Key Formulas'!B68),'Key Formulas'!B68>='Key Formulas'!B64),\"ok\",\"ERROR\")");
+
+  auditFml('Base Ongoing Cost', "'Key Formulas'!B51", DOL,
+    '> 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B51),'Key Formulas'!B51>0),\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: ANNUAL SAVINGS
+  // =========================
+  auditSection('ANNUAL SAVINGS');
+
+  auditFml('Headcount Savings (RA)', "'Key Formulas'!B54", DOL,
+    '>= 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B54),'Key Formulas'!B54>=0),\"ok\",\"ERROR\")");
+
+  auditFml('Enhancement Savings (RA)', "'Key Formulas'!B58", DOL,
+    '>= 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B58),'Key Formulas'!B58>=0),\"ok\",\"ERROR\")");
+
+  auditFml('Total Risk-Adj Savings', "'Key Formulas'!B59", DOL,
+    '> 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B59),'Key Formulas'!B59>0),\"ok\",\"ERROR\")");
+
+  auditFml('Net Annual Benefit', "'Key Formulas'!B60", DOL,
+    'Is a number',
+    "IF(ISNUMBER('Key Formulas'!B60),\"ok\",\"ERROR\")");
+
+  auditFml('Gross Annual Savings', "'Key Formulas'!B61", DOL,
+    '> 0',
+    "IF(AND(ISNUMBER('Key Formulas'!B61),'Key Formulas'!B61>0),\"ok\",\"ERROR\")");
+
+  auditFml('Gross >= Net Savings', "'Key Formulas'!B61-'Key Formulas'!B60", DOL,
+    '>= 0',
+    "IF('Key Formulas'!B61>='Key Formulas'!B60,\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: P&L YEAR-BY-YEAR (BASE CASE)
+  // =========================
+  auditSection('P&L YEAR-BY-YEAR (BASE CASE)');
+
+  for (let y = 1; y <= 5; y++) {
+    const c = String.fromCharCode(66 + y); // C, D, E, F, G
+    auditFml(`FY ${y} Gross Savings`, `'P&L & Cash Flow'!${c}14`, DOL,
+      '> 0',
+      `IF(AND(ISNUMBER('P&L & Cash Flow'!${c}14),'P&L & Cash Flow'!${c}14>0),"ok","ERROR")`);
+  }
+
+  for (let y = 1; y <= 5; y++) {
+    const c = String.fromCharCode(66 + y);
+    auditFml(`FY ${y} Net Cash Flow`, `'P&L & Cash Flow'!${c}21`, DOL,
+      'Is a number',
+      `IF(ISNUMBER('P&L & Cash Flow'!${c}21),"ok","ERROR")`);
+  }
+
+  auditFml('FY 0 Cash Flow (upfront)', "'P&L & Cash Flow'!B21", DOL,
+    '< 0 (outflow)',
+    "IF(AND(ISNUMBER('P&L & Cash Flow'!B21),'P&L & Cash Flow'!B21<0),\"ok\",\"ERROR\")");
+
+  auditFml('FY 5 Cumulative', "'P&L & Cash Flow'!G24", DOL,
+    'Is a number',
+    "IF(ISNUMBER('P&L & Cash Flow'!G24),\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: FINANCIAL METRICS
+  // =========================
+  auditSection('FINANCIAL METRICS (BASE CASE)');
+
+  auditFml('NPV', "'P&L & Cash Flow'!B27", DOL,
+    'Is a finite number',
+    "IF(AND(ISNUMBER('P&L & Cash Flow'!B27),NOT(ISERROR('P&L & Cash Flow'!B27))),\"ok\",\"ERROR\")");
+
+  auditFml('IRR', "'P&L & Cash Flow'!B28", PCT,
+    'Is a number (or N/A)',
+    "IF(OR(ISNUMBER('P&L & Cash Flow'!B28),'P&L & Cash Flow'!B28=\"N/A\"),\"ok\",\"ERROR\")");
+
+  auditFml('Payback (months)', "'P&L & Cash Flow'!B29", '0',
+    '> 0 and <= 61',
+    "IF(AND(ISNUMBER('P&L & Cash Flow'!B29),'P&L & Cash Flow'!B29>0,'P&L & Cash Flow'!B29<=61),\"ok\",\"ERROR\")");
+
+  auditFml('ROIC', "'P&L & Cash Flow'!B30", PCT,
+    'Is a finite number',
+    "IF(AND(ISNUMBER('P&L & Cash Flow'!B30),NOT(ISERROR('P&L & Cash Flow'!B30))),\"ok\",\"ERROR\")");
+
+  // ROIC cross-check: P&L ROIC should match the walkthrough
+  auditFml('ROIC Cross-Check (walkthrough)', "'P&L & Cash Flow'!B38", PCT,
+    'Matches B30',
+    "IF(ABS('P&L & Cash Flow'!B30-'P&L & Cash Flow'!B38)<0.01,\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: SCENARIO ORDERING
+  // =========================
+  auditSection('SCENARIO ORDERING');
+
+  auditFml('Conservative NPV', 'Sensitivity!B14', DOL,
+    '<= Base NPV',
+    'IF(Sensitivity!B14<=Sensitivity!C14+1,"ok","ERROR")');
+
+  auditFml('Base NPV', 'Sensitivity!C14', DOL,
+    '<= Optimistic NPV',
+    'IF(Sensitivity!C14<=Sensitivity!D14+1,"ok","ERROR")');
+
+  auditFml('Optimistic NPV', 'Sensitivity!D14', DOL,
+    'Is finite',
+    'IF(AND(ISNUMBER(Sensitivity!D14),NOT(ISERROR(Sensitivity!D14))),"ok","ERROR")');
+
+  auditFml('Conservative ROIC', 'Sensitivity!B16', PCT,
+    '<= Base ROIC',
+    'IF(Sensitivity!B16<=Sensitivity!C16+0.001,"ok","ERROR")');
+
+  auditFml('Base ROIC', 'Sensitivity!C16', PCT,
+    '<= Optimistic ROIC',
+    'IF(Sensitivity!C16<=Sensitivity!D16+0.001,"ok","ERROR")');
+
+  auditFml('Optimistic Payback', 'Sensitivity!D17', '0',
+    '<= Base Payback',
+    'IF(Sensitivity!D17<=Sensitivity!C17+1,"ok","ERROR")');
+
+  auditFml('Base Payback', 'Sensitivity!C17', '0',
+    '<= Conservative Payback',
+    'IF(Sensitivity!C17<=Sensitivity!B17+1,"ok","ERROR")');
+
+  // =========================
+  // SECTION: CROSS-TAB CONSISTENCY
+  // =========================
+  auditSection('CROSS-TAB CONSISTENCY');
+
+  auditFml('Summary NPV = P&L NPV', "Summary!B4-'P&L & Cash Flow'!B27", DOL,
+    'Difference = 0',
+    "IF(ABS(Summary!B4-'P&L & Cash Flow'!B27)<1,\"ok\",\"ERROR\")");
+
+  auditFml('Summary ROIC = P&L ROIC', "Summary!B6-'P&L & Cash Flow'!B30", PCT,
+    'Difference < 0.1%',
+    "IF(ABS(Summary!B6-'P&L & Cash Flow'!B30)<0.001,\"ok\",\"ERROR\")");
+
+  auditFml('Summary Payback = P&L Payback', "Summary!B7-'P&L & Cash Flow'!B29", '0',
+    'Difference = 0',
+    "IF(ABS(Summary!B7-'P&L & Cash Flow'!B29)<1,\"ok\",\"ERROR\")");
+
+  auditFml('Upfront: Summary = KF', "Summary!B11-'Key Formulas'!B64", DOL,
+    'Difference = 0',
+    "IF(ABS(Summary!B11-'Key Formulas'!B64)<1,\"ok\",\"ERROR\")");
+
+  auditFml('Capital: Summary = KF', "Summary!B13-'Key Formulas'!B68", DOL,
+    'Difference = 0',
+    "IF(ABS(Summary!B13-'Key Formulas'!B68)<1,\"ok\",\"ERROR\")");
+
+  auditFml('Sensitivity Base NPV = P&L NPV', "Sensitivity!C14-'P&L & Cash Flow'!B27", DOL,
+    'Difference < $100',
+    "IF(ABS(Sensitivity!C14-'P&L & Cash Flow'!B27)<100,\"ok\",\"ERROR\")");
+
+  // =========================
+  // SECTION: SENSITIVITY TORNADO CHECKS
+  // =========================
+  auditSection('SENSITIVITY TORNADO');
+
+  // Each tornado variable should have NPV Low < NPV High (or close)
+  for (let i = 0; i < 6; i++) {
+    const r = 26 + i;
+    const name = ['Team Size', 'Avg Salary', 'Error Rate', 'Automation Potential', 'Implementation Cost', 'Ongoing Cost'][i];
+    auditFml(`${name}: NPV range`, `Sensitivity!F${r}-Sensitivity!E${r}`, DOL,
+      'High >= Low',
+      `IF(Sensitivity!F${r}>=Sensitivity!E${r}-1,"ok","ERROR")`);
+  }
+
+  // Discount rate sensitivity
+  auditFml('Discount Rate: NPV range', 'Sensitivity!F47-Sensitivity!E47', DOL,
+    'Low DR gives higher NPV',
+    'IF(Sensitivity!E47>=Sensitivity!F47-1,"ok","ERROR")');
+
+  // =========================
+  // SECTION: MONTE CARLO (snapshot values — hardcoded from MC run)
+  // =========================
+  auditSection('MONTE CARLO SIMULATION');
+
+  if (mcResults) {
+    // MC results are inherently stochastic — written as values, not formulas.
+    // But the audit checks on those values ARE formulas.
+    const mcStartRow = auRow;
+
+    // Write MC values
+    val(AU, auRow, 1, 'Sample Size'); val(AU, auRow, 2, mcResults.sampleSize, NUM); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, '>= 100');
+    fml(AU, auRow, 4, `IF(B${auRow}>=100,"ok","ERROR")`);
+    auRow++;
+
+    val(AU, auRow, 1, 'P(Positive NPV)'); val(AU, auRow, 2, mcResults.probabilityPositiveNPV, PCT); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, '0 - 1');
+    fml(AU, auRow, 4, `IF(AND(B${auRow}>=0,B${auRow}<=1),"ok","ERROR")`);
+    auRow++;
+
+    val(AU, auRow, 1, 'P10 NPV'); val(AU, auRow, 2, mcResults.npv?.p10 ?? 0, DOL); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, 'Is a number');
+    fml(AU, auRow, 4, `IF(ISNUMBER(B${auRow}),"ok","ERROR")`);
+    const p10Row = auRow;
+    auRow++;
+
+    val(AU, auRow, 1, 'P50 NPV'); val(AU, auRow, 2, mcResults.npv?.p50 ?? 0, DOL); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, '>= P10');
+    fml(AU, auRow, 4, `IF(B${auRow}>=B${p10Row}-1,"ok","ERROR")`);
+    const p50Row = auRow;
+    auRow++;
+
+    val(AU, auRow, 1, 'P90 NPV'); val(AU, auRow, 2, mcResults.npv?.p90 ?? 0, DOL); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, '>= P50');
+    fml(AU, auRow, 4, `IF(B${auRow}>=B${p50Row}-1,"ok","ERROR")`);
+    auRow++;
+
+    val(AU, auRow, 1, 'Mean NPV'); val(AU, auRow, 2, mcResults.npv?.mean ?? 0, DOL); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, 'Is finite');
+    fml(AU, auRow, 4, `IF(AND(ISNUMBER(B${auRow}),NOT(ISERROR(B${auRow}))),"ok","ERROR")`);
+    auRow++;
+
+    val(AU, auRow, 1, 'Std Dev NPV'); val(AU, auRow, 2, mcResults.npv?.stdDev ?? 0, DOL); AU.getRow(auRow).getCell(2).fill = calcFill;
+    val(AU, auRow, 3, '>= 0');
+    fml(AU, auRow, 4, `IF(B${auRow}>=0,"ok","ERROR")`);
+    auRow++;
+
+    if (mcResults.tailRisk) {
+      val(AU, auRow, 1, 'P5 Worst Case NPV'); val(AU, auRow, 2, mcResults.tailRisk.p5Npv ?? 0, DOL); AU.getRow(auRow).getCell(2).fill = calcFill;
+      val(AU, auRow, 3, 'Is a number');
+      fml(AU, auRow, 4, `IF(ISNUMBER(B${auRow}),"ok","ERROR")`);
+      auRow++;
+
+      val(AU, auRow, 1, 'P(Capital Loss >50%)'); val(AU, auRow, 2, mcResults.tailRisk.probCapitalLoss50 ?? 0, PCT); AU.getRow(auRow).getCell(2).fill = calcFill;
+      val(AU, auRow, 3, '0 - 1');
+      fml(AU, auRow, 4, `IF(AND(B${auRow}>=0,B${auRow}<=1),"ok","ERROR")`);
+      auRow++;
+    }
+  } else {
+    val(AU, auRow, 1, 'Monte Carlo'); val(AU, auRow, 2, 'Not computed'); val(AU, auRow, 3, '—');
+    AU.getRow(auRow).getCell(4).value = '—';
+    AU.getRow(auRow).getCell(4).font = font9i;
+    AU.getRow(auRow).getCell(4).alignment = { horizontal: 'center' };
+    auRow++;
+  }
+
+  // =========================
+  // SUMMARY — formula-based counts
+  // =========================
+  auRow += 1;
+  const auDataEnd = auRow - 2;
+  sub(AU, auRow, 'SUMMARY', 4);
+  auRow++;
+
+  const sumStartRow = auRow;
+  val(AU, auRow, 1, 'Checks Passed');
+  fmlBold(AU, auRow, 2, `COUNTIF(D${auDataStart}:D${auDataEnd},"ok")`, NUM, okFill);
+  AU.getRow(auRow).getCell(2).font = okFont;
+  auRow++;
+
+  val(AU, auRow, 1, 'Errors Found');
+  fmlBold(AU, auRow, 2, `COUNTIF(D${auDataStart}:D${auDataEnd},"ERROR")`, NUM, errFill);
+  AU.getRow(auRow).getCell(2).font = errFont;
+  const errCountRow = auRow;
+  auRow++;
+
+  val(AU, auRow, 1, 'Not Applicable');
+  fml(AU, auRow, 2, `COUNTIF(D${auDataStart}:D${auDataEnd},"${'\u2014'}")`, NUM);
+  auRow++;
+
+  val(AU, auRow, 1, 'Overall Status');
+  fmlBold(AU, auRow, 2,
+    `IF(B${errCountRow}=0,"ALL CHECKS PASSED",B${errCountRow}&" ERROR"&IF(B${errCountRow}>1,"S","")&" FOUND")`,
+    null, null);
+  // Conditional font via formula: green if 0 errors, red otherwise
+  AU.getRow(auRow).getCell(2).font = { name: 'Calibri', size: 12, bold: true };
+  AU.mergeCells(auRow, 2, auRow, 4);
+
+  // --- Conditional formatting for the entire Status column ---
+  AU.addConditionalFormatting({
+    ref: `D${auDataStart}:D${auDataEnd}`,
+    rules: [
+      {
+        type: 'cellIs', operator: 'equal', formulae: ['"ok"'],
+        style: { font: { color: { argb: 'FF2E7D32' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } } },
+      },
+      {
+        type: 'cellIs', operator: 'equal', formulae: ['"ERROR"'],
+        style: { font: { color: { argb: 'FFC62828' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } } },
+      },
+      {
+        type: 'cellIs', operator: 'equal', formulae: ['"\u2014"'],
+        style: { font: { color: { argb: 'FF9E9E9E' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } } },
+      },
+    ],
+  });
+
+  // Conditional formatting for Overall Status cell
+  AU.addConditionalFormatting({
+    ref: `B${auRow}:D${auRow}`,
+    rules: [
+      {
+        type: 'containsText', operator: 'containsText', text: 'ALL CHECKS PASSED',
+        style: { font: { color: { argb: 'FF2E7D32' }, bold: true, size: 12 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } } },
+      },
+      {
+        type: 'containsText', operator: 'containsText', text: 'ERROR',
+        style: { font: { color: { argb: 'FFC62828' }, bold: true, size: 12 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } } },
+      },
+    ],
+  });
+
+  printSetup(AU);
+
+  // ===================================================================
+  // TAB: ASSUMPTION DEFINITIONS — Archetype cases with key drivers
+  // ===================================================================
+  cols(DF, [30, 45, 55, 40]);
+  hdr(DF, 1, 'ASSUMPTION DEFINITIONS BY USE CASE', 4);
+
+  // Column headers
+  const defHdrRow = DF.getRow(3);
+  ['Use Case', 'Key Drivers', 'Definition', 'Why It Matters'].forEach((h, ci) => {
+    const cell = defHdrRow.getCell(ci + 1);
+    cell.value = h;
+    cell.font = headerFont;
+    cell.fill = headerFill;
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  });
+  defHdrRow.height = 22;
+
+  const ARCHETYPE_DEFINITIONS = [
+    {
+      label: 'Internal Process Automation',
+      drivers: 'Process volume, handling time, error rate, automation %',
+      definition: 'Automate repetitive internal workflows, document handling, and back-office operations using AI to reduce manual effort and errors.',
+      importance: 'Typically the fastest ROI path — high volume processes with measurable time savings and error reduction compound quickly.',
+    },
+    {
+      label: 'Customer-Facing AI',
+      drivers: 'Ticket volume, resolution time, CSAT, churn rate',
+      definition: 'Deploy AI-powered customer interactions including chatbots, intelligent routing, and personalized support experiences.',
+      importance: 'Directly impacts revenue retention and customer satisfaction — a 1-point CSAT improvement can increase retention by 5-10%.',
+    },
+    {
+      label: 'Data, Analytics & FP&A',
+      drivers: 'Reports/month, analyst hours, data sources, close cycle, reconciliation volume',
+      definition: 'Automate reporting, forecasting, financial close, reconciliation, and data-driven decision making to reduce analyst burden and improve insight speed.',
+      importance: 'Frees expensive analyst and finance team time for strategic work. Days-to-close reduction and faster forecasting compound across the organization.',
+    },
+    {
+      label: 'Revenue & Growth AI',
+      drivers: 'Pipeline value, conversion rate, deal cycle, lead volume',
+      definition: 'Drive revenue through AI-enhanced sales intelligence, marketing optimization, and market opportunity identification.',
+      importance: 'Revenue-eligible archetype — models both cost savings and top-line revenue impact from improved conversion.',
+    },
+    {
+      label: 'Risk, Compliance & Legal AI',
+      drivers: 'Audit volume, compliance checks, violation cost, contracts/month, review hours',
+      definition: 'Reduce compliance risk, automate contract review, improve audit quality, and streamline regulatory and legal processes with AI-driven monitoring.',
+      importance: 'Penalty avoidance, audit efficiency, and contract acceleration — a single compliance failure can cost 10-100x the annual AI investment.',
+    },
+    {
+      label: 'Knowledge Management AI',
+      drivers: 'Search queries/day, onboarding time, document count, resolution rate',
+      definition: 'Capture institutional knowledge, power enterprise search, and automate documentation with AI-driven knowledge systems.',
+      importance: 'Reduces knowledge loss from turnover and cuts onboarding time — critical for scaling organizations.',
+    },
+  ];
+
+  ARCHETYPE_DEFINITIONS.forEach((arch, i) => {
+    const r = DF.getRow(4 + i);
+    r.getCell(1).value = arch.label;
+    r.getCell(1).font = fontBold;
+    r.getCell(2).value = arch.drivers;
+    r.getCell(2).font = font10;
+    r.getCell(3).value = arch.definition;
+    r.getCell(3).font = font10;
+    r.getCell(4).value = arch.importance;
+    r.getCell(4).font = font10;
+    [1, 2, 3, 4].forEach(c => {
+      r.getCell(c).alignment = { vertical: 'top', wrapText: true };
+      r.getCell(c).border = thinBorder;
+    });
+    r.height = 45;
+    if (i % 2 === 1) {
+      [1, 2, 3, 4].forEach(c => {
+        r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+      });
+    }
+  });
+
+  // Add selected archetype highlight note
+  const noteRow = DF.getRow(4 + ARCHETYPE_DEFINITIONS.length + 1);
+  noteRow.getCell(1).value = 'Selected Use Case:';
+  noteRow.getCell(1).font = fontBold;
+  noteRow.getCell(2).value = { formula: 'Inputs!B10' };
+  noteRow.getCell(2).font = { ...fontBold, color: { argb: 'FF0000FF' } };
+
+  printSetup(DF);
+  DF.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+
+  // ===================================================================
+  // TABS: PER-ARCHETYPE ASSUMPTION SHEETS
+  // One tab per archetype with key drivers, input variables, computed
+  // formulas, and real-world benchmarks.
+  // ===================================================================
+  const ARCHETYPE_TAB_NAMES = {
+    'internal-process-automation': 'Assumptions: Process',
+    'customer-facing-ai':         'Assumptions: Customer',
+    'data-analytics-automation':  'Assumptions: Analytics',
+    'revenue-growth-ai':          'Assumptions: Revenue',
+    'risk-compliance-legal-ai':   'Assumptions: Compliance',
+    'knowledge-management-ai':    'Assumptions: Knowledge',
+  };
+
+  const ARCHETYPE_BENCHMARKS = {
+    'internal-process-automation': [
+      ['Process automation ROI', '200-300%', 'McKinsey Digital (2024)'],
+      ['Avg handling time reduction', '40-65%', 'Deloitte AI Survey (2024)'],
+      ['Error rate reduction', '50-80%', 'IEEE Intelligent Systems (2024)'],
+      ['Time to value', '3-6 months', 'Gartner RPA Market Guide (2024)'],
+    ],
+    'customer-facing-ai': [
+      ['AI deflection rate (best-in-class)', '40-60%', 'Gartner Customer Service (2025)'],
+      ['First-response time improvement', '50-70%', 'Zendesk CX Trends (2024)'],
+      ['CSAT improvement from AI', '+5 to +15 pts', 'Forrester CX Index (2024)'],
+      ['Churn reduction from faster resolution', '5-10%', 'Harvard Business Review (2024)'],
+    ],
+    'data-analytics-automation': [
+      ['Report generation time reduction', '60-80%', 'McKinsey Analytics (2024)'],
+      ['Financial close cycle reduction', '40-60%', 'Deloitte CFO Insights (2024)'],
+      ['Analyst productivity gain', '30-50%', 'Gartner Data & Analytics (2025)'],
+      ['Forecast accuracy improvement', '15-30%', 'MIT Sloan Management Review (2024)'],
+    ],
+    'revenue-growth-ai': [
+      ['Lead conversion improvement', '15-30%', 'Salesforce State of Sales (2024)'],
+      ['Pipeline velocity increase', '20-40%', 'Forrester B2B Sales (2024)'],
+      ['Customer acquisition cost reduction', '10-25%', 'HubSpot Marketing Trends (2024)'],
+      ['Revenue per rep increase', '10-20%', 'McKinsey B2B Sales (2024)'],
+    ],
+    'risk-compliance-legal-ai': [
+      ['False positive reduction', '20-50%', 'Celent Financial Services (2024)'],
+      ['Contract review time reduction', '60-80%', 'Thomson Reuters Legal AI (2024)'],
+      ['Audit prep time reduction', '30-50%', 'KPMG Regulatory Insights (2024)'],
+      ['Regulatory finding prevention rate', '30-40%', 'Deloitte Risk Advisory (2024)'],
+    ],
+    'knowledge-management-ai': [
+      ['Search success rate improvement', '40-60%', 'Coveo Enterprise Search (2024)'],
+      ['Onboarding time reduction', '30-50%', 'Gartner Digital Workplace (2025)'],
+      ['Duplicate work reduction', '20-40%', 'McKinsey Knowledge Worker (2024)'],
+      ['Time-to-find information reduction', '50-70%', 'IDC Knowledge Management (2024)'],
+    ],
+  };
+
+  const archetypeSheets = [];
+
+  for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
+    const archetype = PROJECT_ARCHETYPES.find(a => a.id === schema.id);
+    if (!archetype) continue;
+
+    const tabName = ARCHETYPE_TAB_NAMES[schema.id] || `Assumptions: ${schema.id}`;
+    const isActive = schema.id === activeArchetypeId;
+    const tabColor = isActive ? 'FF4CAF50' : 'FFB0BEC5';
+    const ws = wb.addWorksheet(tabName, { tabColor: { argb: tabColor } });
+
+    cols(ws, [35, 20, 20, 45]);
+    let r = 1;
+
+    // Header
+    hdr(ws, r, `ASSUMPTIONS: ${archetype.label.toUpperCase()}`, 4);
+    r++;
+    colorLegend(ws, r);
+    r += 2;
+
+    // Active indicator
+    if (isActive) {
+      const activeRow = ws.getRow(r);
+      activeRow.getCell(1).value = '\u2713 ACTIVE — This archetype is selected in your model';
+      activeRow.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
+      activeRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+      ws.mergeCells(r, 1, r, 4);
+    } else {
+      const activeRow = ws.getRow(r);
+      activeRow.getCell(1).value = 'Not active — switch archetype on Inputs tab (row 10) to activate';
+      activeRow.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF999999' } };
+      ws.mergeCells(r, 1, r, 4);
+    }
+    r += 2;
+
+    // Use case definition
+    sub(ws, r, 'USE CASE DEFINITION', 4);
+    r++;
+    val(ws, r, 1, 'Description');
+    ws.getRow(r).getCell(2).value = archetype.description;
+    ws.getRow(r).getCell(2).font = font10;
+    ws.mergeCells(r, 2, r, 4);
+    ws.getRow(r).getCell(2).alignment = { wrapText: true };
+    r++;
+    val(ws, r, 1, 'Real-World Example');
+    ws.getRow(r).getCell(2).value = archetype.example || '';
+    ws.getRow(r).getCell(2).font = { ...font10, italic: true };
+    ws.mergeCells(r, 2, r, 4);
+    ws.getRow(r).getCell(2).alignment = { wrapText: true };
+    ws.getRow(r).height = 30;
+    r++;
+    val(ws, r, 1, 'Source Process Types');
+    ws.getRow(r).getCell(2).value = archetype.sourceProcessTypes.join(', ');
+    ws.getRow(r).getCell(2).font = font10;
+    ws.mergeCells(r, 2, r, 4);
+    r++;
+    val(ws, r, 1, 'Revenue Eligible');
+    ws.getRow(r).getCell(2).value = archetype.revenueEligible ? 'Yes' : 'No';
+    ws.getRow(r).getCell(2).font = fontBold;
+    r += 2;
+
+    // Key input variables
+    sub(ws, r, 'KEY INPUT VARIABLES', 4);
+    r++;
+    tableHeaders(ws, r, ['Variable', 'Default Value', 'Range', 'Description']);
+    r++;
+
+    const inputDefaults = getArchetypeInputDefaults(schema.id);
+    const userValues = (formData.archetypeInputs || {})[schema.id] || {};
+
+    for (const input of schema.inputs) {
+      const cellValue = userValues[input.key] ?? inputDefaults[input.key] ?? input.default;
+      const fill = isActive ? inputFill : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+      const cellFont = isActive ? inputFont : { name: 'Calibri', size: 10, color: { argb: 'FF999999' } };
+
+      val(ws, r, 1, input.label);
+      ws.getRow(r).getCell(1).font = fontBold;
+
+      const vCell = ws.getRow(r).getCell(2);
+      vCell.value = cellValue;
+      vCell.font = cellFont;
+      vCell.fill = fill;
+      if (input.type === 'percent') vCell.numFmt = PCT;
+      else if (input.format === '$#,##0') vCell.numFmt = DOL;
+      else vCell.numFmt = input.format || NUM;
+
+      ws.getRow(r).getCell(3).value = `${input.min ?? 0} – ${input.max ?? '∞'}`;
+      ws.getRow(r).getCell(3).font = font9i;
+
+      ws.getRow(r).getCell(4).value = input.note;
+      ws.getRow(r).getCell(4).font = font9i;
+      ws.getRow(r).getCell(4).alignment = { wrapText: true };
+
+      r++;
+    }
+    r++;
+
+    // Computed outputs
+    sub(ws, r, 'COMPUTED OUTPUTS — How Inputs Feed the DCF', 4);
+    r++;
+    tableHeaders(ws, r, ['DCF Variable', 'Computed Value', 'Formula Logic', '']);
+    r++;
+
+    for (const mapping of schema.computedMappings) {
+      val(ws, r, 1, mapping.mapsTo);
+      ws.getRow(r).getCell(1).font = greenFontBold;
+
+      // Compute the value
+      const merged = { ...inputDefaults, ...userValues };
+      try {
+        const computed = mapping.jsMap(merged);
+        const mFmt = mapping.mapsTo.includes('hours') ? NUM
+          : mapping.mapsTo.includes('revenue') || mapping.mapsTo.includes('risk') ? DOL
+          : PCT;
+        val(ws, r, 2, computed, mFmt, calcFill);
+      } catch {
+        val(ws, r, 2, 'N/A', null, calcFill);
+      }
+
+      ws.getRow(r).getCell(3).value = mapping.excelFormula || '';
+      ws.getRow(r).getCell(3).font = { name: 'Calibri', size: 9, color: { argb: 'FF2E7D32' } };
+      ws.getRow(r).getCell(3).alignment = { wrapText: true };
+
+      if (mapping.note) {
+        ws.getRow(r).getCell(4).value = mapping.note;
+        ws.getRow(r).getCell(4).font = font9i;
+        ws.getRow(r).getCell(4).alignment = { wrapText: true };
+      }
+      r++;
+    }
+    r += 2;
+
+    // Industry benchmarks
+    const benchmarks = ARCHETYPE_BENCHMARKS[schema.id];
+    if (benchmarks) {
+      sub(ws, r, 'INDUSTRY BENCHMARKS & SOURCES', 4);
+      r++;
+      tableHeaders(ws, r, ['Metric', 'Benchmark Range', 'Source', '']);
+      r++;
+
+      for (const [metric, range, source] of benchmarks) {
+        val(ws, r, 1, metric);
+        ws.getRow(r).getCell(1).font = fontBold;
+        val(ws, r, 2, range);
+        ws.getRow(r).getCell(2).font = font10;
+        ws.getRow(r).getCell(3).value = source;
+        ws.getRow(r).getCell(3).font = font9i;
+        r++;
+      }
+    }
+
+    printSetup(ws);
+    ws.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+    archetypeSheets.push({ ws, name: tabName });
+  }
+
   // Hide tabs not included in the user's tier
   const allSheets = [
     { ws: I,  name: 'Inputs' },
     { ws: AD, name: 'Archetype Detail' },
     { ws: KF, name: 'Key Formulas' },
+    { ws: SU, name: 'Summary' },
     { ws: PL, name: 'P&L & Cash Flow' },
     { ws: SE, name: 'Sensitivity' },
+    { ws: V5, name: 'V5 Analysis' },
+    { ws: AU, name: 'Model Audit' },
+    { ws: DF, name: 'Assumption Definitions' },
+    ...archetypeSheets,
   ];
   for (const { ws, name } of allSheets) {
     if (!includedTabs.includes(name)) {

@@ -47,7 +47,7 @@ function scaleInput(key, label, defaults) {
 }
 
 // ---------------------------------------------------------------------------
-// ARCHETYPE INPUT SCHEMAS — 12 archetypes × 8 inputs each
+// ARCHETYPE INPUT SCHEMAS — 6 archetypes × 8 inputs each
 // ---------------------------------------------------------------------------
 export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
@@ -254,10 +254,10 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   },
 
   // =========================================================================
-  // 5. Risk & Compliance AI
+  // 5. Risk, Compliance & Legal AI
   // =========================================================================
   {
-    id: 'risk-compliance-ai',
+    id: 'risk-compliance-legal-ai',
     inputs: [
       numInput('reviewsPerMonth', 'Reviews/audits per month', {
         default: 200, max: 100000, note: 'Monthly compliance review volume',
@@ -311,165 +311,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   },
 
   // =========================================================================
-  // 6. Software & Engineering AI
-  // =========================================================================
-  {
-    id: 'software-engineering-ai',
-    inputs: [
-      numInput('prsPerWeek', 'Pull requests per week', {
-        default: 40, max: 5000, format: '0', note: 'Team-wide PRs merged weekly',
-      }),
-      numInput('reviewTimeHours', 'Avg review time (hours)', {
-        default: 2, min: 0.25, max: 40, format: '0.0', note: 'Hours per code review',
-      }),
-      pctInput('bugRate', 'Bug escape rate', {
-        default: 0.08, note: 'Fraction of releases with production bugs',
-      }),
-      pctInput('testCoverage', 'Current test coverage', {
-        default: 0.65, note: 'Automated test coverage percentage',
-      }),
-      numInput('deployFrequency', 'Deployments per week', {
-        default: 3, min: 0.1, max: 100, format: '0.0', note: 'DORA deployment frequency',
-      }),
-      pctInput('codeAssistTarget', 'Code assist adoption target', {
-        default: 0.70, note: 'Target % of devs using AI coding tools',
-      }),
-      numInput('techDebtHoursPerSprint', 'Tech debt hours/sprint', {
-        default: 20, max: 500, note: 'Sprint hours spent on tech debt',
-      }),
-      numInput('releaseCycleDays', 'Release cycle (days)', {
-        default: 14, min: 1, max: 180, format: '0', note: 'Days between releases',
-      }),
-    ],
-    computedMappings: [
-      {
-        mapsTo: 'automationPotential',
-        jsMap: (i) => Math.min(0.75, i.codeAssistTarget * 0.6 + (1 - i.testCoverage) * 0.3),
-        excelFormula: 'MIN(0.75, {codeAssistTarget} * 0.6 + (1 - {testCoverage}) * 0.3)',
-      },
-      {
-        mapsTo: 'errorRate',
-        jsMap: (i) => i.bugRate,
-        excelFormula: '{bugRate}',
-      },
-      {
-        mapsTo: 'hoursPerWeek',
-        jsMap: (i) => Math.round(i.prsPerWeek * i.reviewTimeHours + i.techDebtHoursPerSprint / 2),
-        excelFormula: 'ROUND({prsPerWeek} * {reviewTimeHours} + {techDebtHoursPerSprint} / 2, 0)',
-      },
-    ],
-  },
-
-  // =========================================================================
-  // 7. HR & Talent AI
-  // =========================================================================
-  {
-    id: 'hr-talent-ai',
-    inputs: [
-      numInput('hiresPerYear', 'Hires per year', {
-        default: 150, max: 100000, format: '0', note: 'Annual new hires',
-      }),
-      numInput('timeToFillDays', 'Time-to-fill (days)', {
-        default: 45, min: 1, max: 365, format: '0', note: 'Average days to fill a position',
-      }),
-      numInput('appsPerRole', 'Applications per role', {
-        default: 200, max: 10000, format: '0', note: 'Applications received per open position',
-      }),
-      numInput('screeningHoursPerRole', 'Screening hours per role', {
-        default: 12, min: 1, max: 200, format: '0', note: 'HR hours to screen candidates per role',
-      }),
-      numInput('onboardingHours', 'Onboarding hours per hire', {
-        default: 40, max: 500, note: 'Total hours for onboarding process',
-      }),
-      pctInput('turnoverRate', 'Annual turnover rate', {
-        default: 0.18, note: 'Voluntary + involuntary turnover',
-      }),
-      numInput('costPerHire', 'Cost per hire ($)', {
-        default: 5000, max: 100000, format: '$#,##0', note: 'Direct recruiting cost per hire',
-      }),
-      pctInput('internalMobilityRate', 'Internal mobility rate', {
-        default: 0.15, note: 'Fraction of roles filled internally',
-      }),
-    ],
-    computedMappings: [
-      {
-        mapsTo: 'automationPotential',
-        jsMap: (i) => Math.min(0.70, 0.30 + (i.appsPerRole / 500) * 0.2 + (1 - i.internalMobilityRate) * 0.15),
-        excelFormula: 'MIN(0.70, 0.30 + ({appsPerRole} / 500) * 0.2 + (1 - {internalMobilityRate}) * 0.15)',
-      },
-      {
-        mapsTo: 'hoursPerWeek',
-        jsMap: (i) => Math.round((i.hiresPerYear * (i.screeningHoursPerRole + i.onboardingHours)) / 52),
-        excelFormula: 'ROUND(({hiresPerYear} * ({screeningHoursPerRole} + {onboardingHours})) / 52, 0)',
-      },
-      {
-        mapsTo: 'errorRate',
-        jsMap: (i) => Math.min(0.30, i.turnoverRate * 0.5),
-        excelFormula: 'MIN(0.30, {turnoverRate} * 0.5)',
-        note: 'High turnover suggests poor hiring quality',
-      },
-    ],
-  },
-
-  // =========================================================================
-  // 8. Supply Chain & Logistics AI
-  // =========================================================================
-  {
-    id: 'supply-chain-ai',
-    inputs: [
-      numInput('skuCount', 'Active SKUs', {
-        default: 5000, max: 10000000, format: '#,##0', note: 'Number of active products/SKUs',
-      }),
-      pctInput('forecastAccuracy', 'Current forecast accuracy', {
-        default: 0.72, min: 0.20, note: 'MAPE-based accuracy rate',
-      }),
-      pctInput('stockoutRate', 'Stockout rate', {
-        default: 0.05, note: 'Fraction of orders affected by stockouts',
-      }),
-      numInput('avgLeadTimeDays', 'Avg lead time (days)', {
-        default: 21, min: 1, max: 365, format: '0', note: 'Average supplier lead time',
-      }),
-      pctInput('demandVariability', 'Demand variability (CV)', {
-        default: 0.35, min: 0.05, max: 2.0, note: 'Coefficient of variation of demand',
-      }),
-      numInput('supplierCount', 'Active suppliers', {
-        default: 120, max: 100000, format: '0', note: 'Number of active suppliers',
-      }),
-      numInput('warehouseCostMonthly', 'Warehouse cost/month ($)', {
-        default: 150000, max: 50000000, format: '$#,##0', note: 'Monthly warehousing/logistics cost',
-      }),
-      pctInput('onTimeDelivery', 'On-time delivery %', {
-        default: 0.88, min: 0.50, note: 'Fraction of orders delivered on time',
-      }),
-    ],
-    computedMappings: [
-      {
-        mapsTo: 'automationPotential',
-        jsMap: (i) => Math.min(0.70, (1 - i.forecastAccuracy) * 1.5 + i.stockoutRate * 2),
-        excelFormula: 'MIN(0.70, (1 - {forecastAccuracy}) * 1.5 + {stockoutRate} * 2)',
-      },
-      {
-        mapsTo: 'errorRate',
-        jsMap: (i) => i.stockoutRate + (1 - i.onTimeDelivery) * 0.5,
-        excelFormula: '{stockoutRate} + (1 - {onTimeDelivery}) * 0.5',
-      },
-      {
-        mapsTo: 'hoursPerWeek',
-        jsMap: (i) => Math.round(i.skuCount * 0.02 + i.supplierCount * 0.5),
-        excelFormula: 'ROUND({skuCount} * 0.02 + {supplierCount} * 0.5, 0)',
-        note: 'Estimated weekly planning/coordination hours',
-      },
-      {
-        mapsTo: 'revenueImpact',
-        jsMap: (i) => Math.round(i.warehouseCostMonthly * 12 * i.stockoutRate * 3),
-        excelFormula: 'ROUND({warehouseCostMonthly} * 12 * {stockoutRate} * 3, 0)',
-        note: 'Annual lost revenue from stockouts (3x carrying cost)',
-      },
-    ],
-  },
-
-  // =========================================================================
-  // 9. Knowledge Management AI
+  // 6. Knowledge Management AI
   // =========================================================================
   {
     id: 'knowledge-management-ai',
@@ -518,166 +360,6 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
     ],
   },
 
-  // =========================================================================
-  // 10. Finance & Accounting AI
-  // =========================================================================
-  {
-    id: 'finance-accounting-ai',
-    inputs: [
-      numInput('invoicesPerMonth', 'Invoices per month', {
-        default: 3000, max: 5000000, note: 'AP + AR invoices processed monthly',
-      }),
-      numInput('reconciliationItems', 'Reconciliation items/month', {
-        default: 1500, max: 1000000, note: 'Monthly line items requiring reconciliation',
-      }),
-      numInput('closeCycleDays', 'Close cycle (days)', {
-        default: 12, min: 1, max: 60, format: '0', note: 'Days to complete monthly/quarterly close',
-      }),
-      pctInput('errorRateFinance', 'Transaction error rate', {
-        default: 0.04, note: 'Fraction of transactions with errors',
-      }),
-      numInput('manualJournalsPerMonth', 'Manual journal entries/month', {
-        default: 200, max: 50000, format: '0', note: 'Number of manual journal entries',
-      }),
-      numInput('apArAgingDays', 'AP/AR aging (days)', {
-        default: 45, min: 1, max: 180, format: '0', note: 'Average days outstanding',
-      }),
-      numInput('auditPrepHours', 'Audit prep hours/year', {
-        default: 600, max: 20000, note: 'Staff hours for annual audit preparation',
-      }),
-      pctInput('exceptionRate', 'Exception/escalation rate', {
-        default: 0.12, note: 'Fraction of transactions requiring manual exception handling',
-      }),
-    ],
-    computedMappings: [
-      {
-        mapsTo: 'automationPotential',
-        jsMap: (i) => Math.min(0.75, 0.25 + i.exceptionRate * 1.5 + i.errorRateFinance * 2),
-        excelFormula: 'MIN(0.75, 0.25 + {exceptionRate} * 1.5 + {errorRateFinance} * 2)',
-      },
-      {
-        mapsTo: 'errorRate',
-        jsMap: (i) => i.errorRateFinance,
-        excelFormula: '{errorRateFinance}',
-      },
-      {
-        mapsTo: 'hoursPerWeek',
-        jsMap: (i) => Math.round((i.invoicesPerMonth * 0.1 + i.reconciliationItems * 0.15 + i.manualJournalsPerMonth * 0.25) / 4.33),
-        excelFormula: 'ROUND(({invoicesPerMonth} * 0.1 + {reconciliationItems} * 0.15 + {manualJournalsPerMonth} * 0.25) / 4.33, 0)',
-      },
-    ],
-  },
-
-  // =========================================================================
-  // 11. Legal & Contract AI
-  // =========================================================================
-  {
-    id: 'legal-contract-ai',
-    inputs: [
-      numInput('contractsPerMonth', 'Contracts per month', {
-        default: 80, max: 50000, format: '0', note: 'Monthly contract volume (new + amendments)',
-      }),
-      numInput('hoursPerContract', 'Hours per contract', {
-        default: 6, min: 0.5, max: 100, format: '0.0', note: 'Attorney/paralegal hours per contract',
-      }),
-      numInput('clauseTypes', 'Unique clause types tracked', {
-        default: 25, min: 5, max: 500, format: '0', note: 'Clause taxonomy size',
-      }),
-      pctInput('amendmentRate', 'Amendment/redline rate', {
-        default: 0.35, note: 'Fraction of contracts requiring amendments',
-      }),
-      numInput('outsideCounselSpend', 'Annual outside counsel spend ($)', {
-        default: 500000, max: 100000000, format: '$#,##0', note: 'Annual external legal spend',
-      }),
-      pctInput('renewalLeakage', 'Renewal leakage %', {
-        default: 0.08, note: 'Revenue lost from missed renewals/unfavorable auto-renewals',
-      }),
-      numInput('approvalChainSteps', 'Approval chain steps', {
-        default: 4, min: 1, max: 20, format: '0', note: 'Number of approval steps per contract',
-      }),
-      numInput('riskClausesPerContract', 'Risk clauses per contract', {
-        default: 6, min: 0, max: 100, format: '0', note: 'Avg high-risk clauses requiring review',
-      }),
-    ],
-    computedMappings: [
-      {
-        mapsTo: 'automationPotential',
-        jsMap: (i) => Math.min(0.70, 0.20 + i.amendmentRate * 0.5 + (i.riskClausesPerContract / 20) * 0.3),
-        excelFormula: 'MIN(0.70, 0.20 + {amendmentRate} * 0.5 + ({riskClausesPerContract} / 20) * 0.3)',
-      },
-      {
-        mapsTo: 'hoursPerWeek',
-        jsMap: (i) => Math.round(i.contractsPerMonth * i.hoursPerContract / 4.33),
-        excelFormula: 'ROUND({contractsPerMonth} * {hoursPerContract} / 4.33, 0)',
-      },
-      {
-        mapsTo: 'toolReplacementRate',
-        jsMap: (i) => Math.min(0.60, i.outsideCounselSpend > 200000 ? 0.30 : 0.15),
-        excelFormula: 'MIN(0.60, IF({outsideCounselSpend} > 200000, 0.30, 0.15))',
-        note: 'Outside counsel replaced by AI contract review',
-      },
-    ],
-  },
-
-  // =========================================================================
-  // 12. IT Operations & AIOps
-  // =========================================================================
-  {
-    id: 'it-operations-aiops',
-    inputs: [
-      numInput('incidentsPerMonth', 'Incidents per month', {
-        default: 400, max: 100000, format: '0', note: 'Total IT incidents/alerts per month',
-      }),
-      numInput('mttrMinutes', 'MTTR (minutes)', {
-        default: 45, min: 1, max: 1440, format: '0', note: 'Mean time to resolve in minutes',
-      }),
-      numInput('changeRequestsPerMonth', 'Change requests/month', {
-        default: 150, max: 50000, format: '0', note: 'Monthly change/deployment requests',
-      }),
-      numInput('falseAlertsPerDay', 'False alerts per day', {
-        default: 30, max: 10000, format: '0', note: 'Daily false positive alerts',
-      }),
-      numInput('infraNodes', 'Infrastructure nodes', {
-        default: 500, max: 1000000, format: '#,##0', note: 'Servers, containers, endpoints managed',
-      }),
-      pctInput('uptimeTarget', 'Uptime target %', {
-        default: 0.999, min: 0.90, max: 0.99999, format: '0.000%', note: 'SLA uptime target',
-      }),
-      pctInput('automatedRemediationPct', 'Auto-remediation %', {
-        default: 0.15, note: 'Fraction of incidents auto-remediated today',
-      }),
-      numInput('alertToTicketRatio', 'Alert-to-ticket ratio', {
-        default: 5, min: 1, max: 100, format: '0.0', note: 'Alerts generated per actionable ticket',
-      }),
-    ],
-    computedMappings: [
-      {
-        mapsTo: 'automationPotential',
-        jsMap: (i) => Math.min(0.80, (1 - i.automatedRemediationPct) * 0.5 + (1 - 1 / i.alertToTicketRatio) * 0.3),
-        excelFormula: 'MIN(0.80, (1 - {automatedRemediationPct}) * 0.5 + (1 - 1 / {alertToTicketRatio}) * 0.3)',
-      },
-      {
-        mapsTo: 'errorRate',
-        jsMap: (i) => Math.min(0.40, i.falseAlertsPerDay / (i.incidentsPerMonth / 30 + i.falseAlertsPerDay)),
-        excelFormula: 'MIN(0.40, {falseAlertsPerDay} / ({incidentsPerMonth} / 30 + {falseAlertsPerDay}))',
-      },
-      {
-        mapsTo: 'hoursPerWeek',
-        jsMap: (i) => Math.round(i.incidentsPerMonth * i.mttrMinutes / 60 / 4.33 + i.changeRequestsPerMonth * 0.5 / 4.33),
-        excelFormula: 'ROUND({incidentsPerMonth} * {mttrMinutes} / 60 / 4.33 + {changeRequestsPerMonth} * 0.5 / 4.33, 0)',
-      },
-      {
-        mapsTo: 'riskReduction',
-        jsMap: (i) => {
-          const downtimeHoursPerYear = (1 - i.uptimeTarget) * 8760;
-          const costPerHour = i.infraNodes * 50;
-          return Math.round(downtimeHoursPerYear * costPerHour * 0.40);
-        },
-        excelFormula: 'ROUND((1 - {uptimeTarget}) * 8760 * {infraNodes} * 50 * 0.40, 0)',
-        note: 'Risk reduction from improved MTTR and auto-remediation',
-      },
-    ],
-  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -707,14 +389,8 @@ export const CLASSIFICATION_PROFILES = {
   'customer-facing-ai':          [3, 5, 3, 4, 2, 3],
   'data-analytics-automation':   [2, 2, 5, 3, 2, 4],
   'revenue-growth-ai':           [3, 4, 3, 3, 1, 3],
-  'risk-compliance-ai':          [4, 1, 3, 4, 5, 3],
-  'software-engineering-ai':     [5, 1, 4, 3, 1, 5],
-  'hr-talent-ai':                [1, 2, 2, 3, 3, 2],
-  'supply-chain-ai':             [1, 2, 4, 5, 2, 3],
+  'risk-compliance-legal-ai':    [4, 1, 3, 4, 5, 3],
   'knowledge-management-ai':     [2, 2, 5, 3, 1, 3],
-  'finance-accounting-ai':       [1, 1, 3, 5, 4, 2],
-  'legal-contract-ai':           [4, 2, 4, 3, 5, 3],
-  'it-operations-aiops':         [5, 1, 4, 5, 2, 5],
 };
 
 // ---------------------------------------------------------------------------

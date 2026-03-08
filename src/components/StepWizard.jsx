@@ -1,32 +1,34 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProgressBar from './ProgressBar';
 import Step1_CompanyContext from './steps/Step1_CompanyContext';
-import Step2_RiskReadiness from './steps/Step2_RiskReadiness';
 import Step3_ProcessDetails from './steps/Step3_ProcessDetails';
-import Step4_ReviewAssumptions from './steps/Step4_ReviewAssumptions';
-import Step4_CurrentCosts from './steps/Step4_CurrentCosts';
 import Step5_AIInvestment from './steps/Step5_AIInvestment';
+import { runCalculations } from '../logic/calculations';
+import { formatCurrency } from '../utils/formatters';
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 3;
 
 const STEP_COMPONENTS = [
-  Step1_CompanyContext,
-  Step2_RiskReadiness,
-  Step3_ProcessDetails,
-  Step4_ReviewAssumptions,
-  Step4_CurrentCosts,
-  Step5_AIInvestment,
+  Step1_CompanyContext,    // Context + Readiness (merged)
+  Step3_ProcessDetails,    // Project + Current Costs (merged)
+  Step5_AIInvestment,      // AI Investment
+];
+
+const STEP_LABELS = [
+  'Context & Readiness',
+  'Project & Costs',
+  'AI Investment',
 ];
 
 const REQUIRED_FIELDS = {
-  1: ['industry', 'companySize', 'role', 'teamLocation'],
-  2: ['changeReadiness', 'dataReadiness'],
-  3: ['projectArchetype', 'teamSize', 'hoursPerWeek', 'errorRate'],
-  4: [], // assumptions have defaults, all optional to override
-  5: ['avgSalary'],
-  6: [], // AI investment has auto-suggested defaults
+  1: ['industry', 'companySize', 'teamLocation', 'changeReadiness', 'dataReadiness', 'execSponsor'],
+  2: ['projectArchetype', 'teamSize', 'avgSalary'],
+  3: [], // AI investment has auto-suggested defaults
 };
+
+// Minimum fields needed to attempt a preview calculation
+const PREVIEW_REQUIRED = ['industry', 'companySize', 'projectArchetype', 'teamSize', 'avgSalary'];
 
 const slideVariants = {
   enter: (direction) => ({
@@ -42,6 +44,60 @@ const slideVariants = {
     opacity: 0,
   }),
 };
+
+function LivePreview({ formData }) {
+  const preview = useMemo(() => {
+    // Check all required fields are present
+    const canPreview = PREVIEW_REQUIRED.every((field) => {
+      const val = formData[field];
+      return val !== undefined && val !== null && val !== '' && !(typeof val === 'number' && val === 0);
+    });
+    if (!canPreview) return null;
+
+    try {
+      const result = runCalculations({ ...formData, _mcMode: 'fast' });
+      const base = result.scenarios?.base;
+      if (!base) return null;
+      return {
+        npv: base.npv,
+        payback: base.paybackMonths,
+        roic: base.roic,
+      };
+    } catch {
+      return null;
+    }
+  }, [
+    formData.industry, formData.companySize, formData.projectArchetype,
+    formData.teamSize, formData.avgSalary, formData.implementationBudget,
+    formData.expectedTimeline, formData.ongoingAnnualCost,
+    formData.changeReadiness, formData.dataReadiness, formData.execSponsor,
+    formData.assumptions, formData.archetypeInputs,
+    formData.currentToolCosts, formData.cashRealizationPct,
+  ]);
+
+  if (!preview) return null;
+
+  const npvColor = preview.npv >= 0 ? 'text-emerald-600' : 'text-red-500';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-center gap-4 rounded-lg bg-navy/5 px-3 py-2 text-xs"
+    >
+      <span className="font-medium text-navy/50">Live estimate:</span>
+      <span className={`font-bold ${npvColor}`}>
+        NPV {formatCurrency(preview.npv)}
+      </span>
+      <span className="text-navy/70">
+        {preview.payback <= 60 ? `${preview.payback}mo payback` : '60+ mo'}
+      </span>
+      <span className="text-navy/70">
+        {(preview.roic * 100).toFixed(0)}% ROIC
+      </span>
+    </motion.div>
+  );
+}
 
 export default function StepWizard({ formData, setFormData, onComplete }) {
   const [currentStep, setCurrentStep] = useState(1);
@@ -78,13 +134,11 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
     setCurrentStep((prev) => Math.max(prev - 1, 1));
   };
 
-  // Keep refs to avoid re-registering the keyboard listener every render
   const isStepValidRef = useRef(isStepValid);
   const handleNextRef = useRef(handleNext);
   isStepValidRef.current = isStepValid;
   handleNextRef.current = handleNext;
 
-  // Keyboard navigation: Enter to advance
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key !== 'Enter') return;
@@ -130,7 +184,11 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
           <div className="w-[72px]" />
         )}
         <div className="flex-1">
-          <ProgressBar currentStep={currentStep} totalSteps={TOTAL_STEPS} />
+          <ProgressBar
+            currentStep={currentStep}
+            totalSteps={TOTAL_STEPS}
+            stepLabels={STEP_LABELS}
+          />
         </div>
       </div>
 
@@ -151,16 +209,19 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
         </AnimatePresence>
       </div>
 
-      {/* Sticky bottom nav for Next / Complete button */}
+      {/* Sticky bottom nav */}
       <div className="sticky bottom-0 z-10 border-t border-gray-100 bg-white/95 px-4 pb-safe backdrop-blur-sm sm:px-6">
+        {/* Live preview — shows once enough data exists */}
+        {currentStep >= 2 && <LivePreview formData={formData} />}
+
         <div className="flex justify-end py-4">
           <button
             type="button"
             onClick={handleNext}
             disabled={!isStepValid()}
-            className="min-h-[48px] w-full rounded-lg bg-gold px-8 py-3 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-gold-light focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+            className="min-h-[48px] w-full rounded-lg bg-gold px-8 py-3 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
           >
-            {currentStep === TOTAL_STEPS ? 'Complete' : 'Next'}
+            {currentStep === TOTAL_STEPS ? 'Calculate ROI' : 'Next'}
           </button>
         </div>
       </div>

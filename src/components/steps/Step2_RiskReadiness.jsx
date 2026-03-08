@@ -114,7 +114,7 @@ export default function Step2_RiskReadiness({ formData, updateField }) {
           >
             <ToggleQuestion
               label="Is there a C-level executive sponsoring this initiative?"
-              value={formData.execSponsor ?? true}
+              value={formData.execSponsor}
               onChange={handleExecSponsor}
               yesLabel={"Yes \u2014 active executive sponsor"}
               noLabel={"No \u2014 still building the case"}

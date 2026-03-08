@@ -38,7 +38,7 @@ export default function HiddenCosts({ hiddenCosts, oneTimeCosts, vendorLockIn, r
           <p className="text-gray-500 text-xs mb-3">
             {oneTimeCosts.displacedFTEs} of {oneTimeCosts.displacedFTEs + oneTimeCosts.retainedFTEs} roles
             phased out over 4 years ({oneTimeCosts.retainedFTEs} retained — {formatPercent(1 - oneTimeCosts.maxHeadcountReduction)} always human).
-            Year 1 is enhancement only — no one is let go Day 1. [15][21]
+            FY 1 is enhancement only — no one is let go Day 1. [15][21]
           </p>
 
           {/* Separation cost breakdown */}
@@ -183,7 +183,7 @@ export default function HiddenCosts({ hiddenCosts, oneTimeCosts, vendorLockIn, r
             <span className="font-mono font-semibold text-red-600">12% / 7%</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-gray-600 text-sm">Year 5 ongoing cost</span>
+            <span className="text-gray-600 text-sm">FY 5 ongoing cost</span>
             <span className="font-mono font-semibold text-navy">{formatCurrency(vendorLockIn.year5OngoingCost)}</span>
           </div>
           <div className="flex justify-between items-center">

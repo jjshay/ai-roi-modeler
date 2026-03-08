@@ -21,6 +21,7 @@ export const PROJECT_ARCHETYPES = [
     label: 'Internal Process Automation',
     icon: '\u2699\ufe0f',
     description: 'Automate internal workflows, document handling, and back-office operations',
+    example: 'e.g. A bank automated loan document processing, cutting review time from 360,000 hours to seconds (JPMorgan COiN)',
     tags: ['Internal', 'Operations', 'Data'],
     sourceProcessTypes: ['Workflow Automation', 'Document Processing'],
   },
@@ -29,88 +30,45 @@ export const PROJECT_ARCHETYPES = [
     label: 'Customer-Facing AI',
     icon: '\ud83d\udcac',
     description: 'AI-powered customer interactions, support, and personalized experiences',
+    example: 'e.g. Klarna\'s AI assistant handles 2/3 of customer chats, resolving issues in 2 min vs. 11 min with human agents',
     tags: ['External', 'Revenue'],
     sourceProcessTypes: ['Customer Communication', 'Content Creation'],
   },
   {
     id: 'data-analytics-automation',
-    label: 'Data & Analytics Automation',
+    label: 'Data, Analytics & FP&A',
     icon: '\ud83d\udcca',
-    description: 'Automate reporting, forecasting, and data-driven decision making',
+    description: 'Automate reporting, forecasting, financial close, reconciliation, and data-driven decision making',
+    example: 'e.g. Siemens uses AI to auto-generate financial forecasts, reducing close cycle from 10 days to 3',
     tags: ['Internal', 'Data'],
-    sourceProcessTypes: ['Data Analysis & Reporting', 'Research & Intelligence'],
+    sourceProcessTypes: ['Data Analysis & Reporting', 'Research & Intelligence', 'Document Processing'],
   },
   {
     id: 'revenue-growth-ai',
     label: 'Revenue & Growth AI',
     icon: '\ud83d\udcc8',
     description: 'Drive revenue through AI-enhanced sales, marketing, and market intelligence',
+    example: 'e.g. Salesforce Einstein AI increased lead conversion rates by 30% for enterprise sales teams',
     tags: ['External', 'Revenue'],
     sourceProcessTypes: ['Customer Communication', 'Content Creation', 'Research & Intelligence'],
   },
   {
-    id: 'risk-compliance-ai',
-    label: 'Risk & Compliance AI',
+    id: 'risk-compliance-legal-ai',
+    label: 'Risk, Compliance & Legal AI',
     icon: '\ud83d\udee1\ufe0f',
-    description: 'Reduce compliance risk, improve audit quality, and automate regulatory processes',
+    description: 'Reduce compliance risk, automate contract review, improve audit quality, and streamline regulatory and legal processes',
+    example: 'e.g. HSBC\'s AI monitoring system reduced false positive alerts by 20%, saving thousands of analyst hours annually',
     tags: ['Internal', 'Operations', 'Data'],
-    sourceProcessTypes: ['Quality & Compliance', 'Document Processing'],
-  },
-  {
-    id: 'software-engineering-ai',
-    label: 'Software & Engineering AI',
-    icon: '\ud83d\udcbb',
-    description: 'Accelerate development with AI-assisted coding, testing, code review, and DevOps',
-    tags: ['Internal', 'Engineering'],
-    sourceProcessTypes: ['Software Development', 'Quality & Compliance'],
-  },
-  {
-    id: 'hr-talent-ai',
-    label: 'HR & Talent AI',
-    icon: '\ud83d\udc65',
-    description: 'Transform recruiting, onboarding, performance management, and workforce planning',
-    tags: ['Internal', 'Operations'],
-    sourceProcessTypes: ['HR & Talent Management', 'Document Processing'],
-  },
-  {
-    id: 'supply-chain-ai',
-    label: 'Supply Chain & Logistics AI',
-    icon: '\ud83d\udce6',
-    description: 'Optimize demand forecasting, inventory management, routing, and supplier operations',
-    tags: ['Operations', 'Data'],
-    sourceProcessTypes: ['Supply Chain & Logistics', 'Data Analysis & Reporting'],
+    sourceProcessTypes: ['Quality & Compliance', 'Document Processing', 'Research & Intelligence'],
   },
   {
     id: 'knowledge-management-ai',
     label: 'Knowledge Management AI',
     icon: '\ud83e\udde0',
     description: 'Capture institutional knowledge, power enterprise search, and automate documentation',
+    example: 'e.g. Novo Nordisk\'s AI knowledge base cut new employee onboarding time by 40% and reduced repeat support tickets by 25%',
     tags: ['Internal', 'Data'],
     sourceProcessTypes: ['Research & Intelligence', 'Document Processing', 'Content Creation'],
-  },
-  {
-    id: 'finance-accounting-ai',
-    label: 'Finance & Accounting AI',
-    icon: '\ud83d\udcb0',
-    description: 'Automate AP/AR, reconciliation, financial close, expense management, and audit prep',
-    tags: ['Internal', 'Operations', 'Data'],
-    sourceProcessTypes: ['Document Processing', 'Data Analysis & Reporting'],
-  },
-  {
-    id: 'legal-contract-ai',
-    label: 'Legal & Contract AI',
-    icon: '\u2696\ufe0f',
-    description: 'Accelerate contract review, legal research, clause extraction, and compliance documentation',
-    tags: ['Internal', 'Operations'],
-    sourceProcessTypes: ['Document Processing', 'Quality & Compliance', 'Research & Intelligence'],
-  },
-  {
-    id: 'it-operations-aiops',
-    label: 'IT Operations & AIOps',
-    icon: '\ud83d\udd27',
-    description: 'Optimize monitoring, incident response, infrastructure management, and IT service delivery',
-    tags: ['Internal', 'Operations', 'Engineering'],
-    sourceProcessTypes: ['Workflow Automation', 'Data Analysis & Reporting'],
   },
 ];
 
@@ -162,7 +120,7 @@ function buildDefaults(archetype, industry) {
   };
 
   // Risk & Compliance gets an extra field
-  if (archetype.id === 'risk-compliance-ai') {
+  if (archetype.id === 'risk-compliance-legal-ai') {
     defaults.errorReductionPotential = parseFloat(
       Math.min(automationPotential + 0.10, 0.75).toFixed(2)
     );

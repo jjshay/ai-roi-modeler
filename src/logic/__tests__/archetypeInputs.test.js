@@ -15,8 +15,8 @@ import { PROJECT_ARCHETYPES } from '../archetypes';
 // Schema Validation
 // ---------------------------------------------------------------------------
 describe('ARCHETYPE_INPUT_SCHEMAS', () => {
-  it('has exactly 12 archetype schemas', () => {
-    expect(ARCHETYPE_INPUT_SCHEMAS).toHaveLength(12);
+  it('has exactly 6 archetype schemas', () => {
+    expect(ARCHETYPE_INPUT_SCHEMAS).toHaveLength(6);
   });
 
   it('every schema has a matching entry in PROJECT_ARCHETYPES', () => {
@@ -76,8 +76,8 @@ describe('ARCHETYPE_INPUT_SCHEMAS', () => {
 // ARCHETYPE_INPUT_MAP
 // ---------------------------------------------------------------------------
 describe('ARCHETYPE_INPUT_MAP', () => {
-  it('has all 12 archetypes indexed by id', () => {
-    expect(Object.keys(ARCHETYPE_INPUT_MAP)).toHaveLength(12);
+  it('has all 6 archetypes indexed by id', () => {
+    expect(Object.keys(ARCHETYPE_INPUT_MAP)).toHaveLength(6);
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       expect(ARCHETYPE_INPUT_MAP[schema.id]).toBe(schema);
     }
@@ -127,17 +127,10 @@ describe('mapArchetypeInputs', () => {
     expect(overrides.automationPotential).toBeGreaterThan(0);
   });
 
-  it('maps risk-compliance-ai to include riskReduction', () => {
-    const defaults = getArchetypeInputDefaults('risk-compliance-ai');
-    const overrides = mapArchetypeInputs('risk-compliance-ai', defaults);
+  it('maps risk-compliance-legal-ai to include riskReduction', () => {
+    const defaults = getArchetypeInputDefaults('risk-compliance-legal-ai');
+    const overrides = mapArchetypeInputs('risk-compliance-legal-ai', defaults);
     expect(overrides.riskReduction).toBeGreaterThan(0);
-  });
-
-  it('maps it-operations-aiops to include riskReduction', () => {
-    const defaults = getArchetypeInputDefaults('it-operations-aiops');
-    const overrides = mapArchetypeInputs('it-operations-aiops', defaults);
-    expect(overrides.riskReduction).toBeGreaterThan(0);
-    expect(overrides.errorRate).toBeGreaterThan(0);
   });
 
   it('returns empty object for unknown archetype', () => {
@@ -210,8 +203,8 @@ describe('validateArchetypeInputs', () => {
 // Classification
 // ---------------------------------------------------------------------------
 describe('Classification', () => {
-  it('has profiles for all 12 archetypes', () => {
-    expect(Object.keys(CLASSIFICATION_PROFILES)).toHaveLength(12);
+  it('has profiles for all 6 archetypes', () => {
+    expect(Object.keys(CLASSIFICATION_PROFILES)).toHaveLength(6);
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       expect(CLASSIFICATION_PROFILES[schema.id]).toBeDefined();
     }
@@ -247,9 +240,9 @@ describe('Classification', () => {
     expect(ranked[0].id).toBe('customer-facing-ai');
   });
 
-  it('perfect match for risk-compliance profile returns risk-compliance first', () => {
+  it('perfect match for risk-compliance-legal profile returns risk-compliance-legal first', () => {
     const ranked = classifyArchetype({ primaryGoal: 4, customerFacing: 1, dataComplexity: 3, processVolume: 4, regulatoryBurden: 5, technicalTeam: 3 });
-    expect(ranked[0].id).toBe('risk-compliance-ai');
+    expect(ranked[0].id).toBe('risk-compliance-legal-ai');
   });
 
   it('handles missing answers gracefully (defaults to 3)', () => {

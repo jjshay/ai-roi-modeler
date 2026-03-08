@@ -10,14 +10,17 @@ const DEFAULT_FORM_DATA = {
   companySize: '',
   role: '',
   teamLocation: '',
+  contractorPct: 0.30,
+  blendedAISalary: null,
   // Step 2: Risk & Readiness (moved earlier - drives cost estimates)
   changeReadiness: 3,
   dataReadiness: 3,
-  execSponsor: true,
+  execSponsor: null,
   // Step 3: Project Archetype & Team Details
   processType: '',              // kept for backward compat
   projectArchetype: '',         // archetype id string
   assumptions: {},              // populated from archetype defaults, user-editable
+  archetypeInputs: {},          // archetype-specific input values (8 per archetype)
   teamSize: 10,
   hoursPerWeek: 20,
   errorRate: 0.10,
@@ -43,6 +46,8 @@ const DEFAULT_FORM_DATA = {
   // V4: Reviewer feedback additions
   retainedTalentPremiumRate: null,  // defaults to 0.10 in calculations
   isAgenticWorkflow: false,
+  // UX mode
+  wizardMode: 'quick', // 'quick' or 'detailed'
 };
 
 const ANALYSIS_STEPS = [
@@ -256,9 +261,9 @@ export default function App() {
     [formData]
   );
 
-  const handleDownloadExcel = useCallback(async (mcResults) => {
+  const handleDownloadExcel = useCallback(async (mcResults, results) => {
     const { generateExcelModel } = await import('./excel/generateExcelModel');
-    generateExcelModel(formData, mcResults);
+    generateExcelModel(formData, mcResults, results);
   }, [formData]);
 
   const handleEditInputs = useCallback(() => setScreen('wizard'), []);

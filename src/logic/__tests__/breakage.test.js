@@ -105,7 +105,7 @@ describe('Edge cases: extreme input values', () => {
   ];
 
   for (const ec of edgeCases) {
-    for (const arch of ['internal-process-automation', 'customer-facing-ai', 'revenue-growth-ai', 'it-operations-aiops']) {
+    for (const arch of ['internal-process-automation', 'customer-facing-ai', 'revenue-growth-ai', 'knowledge-management-ai']) {
       it(`${ec.name} × ${arch}`, () => {
         const result = runCalculations({
           avgSalary: 100000, hoursPerWeek: 20, errorRate: 0.10,
@@ -256,9 +256,7 @@ describe('Classification: each archetype profile matches itself', () => {
   const profiles = {
     'internal-process-automation': { primaryGoal: 1, customerFacing: 1, dataComplexity: 2, processVolume: 5, regulatoryBurden: 2, technicalTeam: 2 },
     'customer-facing-ai': { primaryGoal: 3, customerFacing: 5, dataComplexity: 3, processVolume: 4, regulatoryBurden: 2, technicalTeam: 3 },
-    'risk-compliance-ai': { primaryGoal: 4, customerFacing: 1, dataComplexity: 3, processVolume: 4, regulatoryBurden: 5, technicalTeam: 3 },
-    'software-engineering-ai': { primaryGoal: 5, customerFacing: 1, dataComplexity: 4, processVolume: 3, regulatoryBurden: 1, technicalTeam: 5 },
-    'it-operations-aiops': { primaryGoal: 5, customerFacing: 1, dataComplexity: 4, processVolume: 5, regulatoryBurden: 2, technicalTeam: 5 },
+    'risk-compliance-legal-ai': { primaryGoal: 4, customerFacing: 1, dataComplexity: 3, processVolume: 4, regulatoryBurden: 5, technicalTeam: 3 },
   };
 
   for (const [id, answers] of Object.entries(profiles)) {

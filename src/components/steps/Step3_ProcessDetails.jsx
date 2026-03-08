@@ -1,24 +1,21 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CardSelector from '../inputs/CardSelector';
 import SliderInput from '../inputs/SliderInput';
-import SegmentedSelect from '../inputs/SegmentedSelect';
+import CurrencyInput from '../inputs/CurrencyInput';
 import { PROJECT_ARCHETYPES, getArchetypeDefaults } from '../../logic/archetypes';
+import { ARCHETYPE_INPUT_MAP, getArchetypeInputDefaults, mapArchetypeInputs } from '../../logic/archetypeInputs';
+import { getAutomationPotential } from '../../logic/benchmarks';
+import { formatCurrency } from '../../utils/formatters';
 
 const ARCHETYPE_OPTIONS = PROJECT_ARCHETYPES.map(a => ({
   icon: a.icon,
   title: a.label,
   description: a.description,
+  example: a.example,
   value: a.id,
   tags: a.tags,
 }));
-
-const ERROR_RATE_OPTIONS = [
-  { label: 'Rarely', sublabel: '<5%', value: 0.025 },
-  { label: 'Sometimes', sublabel: '5-15%', value: 0.10 },
-  { label: 'Often', sublabel: '15-30%', value: 0.225 },
-  { label: 'Frequently', sublabel: '>30%', value: 0.35 },
-];
 
 const slideVariants = {
   enter: { x: 80, opacity: 0 },
@@ -26,14 +23,22 @@ const slideVariants = {
   exit: { x: -80, opacity: 0 },
 };
 
+function getStepForNumber(min, max) {
+  const range = max - min;
+  if (range > 10000) return 100;
+  if (range > 1000) return 10;
+  return 1;
+}
+
 export default function Step3_ProcessDetails({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
+  const [showAssumptions, setShowAssumptions] = useState(false);
   const advanceTimer = useRef(null);
 
   const autoAdvance = useCallback(
     (nextSubStep) => {
       clearTimeout(advanceTimer.current);
-      if (nextSubStep <= 3) {
+      if (nextSubStep <= 6) {
         advanceTimer.current = setTimeout(() => {
           setSubStep(nextSubStep);
         }, 300);
@@ -42,18 +47,19 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
     [],
   );
 
+  const isQuick = formData.wizardMode === 'quick';
+
   const handleArchetype = (id) => {
     updateField('projectArchetype', id);
-    // Populate assumptions from archetype defaults for the selected industry
     const defaults = getArchetypeDefaults(id, formData.industry || 'Other');
     if (defaults) {
       updateField('assumptions', defaults);
     }
-    // Also set processType for backward compat (map archetype to primary processType)
     const archetype = PROJECT_ARCHETYPES.find(a => a.id === id);
     if (archetype && archetype.sourceProcessTypes.length > 0) {
       updateField('processType', archetype.sourceProcessTypes[0]);
     }
+    updateField('archetypeInputs', getArchetypeInputDefaults(id));
     autoAdvance(1);
   };
 
@@ -61,35 +67,72 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
     updateField('teamSize', val);
   };
 
-  const handleHoursPerWeek = (val) => {
-    updateField('hoursPerWeek', val);
+  // Quick mode: 0→archetype, 1→team size, 2→archetype inputs, 3→salary, 4→tool costs (skip 5,6)
+  // Detailed mode: 0→archetype, 1→team size, 2→archetype inputs, 3→salary, 4→tool costs, 5→vendors, 6→termination
+  const nextAfterTeamSize = 2;
+  const nextAfterToolCosts = isQuick ? null : 5; // null = end of step in quick mode
+
+  const handleArchetypeInput = (key, val) => {
+    const current = formData.archetypeInputs || {};
+    updateField('archetypeInputs', { ...current, [key]: val });
   };
 
-  const handleErrorRate = (val) => {
-    updateField('errorRate', val);
-  };
+  // Assumptions helpers
+  const assumptions = formData.assumptions || {};
+  const industry = formData.industry || 'Other';
 
+  const updateAssumption = useCallback(
+    (key, value) => {
+      updateField('assumptions', { ...formData.assumptions, [key]: value });
+    },
+    [formData.assumptions, updateField],
+  );
+
+  const handleResetAssumptions = useCallback(() => {
+    const fresh = getArchetypeDefaults(formData.projectArchetype, industry);
+    if (fresh) {
+      updateField('assumptions', fresh);
+    }
+  }, [formData.projectArchetype, industry, updateField]);
+
+  const defaults = getArchetypeDefaults(formData.projectArchetype, industry) || {};
+  const showRevenue = assumptions.revenueEligible !== undefined;
+
+  const computed = useMemo(() => {
+    const archetypeInputs = formData.archetypeInputs || {};
+    return mapArchetypeInputs(formData.projectArchetype, archetypeInputs);
+  }, [formData.projectArchetype, formData.archetypeInputs]);
+
+  const archetypeSchema = formData.projectArchetype
+    ? ARCHETYPE_INPUT_MAP[formData.projectArchetype]
+    : null;
+  const archetypeInfo = formData.projectArchetype
+    ? PROJECT_ARCHETYPES.find(a => a.id === formData.projectArchetype)
+    : null;
+  const archetypeInputValues = formData.archetypeInputs || {};
+
+  // Current cost helpers
   const teamSize = formData.teamSize || 10;
-  const hoursPerWeek = formData.hoursPerWeek || 20;
-  const totalWeeklyHours = teamSize * hoursPerWeek;
+  const avgSalary = formData.avgSalary ?? 100000;
+  const errorRate = formData.errorRate ?? 0.10;
+  const annualLaborCost = teamSize * avgSalary;
+  const reworkCost = annualLaborCost * errorRate;
+  const totalCost = annualLaborCost + reworkCost;
+
+  // Determine section title
+  const isCostSection = subStep >= 3;
 
   return (
     <div className="mx-auto w-full max-w-xl">
       <h2 className="mb-2 text-2xl font-bold text-navy sm:text-3xl">
-        What type of AI project is this?
+        {isCostSection ? "Now let's talk dollars" : 'What type of AI project is this?'}
       </h2>
       <div className="mb-8 h-1 w-16 rounded bg-gold" />
 
       <AnimatePresence mode="wait">
+        {/* SubStep 0: Archetype selection */}
         {subStep === 0 && (
-          <motion.div
-            key="archetype"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
+          <motion.div key="archetype" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3, ease: 'easeInOut' }}>
             <CardSelector
               label="Select the archetype that best describes your project"
               options={ARCHETYPE_OPTIONS}
@@ -99,16 +142,15 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
           </motion.div>
         )}
 
+        {/* SubStep 1: Team size */}
         {subStep === 1 && (
-          <motion.div
-            key="teamSize"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
+          <motion.div key="teamSize" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3, ease: 'easeInOut' }}>
             <div className="space-y-4">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-2">
+                <p className="text-sm text-emerald-800">
+                  <span className="font-bold italic text-emerald-700">Team size</span> is the #1 driver of AI ROI — larger teams see bigger absolute savings.
+                </p>
+              </div>
               <SliderInput
                 label="How many people currently work on this process?"
                 value={formData.teamSize ?? 10}
@@ -117,18 +159,27 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
                 max={500}
                 step={1}
                 suffix=" people"
-                helperText="Include full-time and part-time contributors"
               />
+
+              {/* Show automation potential from archetype defaults */}
+              {computed.automationPotential != null && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-emerald-700">Estimated Automation Potential</p>
+                      <p className="text-[11px] text-emerald-600/70">Based on your archetype selection</p>
+                    </div>
+                    <span className="text-xl font-bold font-mono text-emerald-700">
+                      {Math.round(computed.automationPotential * 100)}%
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <button
                 type="button"
-                onClick={() => setSubStep(2)}
-                className="
-                  mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
-                  text-navy shadow-sm transition-all duration-150
-                  hover:bg-gold/90 focus:outline-none focus-visible:ring-2
-                  focus-visible:ring-gold focus-visible:ring-offset-2
-                "
+                onClick={() => setSubStep(nextAfterTeamSize)}
+                className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
               >
                 Continue
               </button>
@@ -136,9 +187,336 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
           </motion.div>
         )}
 
-        {subStep === 2 && (
+        {/* SubStep 2: Archetype inputs + assumptions */}
+        {subStep === 2 && archetypeSchema && (
+          <motion.div key="archetypeInputs" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3, ease: 'easeInOut' }}>
+            <div className="space-y-6">
+              {/* Archetype header */}
+              <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
+                <span className="text-2xl" role="img" aria-label={archetypeInfo?.label}>
+                  {archetypeInfo?.icon}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-emerald-800">{archetypeInfo?.label}</p>
+                  <p className="text-xs text-gray-500">Customize the inputs below to match your process</p>
+                </div>
+              </div>
+
+              {/* Computed Summary Card */}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Automation Potential</p>
+                    <p className="text-lg font-bold text-navy">
+                      {computed.automationPotential != null ? `${Math.round(computed.automationPotential * 100)}%` : '--'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Hours/Week</p>
+                    <p className="text-lg font-bold text-navy">
+                      {computed.hoursPerWeek != null ? `${computed.hoursPerWeek.toLocaleString()} hrs` : '--'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Error Rate</p>
+                    <p className="text-lg font-bold text-navy">
+                      {computed.errorRate != null ? `${(computed.errorRate * 100).toFixed(1)}%` : '--'}
+                    </p>
+                  </div>
+                  {computed.revenueImpact != null && computed.revenueImpact > 0 && (
+                    <div className="rounded-lg bg-white/70 px-3 py-2">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Revenue Impact</p>
+                      <p className="text-lg font-bold text-navy">{formatCurrency(computed.revenueImpact)}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Scrollable compact input list */}
+              <div className="max-h-[40vh] space-y-5 overflow-y-auto pr-1">
+                {archetypeSchema.inputs.map((input) => {
+                  const rawValue = archetypeInputValues[input.key] ?? input.default;
+
+                  if (input.type === 'percent') {
+                    const displayValue = Math.round(rawValue * 100);
+                    const displayMin = Math.round(input.min * 100);
+                    const displayMax = Math.round(input.max * 100);
+                    return (
+                      <div key={input.key} className="space-y-1">
+                        <SliderInput
+                          label={input.label}
+                          value={displayValue}
+                          onChange={(v) => handleArchetypeInput(input.key, v / 100)}
+                          min={displayMin}
+                          max={displayMax}
+                          step={1}
+                          suffix="%"
+                          helperText={input.note}
+                        />
+                      </div>
+                    );
+                  }
+
+                  if (input.type === 'scale') {
+                    return (
+                      <div key={input.key} className="space-y-1">
+                        <SliderInput
+                          label={input.label}
+                          value={rawValue}
+                          onChange={(v) => handleArchetypeInput(input.key, v)}
+                          min={1}
+                          max={5}
+                          step={1}
+                          suffix=""
+                          helperText={input.note}
+                        />
+                      </div>
+                    );
+                  }
+
+                  const step = getStepForNumber(input.min, input.max);
+                  return (
+                    <div key={input.key} className="space-y-1">
+                      <SliderInput
+                        label={input.label}
+                        value={rawValue}
+                        onChange={(v) => handleArchetypeInput(input.key, v)}
+                        min={input.min}
+                        max={input.max}
+                        step={step}
+                        suffix=""
+                        helperText={input.note}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Collapsible Fine-tune Assumptions */}
+              <button
+                type="button"
+                onClick={() => setShowAssumptions(!showAssumptions)}
+                className="flex w-full items-center gap-2 rounded-lg border-2 border-dashed border-navy/20 px-4 py-2.5 text-sm font-medium text-navy/60 transition-all duration-150 hover:border-navy/40 hover:text-navy hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className={`h-4 w-4 transition-transform duration-200 ${showAssumptions ? 'rotate-90' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                Fine-tune assumptions (optional)
+              </button>
+
+              <AnimatePresence>
+                {showAssumptions && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                      <p className="text-xs text-gray-500">
+                        These values are pre-set from industry benchmarks. Adjust to match your situation.
+                      </p>
+
+                      <SliderInput
+                        label="Automation Potential"
+                        value={Math.round((assumptions.automationPotential ?? computed.automationPotential ?? getAutomationPotential(industry, formData.processType || 'Other')) * 100)}
+                        onChange={(v) => updateAssumption('automationPotential', v / 100)}
+                        min={5}
+                        max={85}
+                        step={1}
+                        suffix="%"
+                        helperText={`% of process work AI can automate. Industry avg: ${Math.round(getAutomationPotential(industry, formData.processType || 'Other') * 100)}%`}
+                      />
+
+                      <SliderInput
+                        label="Process Hours / Week"
+                        value={assumptions.hoursPerWeek ?? computed.hoursPerWeek ?? 20}
+                        onChange={(v) => updateAssumption('hoursPerWeek', v)}
+                        min={1}
+                        max={10000}
+                        step={1}
+                        suffix=" hrs"
+                        helperText={`Total team hours on this process per week.${computed.hoursPerWeek != null ? ` Computed: ${computed.hoursPerWeek.toLocaleString()} hrs` : ''}`}
+                      />
+
+                      <SliderInput
+                        label="Current Error / Rework Rate"
+                        value={Math.round((assumptions.errorRate ?? computed.errorRate ?? 0.10) * 100 * 10) / 10}
+                        onChange={(v) => updateAssumption('errorRate', v / 100)}
+                        min={0}
+                        max={50}
+                        step={0.5}
+                        suffix="%"
+                        helperText={`% of work requiring rework.${computed.errorRate != null ? ` Computed: ${(computed.errorRate * 100).toFixed(1)}%` : ''}`}
+                      />
+
+                      <SliderInput
+                        label="Expected Adoption Rate"
+                        value={Math.round((assumptions.adoptionRate ?? 0.70) * 100)}
+                        onChange={(v) => updateAssumption('adoptionRate', v / 100)}
+                        min={20}
+                        max={95}
+                        step={5}
+                        suffix="%"
+                        helperText={`Benchmark: ${Math.round((defaults.adoptionRate ?? 0.70) * 100)}%`}
+                      />
+
+                      <SliderInput
+                        label="Tool Replacement Rate"
+                        value={Math.round((assumptions.toolReplacementRate ?? 0.40) * 100)}
+                        onChange={(v) => updateAssumption('toolReplacementRate', v / 100)}
+                        min={10}
+                        max={80}
+                        step={5}
+                        suffix="%"
+                        helperText={`Benchmark: ${Math.round((defaults.toolReplacementRate ?? 0.40) * 100)}%`}
+                      />
+
+                      <SliderInput
+                        label="Talent Retention Premium"
+                        value={Math.round((formData.retainedTalentPremiumRate ?? 0.10) * 100)}
+                        onChange={(v) => updateField('retainedTalentPremiumRate', v / 100)}
+                        min={0}
+                        max={20}
+                        step={1}
+                        suffix="%"
+                        helperText="Wage increase to retain top performers. Default: 10%"
+                      />
+
+                      <label className="flex items-center gap-3 cursor-pointer rounded-lg bg-white/70 px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          checked={formData.isAgenticWorkflow || false}
+                          onChange={(e) => updateField('isAgenticWorkflow', e.target.checked)}
+                          className="h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
+                        />
+                        <div>
+                          <span className="text-sm font-medium text-navy">Agentic AI Workflow?</span>
+                          <p className="text-xs text-gray-500">Multi-step reasoning chains use 2-5x more API calls</p>
+                        </div>
+                      </label>
+
+                      {showRevenue && (
+                        <label className="flex items-center gap-3 cursor-pointer rounded-lg bg-white/70 px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={assumptions.revenueEligible ?? false}
+                            onChange={(e) => updateAssumption('revenueEligible', e.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
+                          />
+                          <div>
+                            <span className="text-sm font-medium text-navy">Revenue Eligible</span>
+                            <p className="text-xs text-gray-500">Enable revenue uplift calculations</p>
+                          </div>
+                        </label>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleResetAssumptions}
+                        className="rounded-lg border border-dashed border-navy/20 px-3 py-1.5 text-xs font-medium text-navy/50 transition-all duration-150 hover:border-navy/40 hover:text-navy hover:bg-white/50"
+                      >
+                        Reset to Defaults
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+
+        {/* SubStep 3: Average salary */}
+        {subStep === 3 && (
           <motion.div
-            key="hoursPerWeek"
+            key="avgSalary"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+          >
+            <div className="space-y-4">
+              <CurrencyInput
+                label="What's the average fully-loaded annual cost per person?"
+                value={formData.avgSalary ?? 100000}
+                onChange={(val) => updateField('avgSalary', val)}
+                presets={[100000, 125000, 150000, 200000, 250000, 300000]}
+                defaultValue={100000}
+                helperText="Salary + benefits + overhead (1.3-1.5x base). Higher cost = bigger savings from AI automation."
+              />
+
+              {formData.avgSalary != null && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-emerald-800">Current Annual Process Cost</p>
+                  <div className="space-y-1 text-sm text-emerald-800/80">
+                    <p>
+                      Labor: {formatCurrency(annualLaborCost)}{' '}
+                      <span className="text-emerald-700/50">({teamSize} people x {formatCurrency(avgSalary)})</span>
+                    </p>
+                    <p>+ Rework Cost: {formatCurrency(reworkCost)}</p>
+                    <div className="mt-2 border-t border-emerald-200 pt-2">
+                      <p className="text-base font-bold text-emerald-800">Total: {formatCurrency(totalCost)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setSubStep(4)}
+                className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                Continue
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* SubStep 4: Tool costs */}
+        {subStep === 4 && (
+          <motion.div
+            key="toolCosts"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+          >
+            <div className="space-y-4">
+              <CurrencyInput
+                label="Annual spend on current tools/software for this process?"
+                value={formData.currentToolCosts ?? 0}
+                onChange={(val) => updateField('currentToolCosts', val)}
+                presets={[0, 10000, 25000, 50000, 100000]}
+                defaultValue={0}
+                helperText="Include licenses, subscriptions, and maintenance costs"
+              />
+              {nextAfterToolCosts != null && (
+                <button
+                  type="button"
+                  onClick={() => setSubStep(nextAfterToolCosts)}
+                  className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                >
+                  Continue
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* SubStep 5: Vendors replaced */}
+        {subStep === 5 && (
+          <motion.div
+            key="vendorsReplaced"
             variants={slideVariants}
             initial="enter"
             animate="center"
@@ -147,48 +525,47 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
           >
             <div className="space-y-4">
               <SliderInput
-                label="How many hours per week does EACH person spend on this?"
-                value={formData.hoursPerWeek ?? 20}
-                onChange={handleHoursPerWeek}
-                min={1}
-                max={40}
+                label="How many existing vendors/tools will AI replace?"
+                value={formData.vendorsReplaced ?? 0}
+                onChange={(val) => updateField('vendorsReplaced', val)}
+                min={0}
+                max={3}
                 step={1}
-                suffix=" hrs"
-                liveCalc={`That\u2019s ${totalWeeklyHours.toLocaleString()} total hours/week across your team`}
+                helperText="Count major software vendors or service contracts that will be terminated"
               />
-
-              <button
-                type="button"
-                onClick={() => setSubStep(3)}
-                className="
-                  mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
-                  text-navy shadow-sm transition-all duration-150
-                  hover:bg-gold/90 focus:outline-none focus-visible:ring-2
-                  focus-visible:ring-gold focus-visible:ring-offset-2
-                "
-              >
-                Continue
-              </button>
+              {(formData.vendorsReplaced ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSubStep(6)}
+                  className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                >
+                  Continue
+                </button>
+              )}
             </div>
           </motion.div>
         )}
 
-        {subStep === 3 && (
+        {/* SubStep 6: Vendor termination cost */}
+        {subStep === 6 && (
           <motion.div
-            key="errorRate"
+            key="vendorTerminationCost"
             variants={slideVariants}
             initial="enter"
             animate="center"
             exit="exit"
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            <SegmentedSelect
-              label="How often does work need to be redone or corrected?"
-              options={ERROR_RATE_OPTIONS}
-              value={formData.errorRate}
-              onChange={handleErrorRate}
-              helperText="Include time spent fixing errors, reworking deliverables, and handling complaints from bad output."
-            />
+            <div className="space-y-4">
+              <CurrencyInput
+                label={`Estimated cost to terminate ${formData.vendorsReplaced} vendor contract${formData.vendorsReplaced > 1 ? 's' : ''}?`}
+                value={formData.vendorTerminationCost ?? 0}
+                onChange={(val) => updateField('vendorTerminationCost', val)}
+                presets={[0, 25000, 50000, 100000, 250000]}
+                defaultValue={0}
+                helperText="Include early termination fees, remaining contract obligations, migration costs"
+              />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

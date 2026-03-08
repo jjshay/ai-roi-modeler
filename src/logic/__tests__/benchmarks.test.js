@@ -190,11 +190,11 @@ describe('Industry Peer Benchmarks', () => {
 });
 
 describe('Benchmark Sources', () => {
-  it('has 34 sources', () => {
-    expect(BENCHMARK_SOURCES).toHaveLength(34);
+  it('has 44 sources', () => {
+    expect(BENCHMARK_SOURCES).toHaveLength(44);
   });
 
-  it('IDs are sequential 1-34', () => {
+  it('IDs are sequential 1-37', () => {
     BENCHMARK_SOURCES.forEach((src, i) => {
       expect(src.id).toBe(i + 1);
     });

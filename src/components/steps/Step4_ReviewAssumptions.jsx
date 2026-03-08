@@ -1,7 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import SliderInput from '../inputs/SliderInput';
-import CurrencyInput from '../inputs/CurrencyInput';
 import { getArchetypeDefaults, getArchetypeById } from '../../logic/archetypes';
+import { mapArchetypeInputs } from '../../logic/archetypeInputs';
+import { getAutomationPotential } from '../../logic/benchmarks';
+import { formatCurrency } from '../../utils/formatters';
 
 export default function Step4_ReviewAssumptions({ formData, updateField }) {
   const archetype = getArchetypeById(formData.projectArchetype);
@@ -9,6 +11,12 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
   const assumptions = formData.assumptions || {};
 
   const defaults = getArchetypeDefaults(formData.projectArchetype, industry) || {};
+
+  // Compute derived values from archetype-specific inputs
+  const computed = useMemo(() => {
+    const archetypeInputs = formData.archetypeInputs || {};
+    return mapArchetypeInputs(formData.projectArchetype, archetypeInputs);
+  }, [formData.projectArchetype, formData.archetypeInputs]);
 
   const updateAssumption = useCallback(
     (key, value) => {
@@ -43,9 +51,23 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
         </div>
       )}
 
-      <p className="mb-8 text-sm leading-relaxed text-gray-600">
-        These defaults are based on industry benchmarks for your project type.
-        Adjust any value that doesn't match your situation.
+      {/* ── Revenue Impact (display-only when present) ── */}
+      {computed.revenueImpact != null && computed.revenueImpact > 0 && (
+        <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-emerald-600">
+              Estimated Revenue Impact
+            </p>
+            <p className="text-2xl font-bold text-navy">
+              {formatCurrency(computed.revenueImpact)}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Editable Controls ── */}
+      <p className="mb-6 text-sm leading-relaxed text-gray-600">
+        Adjust these assumptions to match your situation. Defaults are based on industry data and your archetype inputs.
       </p>
 
       <div className="space-y-6">
@@ -53,13 +75,41 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
         <div>
           <SliderInput
             label="Automation Potential"
-            value={Math.round((assumptions.automationPotential ?? 0.50) * 100)}
+            value={Math.round((assumptions.automationPotential ?? computed.automationPotential ?? getAutomationPotential(industry, formData.processType || 'Other')) * 100)}
             onChange={(v) => updateAssumption('automationPotential', v / 100)}
-            min={10}
-            max={90}
-            step={5}
+            min={5}
+            max={85}
+            step={1}
             suffix="%"
-            helperText={`% of current task hours AI can automate. Benchmark: ${Math.round((defaults.automationPotential ?? 0.50) * 100)}%`}
+            helperText={`% of process work AI can automate. Industry avg: ${Math.round(getAutomationPotential(industry, formData.processType || 'Other') * 100)}%`}
+          />
+        </div>
+
+        {/* Hours per Week */}
+        <div>
+          <SliderInput
+            label="Process Hours / Week"
+            value={assumptions.hoursPerWeek ?? computed.hoursPerWeek ?? 20}
+            onChange={(v) => updateAssumption('hoursPerWeek', v)}
+            min={1}
+            max={10000}
+            step={1}
+            suffix=" hrs"
+            helperText={`Total team hours spent on this process per week.${computed.hoursPerWeek != null ? ` Computed: ${computed.hoursPerWeek.toLocaleString()} hrs` : ''}`}
+          />
+        </div>
+
+        {/* Error Rate */}
+        <div>
+          <SliderInput
+            label="Current Error / Rework Rate"
+            value={Math.round((assumptions.errorRate ?? computed.errorRate ?? 0.10) * 100 * 10) / 10}
+            onChange={(v) => updateAssumption('errorRate', v / 100)}
+            min={0}
+            max={50}
+            step={0.5}
+            suffix="%"
+            helperText={`% of work requiring rework or correction.${computed.errorRate != null ? ` Computed: ${(computed.errorRate * 100).toFixed(1)}%` : ''}`}
           />
         </div>
 
@@ -74,31 +124,6 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
             step={5}
             suffix="%"
             helperText={`Expected team adoption after ramp-up. Benchmark: ${Math.round((defaults.adoptionRate ?? 0.70) * 100)}%`}
-          />
-        </div>
-
-        {/* API Cost per 1K Requests */}
-        <div>
-          <CurrencyInput
-            label="API Cost per 1,000 Requests"
-            value={assumptions.apiCostPer1kRequests ?? 10}
-            onChange={(v) => updateAssumption('apiCostPer1kRequests', v)}
-            presets={[5, 10, 15, 25]}
-            helperText={`LLM inference cost. Benchmark: $${defaults.apiCostPer1kRequests ?? 10}`}
-          />
-        </div>
-
-        {/* Requests per Person-Hour */}
-        <div>
-          <SliderInput
-            label="Requests per Person-Hour"
-            value={assumptions.requestsPerPersonHour ?? 12}
-            onChange={(v) => updateAssumption('requestsPerPersonHour', v)}
-            min={1}
-            max={60}
-            step={1}
-            suffix=" req/hr"
-            helperText={`API call volume per person. Benchmark: ${defaults.requestsPerPersonHour ?? 12}`}
           />
         </div>
 
@@ -148,7 +173,7 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
           </label>
         </div>
 
-        {/* Revenue Eligible toggle — only for customer-facing / revenue archetypes */}
+        {/* Revenue Eligible toggle — only for revenue archetypes */}
         {showRevenue && (
           <div className="flex items-center gap-3 rounded-xl border border-navy/10 bg-navy/5 px-4 py-3">
             <label className="flex items-center gap-3 cursor-pointer">
@@ -174,12 +199,7 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
         <button
           type="button"
           onClick={handleReset}
-          className="
-            rounded-lg border-2 border-dashed border-navy/20 px-4 py-2
-            text-sm font-medium text-navy/60 transition-all duration-150
-            hover:border-navy/40 hover:text-navy hover:bg-navy/5
-            focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
-          "
+          className="rounded-lg border-2 border-dashed border-navy/20 px-4 py-2 text-sm font-medium text-navy/60 transition-all duration-150 hover:border-navy/40 hover:text-navy hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
         >
           Reset to Defaults
         </button>

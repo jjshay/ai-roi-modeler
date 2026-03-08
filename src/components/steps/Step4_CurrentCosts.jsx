@@ -86,7 +86,7 @@ export default function Step4_CurrentCosts({ formData, updateField }) {
                 className="
                   mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
                   text-navy shadow-sm transition-all duration-150
-                  hover:bg-gold/90 focus:outline-none focus-visible:ring-2
+                  hover:bg-sky focus:outline-none focus-visible:ring-2
                   focus-visible:ring-gold focus-visible:ring-offset-2
                 "
               >
@@ -121,7 +121,7 @@ export default function Step4_CurrentCosts({ formData, updateField }) {
                 className="
                   mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
                   text-navy shadow-sm transition-all duration-150
-                  hover:bg-gold/90 focus:outline-none focus-visible:ring-2
+                  hover:bg-sky focus:outline-none focus-visible:ring-2
                   focus-visible:ring-gold focus-visible:ring-offset-2
                 "
               >
@@ -165,7 +165,7 @@ export default function Step4_CurrentCosts({ formData, updateField }) {
                   focus:outline-none focus-visible:ring-2
                   focus-visible:ring-gold focus-visible:ring-offset-2
                   ${(formData.vendorsReplaced ?? 0) > 0
-                    ? 'bg-gold text-navy hover:bg-gold/90'
+                    ? 'bg-gold text-navy hover:bg-sky'
                     : 'hidden'
                   }
                 `}

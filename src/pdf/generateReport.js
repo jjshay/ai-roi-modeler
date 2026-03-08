@@ -233,7 +233,7 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   doc.setTextColor(...WHITE);
   doc.text(formatPercent(base.roic), MARGIN + 8, y + 10);
   doc.setFontSize(11);
-  doc.text('5-Year ROIC', MARGIN + 8, y + 18);
+  doc.text('5-FY ROIC', MARGIN + 8, y + 18);
   // Subtext on right
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
@@ -255,9 +255,9 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   const projections = base.projections;
   autoTable(doc, {
     startY: y,
-    head: [['Year', 'Gross Savings', 'AI Costs', 'Net Cash Flow', 'Cumulative']],
+    head: [['FY', 'Gross Savings', 'AI Costs', 'Net Cash Flow', 'Cumulative']],
     body: projections.map(yr => [
-      `Year ${yr.year}`,
+      `FY ${yr.year}`,
       formatCompactValue(yr.grossSavings),
       formatCompactValue(yr.ongoingCost + yr.separationCost),
       formatCompactValue(yr.netCashFlow),
@@ -314,6 +314,80 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   y = doc.lastAutoTable.finalY + 2;
   y = bodyText(doc, `Implementation Timeline: ${ka.timelineMonths} months`, MARGIN, y, { bold: true, size: 9 });
   y += 4;
+
+  // --- Volume Sensitivity + Break-Even Summary ---
+  const volSens = results.volumeSensitivity;
+  if (volSens && volSens.levels) {
+    // Check if we need a new page (need ~60mm for the table)
+    if (y > PAGE_H - 80) {
+      doc.addPage();
+      addHeader(doc);
+      y = 25;
+    }
+    y = sectionTitle(doc, 'Volume Sensitivity', y);
+    y = bodyText(doc, `Impact of changes in ${volSens.inputLabel.toLowerCase()} on 5-FY NPV`, MARGIN, y, { size: 8 });
+    y += 1;
+    autoTable(doc, {
+      startY: y,
+      ...autoTableTheme(),
+      head: [[volSens.inputLabel, 'Change', '5-FY NPV', 'NPV Impact']],
+      body: volSens.levels.map(level => [
+        level.volume.toLocaleString() + (level.delta === 0 ? ' (current)' : ''),
+        level.delta === 0 ? '—' : (level.delta > 0 ? '+' : '') + level.delta.toLocaleString(),
+        formatCompactValue(level.npv),
+        level.npvDelta === 0 ? '—' : (level.npvDelta > 0 ? '+' : '') + formatCompactValue(level.npvDelta),
+      ]),
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 42 },
+        1: { halign: 'right', cellWidth: 24 },
+        2: { halign: 'right', cellWidth: 30 },
+        3: { halign: 'right', fontStyle: 'bold', cellWidth: 30 },
+      },
+      bodyStyles: { fontSize: 8 },
+      headStyles: { fontSize: 8 },
+      didParseCell: (data) => {
+        // Highlight current row
+        if (data.section === 'body' && data.row.index === 2) {
+          data.cell.styles.fillColor = [255, 249, 230];
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  }
+
+  // Break-even thresholds summary (compact)
+  const beUnits = results.breakEvenUnits;
+  if (beUnits && beUnits.length > 0) {
+    if (y > PAGE_H - 40) {
+      doc.addPage();
+      addHeader(doc);
+      y = 25;
+    }
+    y = sectionTitle(doc, 'Break-Even Thresholds', y);
+    autoTable(doc, {
+      startY: y,
+      ...autoTableTheme(),
+      head: [['Input', 'Current', 'Break-Even', 'Margin']],
+      body: beUnits.slice(0, 4).map(item => {
+        const fmtVal = (val, type) => type === 'percent' ? `${(val * 100).toFixed(1)}%` : val.toLocaleString();
+        return [
+          item.label,
+          fmtVal(item.currentValue, item.type),
+          fmtVal(item.breakEvenValue, item.type),
+          `${item.marginPct > 0 ? '+' : ''}${item.marginPct}%`,
+        ];
+      }),
+      columnStyles: {
+        0: { fontStyle: 'bold' },
+        1: { halign: 'right' },
+        2: { halign: 'right' },
+        3: { halign: 'center', fontStyle: 'bold' },
+      },
+      bodyStyles: { fontSize: 8 },
+      headStyles: { fontSize: 8 },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  }
 
   // --- Recommendation verdict ---
   y = sectionTitle(doc, 'Recommendation', y);
@@ -375,6 +449,9 @@ function page2_TableOfContents(doc, includedPages) {
     { title: 'Recommendations & Next Steps', key: 'recommendations' },
     { title: 'Qualitative Benefits', key: 'qualitativeBenefits' },
     { title: 'Case Study: Mid-Market Financial Services', key: 'caseStudy' },
+    { title: 'Capital Allocation: AI vs. Alternatives', key: 'workforceAlternatives' },
+    { title: 'Break-Even Unit Economics', key: 'breakEvenUnits' },
+    { title: 'AI Cost Model & Technical Assumptions', key: 'consultingAssumptions' },
     { title: 'AI Maturity Premium', key: 'maturityPremium' },
     { title: 'Input Assumptions & Model Parameters', key: 'inputAssumptions' },
     { title: 'Appendix A: Calculation Walkthrough & DCF Model', key: 'appendixMethodology' },
@@ -709,9 +786,9 @@ function page3_InvestmentAnalysis(doc, formData, results) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(...NAVY);
-    doc.text('Workforce Separation Costs (Phased Years 2-5) [15][21]', MARGIN, y);
+    doc.text('Workforce Separation Costs (Phased FY 2-5) [15][21]', MARGIN, y);
     y += 2;
-    y = bodyText(doc, `${ot.displacedFTEs} of ${ot.displacedFTEs + ot.retainedFTEs} roles phased out over 4 years (${ot.retainedFTEs} retained — ${formatPercent(1 - MAX_HEADCOUNT_REDUCTION)} always human). Year 1 is enhancement only.`, MARGIN, y, { size: 8, color: MID_GRAY });
+    y = bodyText(doc, `${ot.displacedFTEs} of ${ot.displacedFTEs + ot.retainedFTEs} roles phased out over 4 years (${ot.retainedFTEs} retained — ${formatPercent(1 - MAX_HEADCOUNT_REDUCTION)} always human). FY 1 is enhancement only.`, MARGIN, y, { size: 8, color: MID_GRAY });
     y += 2;
 
     const sepRows = [];
@@ -788,16 +865,16 @@ function page3_InvestmentAnalysis(doc, formData, results) {
 
   y = doc.lastAutoTable.finalY + 2;
 
-  // Year 1 and Year 5 ongoing costs
+  // FY 1 and FY 5 ongoing costs
   const yr1Cost = ai.baseOngoingCost;
   const yr5Cost = ai.ongoingCostsByYear[4];
   drawRoundedRect(doc, MARGIN, y, CONTENT_W, 16, 1.5, NAVY);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...WHITE);
-  doc.text('Year 1 Ongoing Cost', MARGIN + 4, y + 6);
+  doc.text('FY 1 Ongoing Cost', MARGIN + 4, y + 6);
   doc.text(formatCurrency(yr1Cost), MARGIN + CONTENT_W * 0.35, y + 6, { align: 'right' });
-  doc.text(`Year 5 Ongoing Cost (tapered escalation)`, MARGIN + CONTENT_W * 0.5, y + 6);
+  doc.text(`FY 5 Ongoing Cost (tapered escalation)`, MARGIN + CONTENT_W * 0.5, y + 6);
   doc.setTextColor(255, 150, 150);
   doc.text(formatCurrency(yr5Cost), PAGE_W - MARGIN - 4, y + 6, { align: 'right' });
   doc.setTextColor(...WHITE);
@@ -821,7 +898,7 @@ function page4_ScenarioProjections(doc, results) {
   const projRows = [];
   for (let yr = 0; yr < DCF_YEARS; yr++) {
     projRows.push([
-      `Year ${yr + 1} Savings`,
+      `FY ${yr + 1} Savings`,
       formatCurrency(cons.projections[yr]?.grossSavings || 0),
       formatCurrency(base.projections[yr]?.grossSavings || 0),
       formatCurrency(opt.projections[yr]?.grossSavings || 0),
@@ -1190,7 +1267,7 @@ function page5_RiskAssessment(doc, formData, results) {
 
   // Draw three segments with arrow separators
   const segments = ADOPTION_RAMP.map((r, i) => ({
-    label: `Year ${i + 1}`,
+    label: `FY ${i + 1}`,
     pct: `${(r * 100).toFixed(0)}%`,
   }));
 
@@ -1528,7 +1605,6 @@ function page8_InputAssumptions(doc, formData, results) {
   const inputRows = [
     ['Industry', formData.industry || 'N/A'],
     ['Company Size', formData.companySize || 'N/A'],
-    ['Role', formData.role || 'N/A'],
     ['AI Team Location', formData.teamLocation || 'N/A'],
     ['Project Archetype', (getArchetypeById(formData.projectArchetype) || {}).label || formData.processType || 'N/A'],
     ['Team Size', `${formData.teamSize || 0} people`],
@@ -1595,10 +1671,10 @@ function page8_InputAssumptions(doc, formData, results) {
     ['Realistic Implementation Cost (model-adjusted)', formatCurrency(ai.realisticImplCost)],
     ['Ongoing AI Ops Headcount', `${ai.ongoingAiHeadcount} FTE`],
     ['Computed Annual Ongoing Cost', formatCurrency(ai.computedOngoingCost)],
-    ['Year 1 Ongoing Cost (model-adjusted)', formatCurrency(ai.baseOngoingCost)],
+    ['FY 1 Ongoing Cost (model-adjusted)', formatCurrency(ai.baseOngoingCost)],
     ['Risk-Adjusted Timeline', `${results.riskAdjustments.adjustedTimeline} months`],
     ['Discount Rate (WACC proxy) [26]', formatPercent(results.discountRate || 0.10)],
-    ['Adoption Ramp (Year 1-5)', ADOPTION_RAMP.map((r) => (r * 100).toFixed(0) + '%').join(' / ')],
+    ['Adoption Ramp (FY 1-5)', ADOPTION_RAMP.map((r) => (r * 100).toFixed(0) + '%').join(' / ')],
     ['Scenario Multipliers (Cons / Base / Opt)', '0.75x / 1.00x / 1.25x'],
     ['Base Case ROIC Cap [2]', `${(MAX_BASE_ROIC * 100).toFixed(0)}% max`],
     ['Base Case IRR Cap [2][4]', `${(MAX_BASE_IRR * 100).toFixed(0)}% max`],
@@ -1870,7 +1946,7 @@ function page10_AppendixMethodology(doc, formData, results) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...WHITE);
-  doc.text('Net Annual Savings (Base Case, Year 3)', MARGIN + 4, y + 4);
+  doc.text('Net Annual Savings (Base Case, FY 3)', MARGIN + 4, y + 4);
   doc.text(formatCurrency(results.savings.netAnnualSavings), PAGE_W - MARGIN - 4, y + 4, { align: 'right' });
   y += 14;
 
@@ -1976,9 +2052,9 @@ function page10_AppendixMethodology(doc, formData, results) {
 
   let cumPV = -results.upfrontInvestment;
   const dcfRows = [
-    // Year 0 — upfront investment only (separation is phased into Years 2-5)
+    // FY 0 — upfront investment only (separation is phased into FY 2-5)
     [
-      { content: 'Year 0', styles: { fontStyle: 'bold' } },
+      { content: 'FY 0', styles: { fontStyle: 'bold' } },
       '', '', '',
       formatCurrency(-results.upfrontInvestment),
       '1.000',
@@ -1990,7 +2066,7 @@ function page10_AppendixMethodology(doc, formData, results) {
   dcfYears.forEach((d) => {
     cumPV += d.pv;
     dcfRows.push([
-      { content: `Year ${d.yr} (${(d.ramp * 100).toFixed(0)}%)`, styles: { fontStyle: 'bold' } },
+      { content: `FY ${d.yr} (${(d.ramp * 100).toFixed(0)}%)`, styles: { fontStyle: 'bold' } },
       formatCurrency(d.grossCF),
       d.sepCost > 0 ? `(${formatCurrency(d.sepCost)})` : '—',
       `(${formatCurrency(d.opsCost)})`,
@@ -2060,7 +2136,7 @@ function page10_AppendixMethodology(doc, formData, results) {
     const netImpact = totalSavings - d.opsCost - amort;
 
     plRows.push([
-      `Year ${d.yr}`,
+      `FY ${d.yr}`,
       formatCurrency(d.headcount),
       formatCurrency(d.enhancement),
       `(${formatCurrency(d.opsCost)})`,
@@ -2070,7 +2146,7 @@ function page10_AppendixMethodology(doc, formData, results) {
     ]);
   });
 
-  // 5-year total
+  // 5-FY total
   const totHeadcount = dcfYears.reduce((s, d) => s + d.headcount, 0);
   const totEnhancement = dcfYears.reduce((s, d) => s + d.enhancement, 0);
   const totOps = results.aiCostModel.totalOngoing5Year;
@@ -2128,7 +2204,7 @@ function page10_AppendixMethodology(doc, formData, results) {
 
   // Notes
   const plNotes = [
-    'Headcount Savings: Phased reduction in fully-loaded labor costs from displaced FTEs (Years 2-5).',
+    'Headcount Savings: Phased reduction in fully-loaded labor costs from displaced FTEs (FY 2-5).',
     'Enhancement Savings: Efficiency, error reduction, and tool replacement gains (adoption-ramped).',
     'AI Operating Cost: Annual licenses, API/token costs, monitoring, and operational overhead.',
     `Impl. Amortization: Total upfront investment (incl. transition & friction costs) amortized straight-line over ${DCF_YEARS} years.`,
@@ -2359,7 +2435,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   sectionPara(
     'This report presents a forward-looking financial assessment of a proposed artificial intelligence ' +
     'implementation. All projections are derived from a deterministic model using (a) user-provided ' +
-    'inputs, (b) publicly available industry benchmarks sourced from 31 cited references (see Appendix B), ' +
+    'inputs, (b) publicly available industry benchmarks sourced from 44 cited references (see Appendix B), ' +
     'and (c) standardized risk adjustment factors. The model does not use proprietary data, machine learning ' +
     'predictions, or Monte Carlo simulation.'
   );
@@ -2432,8 +2508,8 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     'Adoption rate is derived from the user-reported change readiness score (40%-95%); executive sponsorship adjustment is ' +
     '85% without or 100% with a sponsor, reflecting documented failure rates for unsponsored projects; and industry ' +
     'success rate (45%-72%) reflects the documented rate at which AI projects in each industry achieve target ' +
-    'outcomes [3][4][5]. Additionally, a 5-year adoption ramp (60%, 85%, 100%, 100%, 100%) is applied [14]. ' +
-    'Headcount reduction is phased over Years 2-5 (Year 1 is enhancement only) and capped at 75% — 25% of roles always require humans [21].'
+    'outcomes [3][4][5]. Additionally, a 5-FY adoption ramp (60%, 85%, 100%, 100%, 100%) is applied [14]. ' +
+    'Headcount reduction is phased over FY 2-5 (FY 1 is enhancement only) and capped at 75% — 25% of roles always require humans [21].'
   );
   defItem('D. Implementation Cost Model',
     'Implementation costs are estimated using a staffing model calibrated to industry salary data [7][8]. ' +
@@ -2451,14 +2527,14 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     'platform/license fees (by company size), adjacent product costs (25% of license, reflecting forced ' +
     'vendor cross-sells) [22], model retraining/drift monitoring, annual compliance recertification, ' +
     'retained employee retraining, technical debt/integration maintenance, and cyber insurance increases. ' +
-    'Costs escalate on a tapered schedule (12%/12%/7%/7% in Years 2-5) reflecting aggressive vendor lock-in ' +
+    'Costs escalate on a tapered schedule (12%/12%/7%/7% in FY 2-5) reflecting aggressive vendor lock-in ' +
     'pricing early on that stabilizes over time. The higher of user-stated and model-computed ongoing costs is used.'
   );
   defItem('F. Separation and Transition Costs',
     'Total separation cost for displaced employees is modeled as a multiple of annual salary (0.80x-1.50x by ' +
     'company size), encompassing severance pay (55%), benefits continuation/COBRA (15%), outplacement services (12%), ' +
-    'administrative processing (10%), and legal review (8%) [15]. Separation is phased over Years 2-5 following the ' +
-    'headcount reduction schedule (0%, 20%, 25%, 20%, 10%), NOT charged as upfront costs. Year 1 is enhancement only — ' +
+    'administrative processing (10%), and legal review (8%) [15]. Separation is phased over FY 2-5 following the ' +
+    'headcount reduction schedule (0%, 20%, 25%, 20%, 10%), NOT charged as upfront costs. FY 1 is enhancement only — ' +
     'no employees are separated on Day 1 [21].'
   );
   defItem('G. Empirical Return Ceilings',
@@ -2505,6 +2581,9 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     formatCurrency(sal),
     loc === formData.teamLocation ? 'Selected' : '',
   ]);
+  if (formData.teamLocation === 'Blended' && formData.blendedAISalary) {
+    salaryRows.push(['Blended (US + Offshore)', formatCurrency(formData.blendedAISalary), 'Selected']);
+  }
 
   autoTable(doc, {
     startY: y,
@@ -2651,7 +2730,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
 
   const definitions = [
     ['Adoption Ramp',
-      'The phased utilization curve applied to projected savings. Reflects that enterprise tools are not utilized at full capacity from day one. This model uses 60% / 85% / 100% across Years 1-3, consistent with Worklytics enterprise adoption research [14].'],
+      'The phased utilization curve applied to projected savings. Reflects that enterprise tools are not utilized at full capacity from day one. This model uses 60% / 85% / 100% across FY 1-3, consistent with Worklytics enterprise adoption research [14].'],
     ['Automation Potential',
       'The estimated percentage of current process hours addressable by AI automation, derived from a cross-tabulation of industry and process type based on McKinsey [1] and Deloitte [5] research.'],
     ['Confidence Intervals',
@@ -2700,7 +2779,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     'Technology pricing (API costs, platform licenses, infrastructure) is based on current market rates and is subject to change. Rapid shifts in AI model pricing could materially affect ongoing cost projections.',
     'The model does not account for regulatory changes that may affect AI implementation costs, timelines, or permissible use cases after the date of this report.',
     'R&D tax credit and opportunity cost projections are presented for informational context only and are explicitly excluded from all NPV, IRR, and payback calculations to maintain conservative financial projections.',
-    'Generated using a deterministic financial model calibrated to 25 industry benchmarks and adjusted for organizational risk posture. This report has not been reviewed or endorsed by a licensed financial advisor, certified public accountant, investment banker, or legal counsel.',
+    'Generated using a deterministic financial model calibrated to 44 industry benchmarks and adjusted for organizational risk posture. This report has not been reviewed or endorsed by a licensed financial advisor, certified public accountant, investment banker, or legal counsel.',
   ];
 
   limitations.forEach((text, i) => {
@@ -3033,7 +3112,7 @@ function pageN_CapitalEfficiencyGates(doc, results) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...MID_GRAY);
-  doc.text('Year 3 return on capital', MARGIN + boxW + 10, y + 26);
+  doc.text('FY 3 return on capital', MARGIN + boxW + 10, y + 26);
 
   y += boxH + 6;
 
@@ -3181,7 +3260,7 @@ function pageN_OpportunityCostRevenue(doc, results) {
 
     autoTable(doc, {
       startY: y,
-      head: [['Year 1 Cost Component', 'Amount']],
+      head: [['FY 1 Cost Component', 'Amount']],
       body: breakdownRows,
       ...autoTableTheme(),
       columnStyles: {
@@ -3731,7 +3810,7 @@ function pageN_CaseStudy(doc) {
     margin: { left: MARGIN, right: MARGIN },
     head: [['Metric', 'Conservative', 'Base Case', 'Optimistic']],
     body: [
-      ['5-Year NPV', '$1.2M', '$2.1M', '$3.0M'],
+      ['5-FY NPV', '$1.2M', '$2.1M', '$3.0M'],
       ['IRR', '38%', '62%', '85%'],
       ['Payback', '22 months', '16 months', '12 months'],
       ['ROIC', '45%', '72%', '95%'],
@@ -3796,7 +3875,366 @@ function pageN_CaseStudy(doc) {
 }
 
 // ---------------------------------------------------------------------------
-// AI Maturity Premium Page
+// V5: Workforce Alternatives (AI vs Hire vs Outsource vs Do Nothing)
+// ---------------------------------------------------------------------------
+function pageN_WorkforceAlternatives(doc, results) {
+  doc.addPage();
+  addHeader(doc);
+
+  let y = 25;
+  y = sectionTitle(doc, 'Capital Allocation: AI vs. Alternatives', y);
+
+  y = bodyText(doc, 'This analysis compares four capital deployment strategies for addressing the same business need. ' +
+    'Each option is evaluated on total cost of ownership, risk profile, and strategic fit.', MARGIN, y);
+  y += 2;
+
+  const wa = results.workforceAlternatives;
+  if (!wa) {
+    y = bodyText(doc, 'Workforce alternatives data not available for this configuration.', MARGIN, y);
+    return;
+  }
+
+  // Summary comparison table
+  autoTable(doc, {
+    startY: y,
+    ...autoTableTheme(),
+    head: [['Strategy', 'Key Metric', '5-FY Economics', 'Risk Level']],
+    body: [
+      [
+        wa.aiInvestment.label,
+        `Upfront: ${formatCompactValue(wa.aiInvestment.upfrontCost)}`,
+        `Net: ${formatCompactValue(wa.aiInvestment.annual5YearNet)}`,
+        wa.aiInvestment.riskLevel,
+      ],
+      [
+        wa.hiring.label,
+        `FTEs: ${wa.hiring.ftesNeeded}`,
+        `Cost: ${formatCompactValue(wa.hiring.total5YearCost)}`,
+        wa.hiring.riskLevel,
+      ],
+      [
+        wa.outsourcing.label,
+        `Annual: ${formatCompactValue(wa.outsourcing.annualCost)}`,
+        `Net: ${formatCompactValue(wa.outsourcing.total5YearNet)}`,
+        wa.outsourcing.riskLevel,
+      ],
+      [
+        wa.statusQuo.label,
+        `Annual: ${formatCompactValue(wa.statusQuo.annualCost)}`,
+        `Cost: ${formatCompactValue(wa.statusQuo.total5YearCost)}`,
+        wa.statusQuo.riskLevel,
+      ],
+    ],
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Detailed breakdown for each option
+  const options = [
+    {
+      title: 'Option A: AI Automation',
+      color: GREEN,
+      rows: [
+        ['Upfront Investment', formatCompactValue(wa.aiInvestment.upfrontCost)],
+        ['5-FY Net Return', formatCompactValue(wa.aiInvestment.annual5YearNet)],
+        ['ROI', formatPercent(wa.aiInvestment.roi)],
+        ['Payback Period', safePayback(wa.aiInvestment.paybackMonths)],
+        ['NPV', formatCompactValue(wa.aiInvestment.npv)],
+      ],
+    },
+    {
+      title: 'Option B: Hire More Staff',
+      color: [33, 150, 243],
+      rows: [
+        ['FTEs Needed', `${wa.hiring.ftesNeeded}`],
+        ['Annual Cost (fully loaded)', formatCompactValue(wa.hiring.annualCost)],
+        ['Annual Turnover Cost', formatCompactValue(wa.hiring.turnoverCost)],
+        ['5-FY Total Cost', formatCompactValue(wa.hiring.total5YearCost)],
+        ['Ramp-Up Period', `${wa.hiring.rampMonths} months`],
+      ],
+    },
+    {
+      title: 'Option C: Outsource / BPO',
+      color: [156, 39, 176],
+      rows: [
+        ['Annual Cost', formatCompactValue(wa.outsourcing.annualCost)],
+        ['Annual Savings vs. Current', formatCompactValue(wa.outsourcing.annualSavings)],
+        ['5-FY Net', formatCompactValue(wa.outsourcing.total5YearNet)],
+        ['Quality Impact', wa.outsourcing.qualityImpact],
+        ['Transition Period', `${wa.outsourcing.transitionMonths} months`],
+      ],
+    },
+    {
+      title: 'Option D: Status Quo (Do Nothing)',
+      color: RED,
+      rows: [
+        ['Current Annual Cost', formatCompactValue(wa.statusQuo.annualCost)],
+        ['5-FY Total Cost', formatCompactValue(wa.statusQuo.total5YearCost)],
+        ['Opportunity Cost', formatCompactValue(wa.statusQuo.opportunityCost)],
+        ['Competitive Erosion Rate', formatPercent(wa.statusQuo.competitiveErosionRate) + '/yr'],
+      ],
+    },
+  ];
+
+  const colW = (CONTENT_W - 4) / 2;
+  options.forEach((opt, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const xPos = MARGIN + col * (colW + 4);
+    const yPos = y + row * 52;
+
+    doc.setFillColor(...opt.color);
+    doc.rect(xPos, yPos, colW, 5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...WHITE);
+    doc.text(opt.title, xPos + 3, yPos + 3.5);
+
+    let rowY = yPos + 9;
+    opt.rows.forEach(([label, value]) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...MID_GRAY);
+      doc.text(label, xPos + 3, rowY);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...DARK_TEXT);
+      doc.text(value, xPos + colW - 3, rowY, { align: 'right' });
+      rowY += 5;
+    });
+  });
+
+  y += 110;
+
+  // Recommendation callout
+  const aiWins = wa.aiInvestment.annual5YearNet > 0 &&
+    wa.aiInvestment.annual5YearNet > (wa.outsourcing.total5YearNet || 0);
+  const calloutColor = aiWins ? [236, 253, 245] : [254, 249, 235];
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 14, 2, calloutColor);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...NAVY);
+  const verdict = aiWins
+    ? 'AI automation offers the strongest risk-adjusted return among all four capital deployment strategies.'
+    : 'AI automation carries higher near-term risk but offers strategic upside that alternative approaches cannot match.';
+  doc.text(verdict, MARGIN + 4, y + 6);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MID_GRAY);
+  doc.text('Based on capital allocation benchmarks [1][2]. See Appendix C for assumptions.', MARGIN + 4, y + 11);
+}
+
+// ---------------------------------------------------------------------------
+// V5: Break-Even Unit Economics
+// ---------------------------------------------------------------------------
+function pageN_BreakEvenUnits(doc, results) {
+  doc.addPage();
+  addHeader(doc);
+
+  let y = 25;
+  y = sectionTitle(doc, 'Break-Even Unit Economics', y);
+
+  const items = results.breakEvenUnits;
+  if (!items || items.length === 0) {
+    y = bodyText(doc, 'Break-even unit economics are not available for this configuration. ' +
+      'This analysis requires archetype-specific inputs to be configured in the wizard.', MARGIN, y);
+    return;
+  }
+
+  const isFloor = items[0]?.direction === 'floor';
+  y = bodyText(doc, isFloor
+    ? 'The table below shows the minimum value each input variable can reach before the project NPV turns negative. ' +
+      'Larger margins indicate greater resilience to adverse changes in that variable.'
+    : 'The table below shows the target value each input variable must reach for the project NPV to turn positive. ' +
+      'These represent the thresholds needed to justify the investment.', MARGIN, y);
+  y += 2;
+
+  function fmtBEValue(val, type) {
+    if (type === 'percent') return `${(val * 100).toFixed(1)}%`;
+    if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
+    if (val >= 1_000) return val.toLocaleString();
+    return val.toString();
+  }
+
+  autoTable(doc, {
+    startY: y,
+    ...autoTableTheme(),
+    head: [[
+      'Input Variable',
+      'Current Value',
+      'Break-Even Value',
+      isFloor ? 'Safety Margin' : 'Gap to Target',
+      'Direction',
+    ]],
+    body: items.map(item => {
+      const pctLabel = isFloor
+        ? `${item.marginPct > 0 ? '+' : ''}${item.marginPct}%`
+        : `${item.marginPct < 0 ? '' : '+'}${item.marginPct}%`;
+      return [
+        item.label,
+        fmtBEValue(item.currentValue, item.type),
+        fmtBEValue(item.breakEvenValue, item.type),
+        pctLabel,
+        isFloor ? 'Floor (min before loss)' : 'Target (needed for gain)',
+      ];
+    }),
+    columnStyles: {
+      3: {
+        cellWidth: 28,
+        halign: 'center',
+        fontStyle: 'bold',
+      },
+    },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Visual margin bars
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...NAVY);
+  doc.text('Safety Margin Visualization', MARGIN, y);
+  y += 6;
+
+  items.forEach((item) => {
+    const barMaxW = CONTENT_W - 60;
+    const absPct = Math.min(Math.abs(item.marginPct), 100);
+    const barW = (absPct / 100) * barMaxW;
+    const barColor = isFloor
+      ? (item.marginPct > 30 ? GREEN : item.marginPct > 10 ? GOLD : RED)
+      : [33, 150, 243];
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...DARK_TEXT);
+    doc.text(item.label, MARGIN, y + 3, { maxWidth: 56 });
+
+    // Background
+    doc.setFillColor(230, 235, 240);
+    doc.rect(MARGIN + 58, y, barMaxW, 5, 'F');
+
+    // Bar
+    doc.setFillColor(...barColor);
+    doc.rect(MARGIN + 58, y, barW, 5, 'F');
+
+    // Label
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...DARK_TEXT);
+    const pctText = `${item.marginPct > 0 ? '+' : ''}${item.marginPct}%`;
+    doc.text(pctText, MARGIN + 60 + barW, y + 3.5);
+
+    y += 8;
+  });
+
+  y += 4;
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 12, 2, LIGHT_GRAY);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MID_GRAY);
+  doc.text('Break-even values determined via binary search on individual archetype inputs while holding all other variables constant.', MARGIN + 4, y + 5);
+  doc.text('Interactions between variables are not captured. See sensitivity analysis for multi-variable impact.', MARGIN + 4, y + 9);
+}
+
+// ---------------------------------------------------------------------------
+// V5: Consulting Assumptions (Token Economics, Drift, Agent Infrastructure)
+// ---------------------------------------------------------------------------
+function pageN_ConsultingAssumptions(doc, results) {
+  doc.addPage();
+  addHeader(doc);
+
+  let y = 25;
+  y = sectionTitle(doc, 'AI Cost Model & Technical Assumptions', y);
+
+  const ca = results.consultingAssumptions || {};
+
+  y = bodyText(doc, 'This section details the technical cost modeling assumptions used in the analysis, ' +
+    'including LLM token economics, model drift degradation, and agent infrastructure costs where applicable.', MARGIN, y);
+  y += 4;
+
+  // Token Economics
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('LLM Token Economics', MARGIN, y);
+  y += 6;
+
+  autoTable(doc, {
+    startY: y,
+    ...autoTableTheme(),
+    head: [['Parameter', 'Value', 'Notes']],
+    body: [
+      ['Model Tier', ca.modelTier || 'standard', 'Economy / Standard / Premium pricing tier'],
+      ['Token-Based Costing', ca.useTokenModel ? 'Enabled' : 'Disabled', 'Uses per-token pricing vs flat API rates'],
+      ['LLM Calls Per Task', `${ca.llmCallsPerTask || 3}`, 'Average API calls per automated task unit'],
+      ['Prompt Caching Rate', formatPercent(ca.promptCachingRate || 0), 'Portion of inputs served from cache (reduces cost)'],
+    ],
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Model Drift
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text('Model Drift Degradation', MARGIN, y);
+  y += 6;
+
+  const driftRate = ca.modelDriftRate || 0.03;
+  y = bodyText(doc, `AI model performance degrades at an estimated ${formatPercent(driftRate)} per year due to data distribution ` +
+    'shift, concept drift, and changing business processes. This "model drift" factor is applied to all benefit ' +
+    'projections in years 2-5, compounding annually.', MARGIN, y, { size: 9 });
+  y += 2;
+
+  autoTable(doc, {
+    startY: y,
+    ...autoTableTheme(),
+    head: [['FY', 'Drift Factor', 'Effective Benefit Rate', 'Cumulative Reduction']],
+    body: Array.from({ length: 5 }, (_, i) => {
+      const factor = Math.pow(1 - driftRate, i);
+      return [
+        `FY ${i + 1}`,
+        `${factor.toFixed(3)}`,
+        formatPercent(factor),
+        formatPercent(1 - factor),
+      ];
+    }),
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Agent Infrastructure (if applicable)
+  if (ca.isAgenticWorkflow) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...NAVY);
+    doc.text('Agentic Workflow Infrastructure', MARGIN, y);
+    y += 6;
+
+    y = bodyText(doc, `This project uses agentic AI workflows (complexity: ${ca.agentComplexity || 'standard'}). ` +
+      'Agentic workflows incur additional infrastructure costs for orchestration, state management, ' +
+      'tool calling, and monitoring beyond standard LLM API costs.', MARGIN, y, { size: 9 });
+    y += 2;
+
+    autoTable(doc, {
+      startY: y,
+      ...autoTableTheme(),
+      head: [['Component', 'Description']],
+      body: [
+        ['Orchestration', 'Agent loop management, retry logic, and multi-step planning'],
+        ['Tool Calling', 'External API integrations, database queries, file operations'],
+        ['State Management', 'Conversation memory, context windows, session persistence'],
+        ['Monitoring', 'Agent performance tracking, cost attribution, quality assurance'],
+        ['Safety Rails', 'Output validation, human-in-the-loop checkpoints, guardrails'],
+      ],
+    });
+  }
+
+  // Footnote
+  y = Math.max(doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : y + 10, y);
+  drawRoundedRect(doc, MARGIN, y, CONTENT_W, 12, 2, LIGHT_GRAY);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MID_GRAY);
+  doc.text('Token economics based on public model pricing as of Q1 2026. Model drift rate from Stanford HAI research [35].', MARGIN + 4, y + 5);
+  doc.text('Agent infrastructure costs from industry benchmarks [36][37]. Actual costs may vary.', MARGIN + 4, y + 9);
+}
+
 // ---------------------------------------------------------------------------
 function pageN_MaturityPremium(doc) {
   doc.addPage();
@@ -3939,6 +4377,9 @@ export default function generateReport(formData, results, recommendation, mcResu
   if (has('peerComparison'))          pageN_PeerComparison(doc, formData, results);
   if (has('recommendations'))         page7_Recommendations(doc, recommendation);
   if (has('qualitativeBenefits'))     pageN_QualitativeBenefits(doc);
+  if (has('workforceAlternatives'))   pageN_WorkforceAlternatives(doc, results);
+  if (has('breakEvenUnits'))          pageN_BreakEvenUnits(doc, results);
+  if (has('consultingAssumptions'))   pageN_ConsultingAssumptions(doc, results);
   if (has('caseStudy'))               pageN_CaseStudy(doc);
   if (has('maturityPremium'))         pageN_MaturityPremium(doc);
   if (has('inputAssumptions'))        page8_InputAssumptions(doc, formData, results);

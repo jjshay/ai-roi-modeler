@@ -59,7 +59,7 @@ export default function LandingPage({ onStart }) {
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.98 }}
             onClick={onStart}
-            className="bg-gold text-navy font-bold py-4 px-10 rounded-xl text-lg md:text-xl shadow-lg shadow-gold/20 cursor-pointer transition-colors hover:bg-gold-light"
+            className="bg-gold text-navy font-bold py-4 px-10 rounded-xl text-lg md:text-xl shadow-lg shadow-gold/20 cursor-pointer transition-colors hover:bg-sky"
           >
             Start Free Assessment →
           </motion.button>

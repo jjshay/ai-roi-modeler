@@ -520,7 +520,7 @@ describe('Probability-Weighted Expected Value', () => {
 describe('AI Cost Model', () => {
   it('uses location-specific salary', () => {
     const r = runCalculations(BASE_INPUTS);
-    expect(r.aiCostModel.aiSalary).toBe(215000); // US Major Tech Hub
+    expect(r.aiCostModel.aiSalary).toBe(225000); // US Major Tech Hub
   });
 
   it('realistic impl cost >= user budget (risk-adjusted)', () => {
@@ -1038,7 +1038,7 @@ describe('Project Archetypes & Assumptions', () => {
       'customer-facing-ai',
       'data-analytics-automation',
       'revenue-growth-ai',
-      'risk-compliance-ai',
+      'risk-compliance-legal-ai',
     ];
     for (const id of archetypeIds) {
       const inputs = {

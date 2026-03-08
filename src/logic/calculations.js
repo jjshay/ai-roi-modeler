@@ -69,8 +69,17 @@ import {
   AI_ADOPTION_RATE_BY_INDUSTRY,
   MARGIN_COMPRESSION_BY_INDUSTRY,
   SALARY_RANGES_BY_INDUSTRY,
+  // V5: Consulting-grade additions
+  TOKEN_PROFILES,
+  MODEL_TIERS,
+  PROMPT_CACHING_RATE,
+  CACHED_INPUT_DISCOUNT,
+  AGENT_COST_PROFILES,
+  AGENT_INFRASTRUCTURE_MONTHLY,
+  MODEL_DRIFT_RATE,
+  CAPITAL_ALLOCATION,
 } from './benchmarks';
-import { mapArchetypeInputs } from './archetypeInputs';
+import { mapArchetypeInputs, ARCHETYPE_INPUT_MAP } from './archetypeInputs';
 
 export function runCalculations(inputs) {
   // =====================================================================
@@ -85,21 +94,29 @@ export function runCalculations(inputs) {
   // CONTEXT-AWARE DEFAULTS (for null/undefined values)
   // Archetype overrides refine hoursPerWeek and errorRate if provided
   // =====================================================================
+  const assumptions = inputs.assumptions || {};
   const teamSize = Math.max(1, Math.min(inputs.teamSize || 10, 100000));
   const avgSalary = Math.max(10000, Math.min(inputs.avgSalary || 100000, 10000000));
-  const hoursPerWeek = Math.max(1, Math.min(_archetypeOverrides.hoursPerWeek ?? inputs.hoursPerWeek ?? 20, 80));
-  const errorRate = Math.max(0, Math.min(_archetypeOverrides.errorRate ?? inputs.errorRate ?? 0.10, 1));
+  const hoursPerWeek = Math.max(1, Math.min(assumptions.hoursPerWeek ?? _archetypeOverrides.hoursPerWeek ?? inputs.hoursPerWeek ?? 20, 10000));
+  const errorRate = Math.max(0, Math.min(assumptions.errorRate ?? _archetypeOverrides.errorRate ?? inputs.errorRate ?? 0.10, 1));
+  const archetypeRevenueImpact = Math.max(0, _archetypeOverrides.revenueImpact || 0);
   const currentToolCosts = Math.max(0, inputs.currentToolCosts || 0);
-  const companySize = inputs.companySize || 'Mid-Market (501-5,000)';
+  // Normalize companySize — handles truncated values from legacy share links
+  const VALID_SIZES = ['Startup (1-50)', 'SMB (51-500)', 'Mid-Market (501-5,000)', 'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)'];
+  const rawSize = inputs.companySize || 'Mid-Market (501-5,000)';
+  const companySize = VALID_SIZES.includes(rawSize)
+    ? rawSize
+    : VALID_SIZES.find(s => s.startsWith(rawSize)) || 'Mid-Market (501-5,000)';
   const industry = inputs.industry || 'Other';
   const processType = inputs.processType || 'Other';
-  const assumptions = inputs.assumptions || {};
   const teamLocation = inputs.teamLocation || 'US - Major Tech Hub';
   const dataReadiness = inputs.dataReadiness ?? 3;
   const changeReadiness = inputs.changeReadiness ?? 3;
 
   // Auto-calculate implementation budget if not provided
-  const aiSalaryForCalc = AI_TEAM_SALARY[teamLocation] || 135000;
+  const aiSalaryForCalc = teamLocation === 'Blended'
+    ? (inputs.blendedAISalary || 169500)
+    : (AI_TEAM_SALARY[teamLocation] || 135000);
   const maxTeamForCalc = MAX_IMPL_TEAM[companySize] || 10;
   const sizeMultForCalc = SIZE_MULTIPLIER[companySize] || 1.0;
   const dataTimeMultForCalc = DATA_TIMELINE_MULTIPLIER[dataReadiness] || 1.10;
@@ -138,6 +155,13 @@ export function runCalculations(inputs) {
   // =====================================================================
   const automationPotential = assumptions.automationPotential ?? _archetypeOverrides.automationPotential ?? getAutomationPotential(industry, processType);
   const industrySuccessRate = getIndustrySuccessRate(industry);
+
+  // Custom adoption ramp: user can override default ADOPTION_RAMP per year
+  // Array of 5 values (Year 1-5) between 0 and 1, representing % of steady-state
+  const adoptionRamp = (
+    Array.isArray(inputs.customAdoptionRamp) && inputs.customAdoptionRamp.length === DCF_YEARS
+  ) ? inputs.customAdoptionRamp.map(v => Math.max(0, Math.min(v, 1)))
+    : ADOPTION_RAMP;
 
   // =====================================================================
   // RISK ADJUSTMENTS
@@ -198,7 +222,9 @@ export function runCalculations(inputs) {
   // AI IMPLEMENTATION COST MODEL
   // Derives realistic staffing, labor, and operational costs from inputs
   // =====================================================================
-  const aiSalary = AI_TEAM_SALARY[teamLocation] || 135000;
+  const aiSalary = teamLocation === 'Blended'
+    ? (inputs.blendedAISalary || 169500)
+    : (AI_TEAM_SALARY[teamLocation] || 135000);
   const implTimelineYears = adjustedTimeline / 12;
 
   // Implementation engineering headcount
@@ -226,14 +252,65 @@ export function runCalculations(inputs) {
   const ongoingAiHeadcount = Math.max(0.5, Math.round(aiImplEngineers * 0.25 * 2) / 2);
   const ongoingAiLaborCost = ongoingAiHeadcount * aiSalary;
 
-  // API / inference costs
+  // API / inference costs — token-based model with legacy fallback
   const isAgenticWorkflow = inputs.isAgenticWorkflow || false;
   const requestsPerHour = assumptions.requestsPerPersonHour ?? REQUESTS_PER_PERSON_HOUR[processType] ?? 12;
+  const monthlyTaskVolume = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
+
+  // Token-based cost model (activates when user provides token-level inputs or model tier)
+  const useTokenModel = assumptions.useTokenModel
+    || assumptions.modelTier != null
+    || assumptions.avgInputTokensPerRequest != null;
+
+  const tokenProfile = TOKEN_PROFILES[processType] || TOKEN_PROFILES['Other'];
+  const modelTier = assumptions.modelTier || 'standard';
+  const modelPricing = MODEL_TIERS[modelTier] || MODEL_TIERS['standard'];
+  const avgInputTokens = assumptions.avgInputTokensPerRequest ?? tokenProfile.avgInput;
+  const avgOutputTokens = assumptions.avgOutputTokensPerRequest ?? tokenProfile.avgOutput;
+  const inputCostPer1M = assumptions.inputTokenCostPer1M ?? modelPricing.inputPer1M;
+  const outputCostPer1M = assumptions.outputTokenCostPer1M ?? modelPricing.outputPer1M;
+
+  // Prompt caching — reduces effective input token cost
+  const promptCachingRate = assumptions.promptCachingRate ?? PROMPT_CACHING_RATE;
+  const effectiveInputCostPer1M = inputCostPer1M * (1 - promptCachingRate * CACHED_INPUT_DISCOUNT);
+
+  // Agent complexity — multiple LLM calls per task for agentic workflows
+  const agentComplexity = assumptions.agentComplexity || 'moderate';
+  const agentProfile = isAgenticWorkflow
+    ? (AGENT_COST_PROFILES[agentComplexity] || AGENT_COST_PROFILES['moderate'])
+    : AGENT_COST_PROFILES['simple'];
+  const llmCallsPerTask = agentProfile.llmCallsPerTask;
+  const monthlyLLMCalls = monthlyTaskVolume * llmCallsPerTask;
+
+  // Token costs
+  const monthlyInputTokens = monthlyLLMCalls * avgInputTokens;
+  const monthlyOutputTokens = monthlyLLMCalls * avgOutputTokens;
+  const monthlyInputCost = (monthlyInputTokens / 1_000_000) * effectiveInputCostPer1M;
+  const monthlyOutputCost = (monthlyOutputTokens / 1_000_000) * outputCostPer1M;
+  const monthlyTokenCost = monthlyInputCost + monthlyOutputCost;
+
+  // Agent infrastructure costs (orchestration, vector DB, eval, guardrails)
+  const agentInfraDefaults = AGENT_INFRASTRUCTURE_MONTHLY[companySize] || AGENT_INFRASTRUCTURE_MONTHLY['Mid-Market (501-5,000)'];
+  const monthlyAgentInfraCost = isAgenticWorkflow
+    ? (assumptions.orchestrationPlatformCost ?? agentInfraDefaults.orchestration)
+      + (assumptions.vectorDatabaseCost ?? agentInfraDefaults.vectorDb)
+      + (assumptions.evalMonitoringCost ?? agentInfraDefaults.evalMonitoring)
+      + (assumptions.guardrailsCost ?? agentInfraDefaults.guardrails)
+    : 0;
+
+  // Final monthly/annual API cost — token model or legacy fallback
   const effectiveRequestsPerHour = isAgenticWorkflow ? requestsPerHour * AGENTIC_COMPUTE_MULTIPLIER : requestsPerHour;
   const monthlyApiVolume = teamSize * hoursPerWeek * 4.33 * effectiveRequestsPerHour;
-  const apiCostPerK = assumptions.apiCostPer1kRequests ?? API_COST_PER_1K_REQUESTS[processType] ?? 10;
-  const monthlyApiCost = (monthlyApiVolume / 1000) * apiCostPerK;
-  const annualApiCost = monthlyApiCost * 12;
+  let monthlyApiCost, annualApiCost;
+  if (useTokenModel) {
+    monthlyApiCost = monthlyTokenCost + monthlyAgentInfraCost;
+    annualApiCost = monthlyApiCost * 12;
+  } else {
+    // Legacy request-based cost (backward compat with existing tests/users)
+    const apiCostPerK = assumptions.apiCostPer1kRequests ?? API_COST_PER_1K_REQUESTS[processType] ?? 10;
+    monthlyApiCost = (monthlyApiVolume / 1000) * apiCostPerK + monthlyAgentInfraCost;
+    annualApiCost = monthlyApiCost * 12;
+  }
 
   // Platform / license costs
   const annualLicenseCost = PLATFORM_LICENSE_COST[companySize] || 48000;
@@ -318,6 +395,38 @@ export function runCalculations(inputs) {
     ongoingCostsByYear,
     totalOngoing5Year,
     escalationSchedule: AI_COST_ESCALATION_SCHEDULE,
+    // V5: Token-based cost model
+    tokenCostModel: {
+      useTokenModel,
+      modelTier,
+      modelTierLabel: modelPricing.label,
+      avgInputTokensPerRequest: avgInputTokens,
+      avgOutputTokensPerRequest: avgOutputTokens,
+      inputCostPer1M,
+      outputCostPer1M,
+      effectiveInputCostPer1M,
+      promptCachingRate,
+      monthlyTaskVolume,
+      monthlyLLMCalls,
+      monthlyInputTokens,
+      monthlyOutputTokens,
+      monthlyInputCost,
+      monthlyOutputCost,
+      monthlyTokenCost,
+      annualTokenCost: monthlyTokenCost * 12,
+      costPerRequest: monthlyLLMCalls > 0 ? monthlyTokenCost / monthlyLLMCalls : 0,
+      costPer1kRequests: monthlyLLMCalls > 0 ? (monthlyTokenCost / monthlyLLMCalls) * 1000 : 0,
+    },
+    // V5: Agent infrastructure
+    agentInfrastructure: {
+      isAgentic: isAgenticWorkflow,
+      agentComplexity,
+      agentProfileLabel: agentProfile.label,
+      llmCallsPerTask,
+      toolCallsPerTask: agentProfile.toolCallsPerTask,
+      monthlyAgentInfraCost,
+      annualAgentInfraCost: monthlyAgentInfraCost * 12,
+    },
   };
 
   // =====================================================================
@@ -430,16 +539,17 @@ export function runCalculations(inputs) {
   const efficiencySavingsGross = Math.max(0, (annualLaborCost * automationPotential) - headcountSavingsGross);
   const errorReductionGross = annualReworkCost * automationPotential;
   const toolReplacementGross = currentToolCosts * toolReplacementRate;
+  const archetypeRevenueGross = archetypeRevenueImpact;
 
   // Enhancement savings = what you get Year 1 (no headcount reduction yet)
-  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross;
+  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross;
   const enhancementRiskAdjusted = enhancementGross * riskMultiplier;
 
   // =====================================================================
   // ANNUAL SAVINGS (gross metrics for reference)
   // Uses decomposed value breakdown to avoid applying automation % to tool costs
   // =====================================================================
-  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross;
+  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross;
   // Risk multiplier applies only to enhancement savings, not headcount (reviewer fix P1)
   const riskAdjustedSavings = headcountSavingsGross + enhancementRiskAdjusted;
   const netAnnualSavings = riskAdjustedSavings - baseOngoingCost;
@@ -466,8 +576,12 @@ export function runCalculations(inputs) {
       gross: toolReplacementGross,
       riskAdjusted: toolReplacementGross * riskMultiplier,
     },
-    totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross,
-    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross) * riskMultiplier,
+    archetypeRevenue: {
+      gross: archetypeRevenueGross,
+      riskAdjusted: archetypeRevenueGross * riskMultiplier,
+    },
+    totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross,
+    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross) * riskMultiplier,
     // Per-employee productivity gain in Year 1 (enhancement phase, before any layoffs)
     perEmployeeGain: teamSize > 0
       ? enhancementRiskAdjusted / teamSize
@@ -485,7 +599,10 @@ export function runCalculations(inputs) {
   // Year 1: Enhancement only (AI augments people, no layoffs)
   // Years 2-5: Phased headcount reduction with separation costs
   // Ongoing AI costs escalate 12%/year after Year 1
+  // Model drift degrades benefits 3%/year (partially offset by retraining budget)
   // =====================================================================
+  const modelDriftRate = assumptions.modelDriftRate ?? MODEL_DRIFT_RATE;
+
   function buildYearCashFlows(scenarioMultiplier) {
     const flows = [];
     let cumulativeReduction = 0;
@@ -495,12 +612,16 @@ export function runCalculations(inputs) {
       // Savings inflate with wage growth (the labor costs being avoided grow annually)
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
 
-      // Enhancement savings (efficiency + error + tool) — adoption ramp applies
-      const enhancementSavings = enhancementRiskAdjusted * ADOPTION_RAMP[yr] * scenarioMultiplier * wageGrowth;
+      // Model drift — AI benefit degradation from data/model staleness
+      // Year 0 = no drift; subsequent years degrade unless maintained
+      const driftFactor = Math.pow(1 - modelDriftRate, yr);
 
-      // Headcount savings — phased reduction (cumulative)
+      // Enhancement savings (efficiency + error + tool + revenue) — adoption ramp + drift
+      const enhancementSavings = enhancementRiskAdjusted * adoptionRamp[yr] * scenarioMultiplier * wageGrowth * driftFactor;
+
+      // Headcount savings — phased reduction (cumulative), also subject to drift
       cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
-      const headcountSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * scenarioMultiplier * wageGrowth;
+      const headcountSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * scenarioMultiplier * wageGrowth * driftFactor;
 
       // Total gross savings this year
       const grossSavings = enhancementSavings + headcountSavings;
@@ -692,9 +813,10 @@ export function runCalculations(inputs) {
     let cumulativeNet = -modUpfront;
     for (let yr = 0; yr < DCF_YEARS; yr++) {
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
-      const eSavings = modEnhancementRA * ADOPTION_RAMP[yr] * wageGrowth;
+      const driftFactor = Math.pow(1 - modelDriftRate, yr);
+      const eSavings = modEnhancementRA * adoptionRamp[yr] * wageGrowth * driftFactor;
       cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
-      const hSavings = modHeadcountRA * cumulativeReduction * wageGrowth;
+      const hSavings = modHeadcountRA * cumulativeReduction * wageGrowth * driftFactor;
       const sepCost = separationByYear[yr];
       const ongCost = modOngoingByYear[yr];
       const net = eSavings + hSavings - sepCost - ongCost;
@@ -798,9 +920,10 @@ export function runCalculations(inputs) {
     let cumulativeReduction = 0;
     for (let yr = 0; yr < DCF_YEARS; yr++) {
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
-      const eSavings = enhancementRiskAdjusted * ADOPTION_RAMP[yr] * wageGrowth;
+      const driftFactor = Math.pow(1 - modelDriftRate, yr);
+      const eSavings = enhancementRiskAdjusted * adoptionRamp[yr] * wageGrowth * driftFactor;
       cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
-      const hSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * wageGrowth;
+      const hSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * wageGrowth * driftFactor;
       const sepCost = separationByYear[yr];
       const ongCost = ongoingCostsByYear[yr];
       const net = eSavings + hSavings - sepCost - ongCost;
@@ -821,10 +944,11 @@ export function runCalculations(inputs) {
       const yearIndex = Math.floor((month - 1) / 12);
       if (yearIndex >= DCF_YEARS) break;
       const wageGrowth = Math.pow(1 + wageInflationRate, yearIndex);
+      const driftFactor = Math.pow(1 - modelDriftRate, yearIndex);
       let cRed = 0;
       for (let y = 0; y <= yearIndex; y++) cRed += HEADCOUNT_REDUCTION_SCHEDULE[y];
-      const eSavings = modEnhancementRA * ADOPTION_RAMP[yearIndex] * wageGrowth;
-      const hSavings = modHeadcountRA * cRed * wageGrowth;
+      const eSavings = modEnhancementRA * adoptionRamp[yearIndex] * wageGrowth * driftFactor;
+      const hSavings = modHeadcountRA * cRed * wageGrowth * driftFactor;
       const monthlyNet = (eSavings + hSavings - separationByYear[yearIndex] - modOngoingByYear[yearIndex]) / 12;
       cumulative += monthlyNet;
       if (cumulative >= 0) return month;
@@ -976,18 +1100,20 @@ export function runCalculations(inputs) {
       // Compounding: cost of wages that have grown yr years
       const wageInflation = annualLaborCost * (Math.pow(1 + wageInflationRate, yr) - 1);
       const legacyCreep = currentToolCosts * (Math.pow(1 + LEGACY_MAINTENANCE_CREEP, yr) - 1);
-      const forgoneSavings = netAnnualSavings * (yr <= DCF_YEARS ? ADOPTION_RAMP[Math.min(yr - 1, DCF_YEARS - 1)] : 1.0);
-
       // Enhanced: revenue-based S-curve margin compression when annualRevenue is provided
       let competitiveLoss;
       let revenueErosion = 0;
+      let forgoneSavings = 0;
       if (userAnnualRevenueForErosion > 0) {
         // S-curve: adoption accelerates then plateaus, creating non-linear erosion
+        // When using revenue-based erosion, skip forgoneSavings to avoid double-counting
+        // (revenueErosion already captures the competitive cost of inaction)
         const adoptionPct = logisticAdoption(yr, aiAdoptionRate);
         revenueErosion = userAnnualRevenueForErosion * marginCompression * adoptionPct;
         competitiveLoss = revenueErosion;
       } else {
-        // Fallback: cost-based competitive penalty (original logic)
+        // Fallback: cost-based competitive penalty + forgone savings
+        forgoneSavings = netAnnualSavings * (yr <= DCF_YEARS ? adoptionRamp[Math.min(yr - 1, DCF_YEARS - 1)] : 1.0);
         competitiveLoss = totalCurrentCost * (Math.pow(1 + competitivePenalty, yr) - 1);
       }
 
@@ -1040,7 +1166,7 @@ export function runCalculations(inputs) {
   // R&D TAX CREDIT (informational only — NOT in NPV/ROIC)
   // =====================================================================
   const companyState = inputs.companyState || 'Other / Not Sure';
-  const isUSBased = (teamLocation || '').startsWith('US');
+  const isUSBased = (teamLocation || '').startsWith('US') || teamLocation === 'Blended';
   const qualifiedExpenses = realisticImplCost * RD_QUALIFICATION_RATE;
   const federalCredit = isUSBased ? qualifiedExpenses * FEDERAL_RD_CREDIT_RATE : 0;
   const stateRate = STATE_RD_CREDIT_RATES[companyState] || 0;
@@ -1096,7 +1222,7 @@ export function runCalculations(inputs) {
   // THRESHOLD / BREAKEVEN ANALYSIS
   // =====================================================================
   function calculateBreakeven() {
-    const pvFactor = ADOPTION_RAMP.reduce((sum, ramp, yr) =>
+    const pvFactor = adoptionRamp.reduce((sum, ramp, yr) =>
       sum + ramp / Math.pow(1 + discountRate, yr + 1), 0);
 
     // Breakeven risk multiplier: what risk level makes NPV = 0?
@@ -1110,8 +1236,9 @@ export function runCalculations(inputs) {
       : null;
 
     // Break-even adoption rate: what adoption rate makes NPV = 0?
-    const breakevenAdoptionRate = grossAnnualSavings > 0 && automationPotential > 0
-      ? ((upfrontInvestment / pvFactor) + baseOngoingCost) / (grossAnnualSavings / adoptionRate)
+    const savingsPerAdoptionUnit = adoptionRate > 0 ? grossAnnualSavings / adoptionRate : 0;
+    const breakevenAdoptionRate = savingsPerAdoptionUnit > 0 && pvFactor > 0
+      ? ((upfrontInvestment / pvFactor) + baseOngoingCost) / savingsPerAdoptionUnit
       : null;
 
     return {
@@ -1140,6 +1267,7 @@ export function runCalculations(inputs) {
       if (type === 'efficiency') phaseValue += valueBreakdown.efficiency.riskAdjusted;
       if (type === 'errorReduction') phaseValue += valueBreakdown.errorReduction.riskAdjusted;
       if (type === 'toolReplacement') phaseValue += valueBreakdown.toolReplacement.riskAdjusted;
+      if (type === 'archetypeRevenue') phaseValue += valueBreakdown.archetypeRevenue.riskAdjusted;
     });
     return {
       ...phase,
@@ -1316,10 +1444,15 @@ export function runCalculations(inputs) {
   };
 
   // --- Combined V3 Value ---
+  // When capacity is included in NPV, add only the non-cash portion to avoid
+  // double-counting with costEfficiency (which already includes cash-realized savings).
   const includeRevAccelInNPV = inputs.includeRevenueAcceleration ?? false;
+  const capacityNPVAddon = capacityCreationPathway.includeInNPV
+    ? costEfficiencyPathway.annualCapacityOnly + revenueAcceleration
+    : 0;
   const totalV3AnnualValue =
     costEfficiencyPathway.annualRiskAdjusted
-    + (capacityCreationPathway.includeInNPV ? capacityCreationPathway.totalAnnualValue : 0)
+    + capacityNPVAddon
     + (riskReductionPathway.includeInNPV ? riskReductionPathway.annualValueAvoided : 0)
     + (includeRevAccelInNPV ? revenueAcceleration : 0);
 
@@ -1413,6 +1546,87 @@ export function runCalculations(inputs) {
   const capitalAllocation = calculateCapitalAllocation();
 
   // =====================================================================
+  // V5: WORKFORCE ALTERNATIVES COMPARISON (AI vs Hire vs Outsource vs Do Nothing)
+  // Executives want to see AI investment vs practical alternatives
+  // =====================================================================
+  function calculateWorkforceAlternatives() {
+    const annualGap = grossAnnualSavings; // value AI delivers = gap alternatives must fill
+
+    // Option A: Hire more staff
+    const hireFTEs = Math.max(1, Math.ceil(annualGap / (avgSalary * CAPITAL_ALLOCATION.HIRING_FULLY_LOADED_MULTIPLIER)));
+    const hireAnnualCost = hireFTEs * avgSalary * CAPITAL_ALLOCATION.HIRING_FULLY_LOADED_MULTIPLIER;
+    const hireTurnoverCost = hireFTEs * CAPITAL_ALLOCATION.HIRING_ANNUAL_TURNOVER * avgSalary * CAPITAL_ALLOCATION.HIRING_REPLACEMENT_COST_RATE;
+    const hireTotalYear1 = hireAnnualCost + hireTurnoverCost;
+    const hire5YearCost = hireTotalYear1 * DCF_YEARS * Math.pow(1 + wageInflationRate, 2); // wage inflation
+    const hireROI = hire5YearCost > 0 ? (annualGap * DCF_YEARS - hire5YearCost) / hire5YearCost : 0;
+
+    // Option B: Outsource / BPO
+    const bpoAnnualCost = totalCurrentCost * CAPITAL_ALLOCATION.BPO_COST_RATIO;
+    const bpoManagementCost = bpoAnnualCost * CAPITAL_ALLOCATION.BPO_MANAGEMENT_OVERHEAD;
+    const bpoQualityLoss = totalCurrentCost * (1 - CAPITAL_ALLOCATION.BPO_QUALITY_DISCOUNT);
+    const bpoTotalAnnual = bpoAnnualCost + bpoManagementCost + bpoQualityLoss;
+    const bpoSavings = totalCurrentCost - bpoTotalAnnual;
+    const bpo5YearNet = bpoSavings * DCF_YEARS;
+    const bpoROI = bpoTotalAnnual > 0 ? bpoSavings / bpoTotalAnnual : 0;
+
+    // Option C: Do nothing (status quo + competitive erosion)
+    const statusQuoYear1Cost = totalCurrentCost;
+    let statusQuo5YearCost = 0;
+    for (let yr = 0; yr < DCF_YEARS; yr++) {
+      const erosion = Math.pow(1 + CAPITAL_ALLOCATION.STATUS_QUO_COMPETITIVE_EROSION, yr);
+      const wagePressure = Math.pow(1 + wageInflationRate, yr);
+      statusQuo5YearCost += statusQuoYear1Cost * wagePressure * erosion;
+    }
+    const statusQuoOpportunityCost = statusQuo5YearCost - (statusQuoYear1Cost * DCF_YEARS);
+
+    // Option D: AI investment (from our model)
+    const ai5YearNet = scenarioResults.base.projections.reduce((sum, yr) => sum + yr.netCashFlow, 0) - upfrontInvestment;
+    const aiROI = totalInvestment > 0 ? ai5YearNet / totalInvestment : 0;
+
+    return {
+      aiInvestment: {
+        label: 'AI Automation',
+        upfrontCost: upfrontInvestment,
+        annual5YearNet: ai5YearNet,
+        roi: aiROI,
+        paybackMonths: scenarioResults.base.paybackMonths,
+        npv: scenarioResults.base.npv,
+        riskLevel: 'Medium',
+      },
+      hiring: {
+        label: 'Hire More Staff',
+        ftesNeeded: hireFTEs,
+        annualCost: hireAnnualCost,
+        turnoverCost: hireTurnoverCost,
+        total5YearCost: hire5YearCost,
+        roi: hireROI,
+        rampMonths: CAPITAL_ALLOCATION.HIRING_RAMP_MONTHS,
+        riskLevel: 'Low',
+      },
+      outsourcing: {
+        label: 'Outsource / BPO',
+        annualCost: bpoTotalAnnual,
+        annualSavings: bpoSavings,
+        total5YearNet: bpo5YearNet,
+        roi: bpoROI,
+        qualityImpact: `-${Math.round((1 - CAPITAL_ALLOCATION.BPO_QUALITY_DISCOUNT) * 100)}%`,
+        transitionMonths: CAPITAL_ALLOCATION.BPO_TRANSITION_MONTHS,
+        riskLevel: 'Low-Medium',
+      },
+      statusQuo: {
+        label: 'Do Nothing',
+        annualCost: statusQuoYear1Cost,
+        total5YearCost: statusQuo5YearCost,
+        opportunityCost: statusQuoOpportunityCost,
+        competitiveErosionRate: CAPITAL_ALLOCATION.STATUS_QUO_COMPETITIVE_EROSION,
+        riskLevel: 'High (competitive)',
+      },
+    };
+  }
+
+  const workforceAlternatives = calculateWorkforceAlternatives();
+
+  // =====================================================================
   // V3: GATE STRUCTURE — Phased deployment with go/no-go thresholds
   // =====================================================================
   function calculateGateStructure() {
@@ -1425,7 +1639,7 @@ export function runCalculations(inputs) {
       // Expected value at this gate (proportional to timeline)
       const gateMonths = gate.monthRange[1];
       const yearsIn = gateMonths / 12;
-      const gateAnnualSavings = riskAdjustedSavings * Math.min(1, yearsIn > 0 ? ADOPTION_RAMP[Math.min(Math.floor(yearsIn), DCF_YEARS - 1)] : 0);
+      const gateAnnualSavings = riskAdjustedSavings * Math.min(1, yearsIn > 0 ? adoptionRamp[Math.min(Math.floor(yearsIn), DCF_YEARS - 1)] : 0);
 
       return {
         ...gate,
@@ -1599,7 +1813,7 @@ export function runCalculations(inputs) {
       const capacityAnnual = capacityCreationPathway.totalAnnualValue;
       let capacityNPVBoost = 0;
       for (let yr = 0; yr < DCF_YEARS; yr++) {
-        capacityNPVBoost += (capacityAnnual * ADOPTION_RAMP[yr]) / Math.pow(1 + discountRate, yr + 1);
+        capacityNPVBoost += (capacityAnnual * adoptionRamp[yr]) / Math.pow(1 + discountRate, yr + 1);
       }
       if (baseNPVForPath + capacityNPVBoost >= 0) {
         pathToPositive.levers.push({
@@ -1638,6 +1852,168 @@ export function runCalculations(inputs) {
       message: `Model-estimated ongoing cost ($${Math.round(computedOngoingCost).toLocaleString()}) differs from default ($${Math.round(ongoingAnnualCost).toLocaleString()}). Using model estimate.`,
     });
   }
+
+  // =====================================================================
+  // V5.1: BREAK-EVEN UNIT ECONOMICS
+  // For each archetype input, find the minimum value that makes NPV >= 0.
+  // Binary search: modify ONE archetype input at a time, re-run mapping,
+  // then compute a simplified NPV to find the break-even threshold.
+  // =====================================================================
+  function calculateBreakEvenUnits() {
+    if (!inputs.archetypeInputs || !inputs.projectArchetype) return null;
+
+    const schema = ARCHETYPE_INPUT_MAP[inputs.projectArchetype];
+    if (!schema) return null;
+
+    const baseInputs = { ...inputs.archetypeInputs };
+    const results = [];
+
+    // Quick NPV proxy: rebuild savings from overrides, run through sensitivityNPV
+    function quickNPVProxy(overrides) {
+      const ap = overrides.automationPotential ?? automationPotential;
+      const er = Math.max(0, Math.min(overrides.errorRate ?? errorRate, 1));
+      const rev = Math.max(0, overrides.revenueImpact || 0);
+
+      const lab = teamSize * avgSalary;
+      const rw = lab * er;
+      const displacedRaw = Math.round(teamSize * ap * adoptionRate);
+      const maxDisplaced = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
+      const displaced = Math.min(displacedRaw, maxDisplaced);
+      const headGross = displaced * avgSalary;
+      const effGross = Math.max(0, lab * ap - headGross);
+      const errGross = rw * ap;
+      const toolGross = currentToolCosts * (assumptions.toolReplacementRate ?? 0.40);
+      const enhRA = (effGross + errGross + toolGross + rev) * riskMultiplier;
+      const headRA = headGross * riskMultiplier;
+
+      return sensitivityNPV(enhRA, headRA, ongoingCostsByYear, upfrontInvestment);
+    }
+
+    for (const inputDef of schema.inputs) {
+      const currentVal = baseInputs[inputDef.key] ?? inputDef.default;
+      if (inputDef.type === 'scale') continue;
+
+      // Determine search direction: does increasing this input improve or worsen NPV?
+      const bump = inputDef.type === 'percent'
+        ? Math.min(currentVal * 1.5, inputDef.max)
+        : Math.min(currentVal * 1.5 || 1, inputDef.max);
+      const testInputs = { ...baseInputs, [inputDef.key]: bump };
+      const testOverrides = mapArchetypeInputs(inputs.projectArchetype, testInputs) || {};
+      const higherNPV = quickNPVProxy(testOverrides);
+      const baseNPVVal = quickNPVProxy(_archetypeOverrides);
+      const increasing = higherNPV >= baseNPVVal;
+
+      // Binary search bounds
+      let lo, hi;
+      if (baseNPV >= 0) {
+        lo = increasing ? inputDef.min : currentVal;
+        hi = increasing ? currentVal : inputDef.max;
+      } else {
+        lo = increasing ? currentVal : inputDef.min;
+        hi = increasing ? inputDef.max : currentVal;
+      }
+
+      for (let iter = 0; iter < 20; iter++) {
+        const mid = (lo + hi) / 2;
+        const midInputs = { ...baseInputs, [inputDef.key]: mid };
+        const midOverrides = mapArchetypeInputs(inputs.projectArchetype, midInputs) || {};
+        const midNPV = quickNPVProxy(midOverrides);
+        if (midNPV >= 0) {
+          if (increasing) hi = mid; else lo = mid;
+        } else {
+          if (increasing) lo = mid; else hi = mid;
+        }
+      }
+
+      const beValue = increasing ? hi : lo;
+      if (beValue >= inputDef.min && beValue <= inputDef.max) {
+        const formatted = inputDef.type === 'percent'
+          ? Math.round(beValue * 1000) / 1000
+          : Math.round(beValue);
+        const safeDiv = (a, b) => b !== 0 ? a / b : 0;
+        results.push({
+          key: inputDef.key,
+          label: inputDef.label,
+          type: inputDef.type,
+          currentValue: currentVal,
+          breakEvenValue: formatted,
+          marginPct: Math.round(safeDiv(currentVal - beValue, Math.abs(beValue) || 1) * 100),
+          direction: baseNPV >= 0 ? 'floor' : 'target',
+        });
+      }
+    }
+
+    return results.length > 0 ? results : null;
+  }
+
+  const _breakEvenUnits = calculateBreakEvenUnits();
+
+  // =====================================================================
+  // V5.2: VOLUME SENSITIVITY TABLE
+  // Shows NPV impact at stepped changes in the primary volume driver.
+  // Identifies the first numeric (non-percent, non-scale) archetype input,
+  // computes NPV at 5 levels around the current value.
+  // =====================================================================
+  function calculateVolumeSensitivity() {
+    if (!inputs.archetypeInputs || !inputs.projectArchetype) return null;
+    const schema = ARCHETYPE_INPUT_MAP[inputs.projectArchetype];
+    if (!schema) return null;
+
+    // Find primary volume input: first numeric (non-percent, non-scale) input
+    const volumeInput = schema.inputs.find(i => i.type === 'number');
+    if (!volumeInput) return null;
+
+    const currentVal = inputs.archetypeInputs[volumeInput.key] ?? volumeInput.default;
+    if (!currentVal || currentVal <= 0) return null;
+
+    // Choose step size: round to a "nice" interval (~20% of current value)
+    const rawStep = currentVal * 0.20;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const step = Math.max(1, Math.round(rawStep / magnitude) * magnitude);
+
+    // Build 5 levels: current-2step, current-step, current, current+step, current+2step
+    const levels = [-2, -1, 0, 1, 2].map(mult => {
+      const vol = Math.max(volumeInput.min || 1, currentVal + mult * step);
+      const testInputs = { ...inputs.archetypeInputs, [volumeInput.key]: vol };
+      const testOverrides = mapArchetypeInputs(inputs.projectArchetype, testInputs) || {};
+
+      // Quick NPV via proxy (same approach as break-even units)
+      const ap = testOverrides.automationPotential ?? automationPotential;
+      const er = Math.max(0, Math.min(testOverrides.errorRate ?? errorRate, 1));
+      const rev = Math.max(0, testOverrides.revenueImpact || 0);
+
+      const lab = teamSize * avgSalary;
+      const rw = lab * er;
+      const displacedRaw = Math.round(teamSize * ap * adoptionRate);
+      const maxDisplacedCalc = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
+      const displaced = Math.min(displacedRaw, maxDisplacedCalc);
+      const headGross = displaced * avgSalary;
+      const effGross = Math.max(0, lab * ap - headGross);
+      const errGross = rw * ap;
+      const toolGross = currentToolCosts * (assumptions.toolReplacementRate ?? 0.40);
+      const enhRA = (effGross + errGross + toolGross + rev) * riskMultiplier;
+      const headRA = headGross * riskMultiplier;
+
+      const npv = sensitivityNPV(enhRA, headRA, ongoingCostsByYear, upfrontInvestment);
+
+      return {
+        volume: vol,
+        delta: mult * step,
+        npv,
+        npvDelta: npv - baseNPV,
+      };
+    });
+
+    return {
+      inputKey: volumeInput.key,
+      inputLabel: volumeInput.label,
+      currentValue: currentVal,
+      step,
+      levels,
+    };
+  }
+
+  const _volumeSensitivity = inputs._mcMode === 'fast' ? null : calculateVolumeSensitivity();
 
   // =====================================================================
   // RETURN
@@ -1707,5 +2083,24 @@ export function runCalculations(inputs) {
     inputWarnings,
     savingsBridge,
     pathToPositive,
+    // V5: Consulting-grade additions
+    workforceAlternatives,
+    modelDriftRate,
+    consultingAssumptions: {
+      modelDriftRate,
+      modelTier,
+      useTokenModel,
+      isAgenticWorkflow,
+      agentComplexity: isAgenticWorkflow ? agentComplexity : null,
+      llmCallsPerTask,
+      promptCachingRate,
+    },
+    // V5.1: Break-even unit economics per archetype input
+    breakEvenUnits: _breakEvenUnits,
+    // V5.2: Volume sensitivity table
+    volumeSensitivity: _volumeSensitivity,
+    // V5.3: Adoption ramp (for UI display/editing)
+    adoptionRamp,
   };
+
 }

@@ -1,6 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SegmentedSelect from '../inputs/SegmentedSelect';
+import SliderInput from '../inputs/SliderInput';
+import ReadinessSlider from '../inputs/ReadinessSlider';
+import ToggleQuestion from '../inputs/ToggleQuestion';
+import { AI_TEAM_SALARY } from '../../logic/benchmarks';
+import { formatCurrency } from '../../utils/formatters';
 
 const INDUSTRIES = [
   'Technology / Software',
@@ -23,36 +28,28 @@ const COMPANY_SIZES = [
   { label: 'Large Enterprise', sublabel: '50,000+', value: 'Large Enterprise (50,000+)' },
 ];
 
-const ROLES = [
-  'CEO / President',
-  'Board Member / Advisor',
-  'COO / Chief of Staff',
-  'CFO / Finance Executive',
-  'CTO / CIO',
-  'VP / SVP',
-  'Director',
-  'Head of Department',
-  'Finance / FP&A Team',
-  'Manager',
-  'Analyst / IC',
-  'Other',
-];
-
 const TEAM_LOCATIONS = [
   { label: 'US - Major Tech Hub', sublabel: 'SF, NYC, Seattle, Boston', value: 'US - Major Tech Hub' },
-  { label: 'US - Other', sublabel: 'Austin, Denver, Chicago, etc.', value: 'US - Other' },
-  { label: 'UK / Western Europe', sublabel: 'London, Berlin, Paris', value: 'UK / Western Europe' },
-  { label: 'Canada / Australia', sublabel: 'Toronto, Sydney, etc.', value: 'Canada / Australia' },
-  { label: 'Remote / Distributed', sublabel: 'Mixed locations', value: 'Remote / Distributed' },
-  { label: 'Eastern Europe', sublabel: 'Poland, Romania, Ukraine', value: 'Eastern Europe' },
-  { label: 'Latin America', sublabel: 'Brazil, Mexico, Colombia', value: 'Latin America' },
-  { label: 'India / South Asia', sublabel: 'Bangalore, Hyderabad, etc.', value: 'India / South Asia' },
+  { label: 'Remote / Distributed', sublabel: 'Mixed US locations', value: 'Remote / Distributed' },
+  { label: 'Blended (US + Offshore)', sublabel: 'US employees + offshore contractors', value: 'Blended' },
+  { label: 'Offshore - Employee', sublabel: 'India, Eastern Europe, LatAm', value: 'Offshore - Employee' },
+  { label: 'Offshore - Contractor', sublabel: 'Third-party offshore vendor', value: 'Offshore - Contractor' },
 ];
 
-const US_STATES = [
-  'California', 'New York', 'Texas', 'Massachusetts', 'Washington',
-  'Illinois', 'Pennsylvania', 'Georgia', 'New Jersey', 'Colorado',
-  'Virginia', 'Florida', 'Other / Not Sure',
+const CHANGE_READINESS_DESCRIPTIONS = [
+  "Significant resistance expected. Leadership hasn't communicated the why.",
+  'Some openness but no formal change plan. Team is skeptical.',
+  'Moderate readiness. Leadership supports it. Some champions exist.',
+  'Strong readiness. Clear communication plan. Team is excited.',
+  'Fully bought in. Change management resourced. Previous successful transformations.',
+];
+
+const DATA_READINESS_DESCRIPTIONS = [
+  'Data is scattered, inconsistent, mostly manual',
+  'Some structured data, lots of cleanup needed',
+  'Reasonably organized, some integration work required',
+  'Well-structured, accessible via APIs',
+  'Enterprise data platform, clean and governed',
 ];
 
 const slideVariants = {
@@ -65,12 +62,10 @@ export default function Step1_CompanyContext({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
   const advanceTimer = useRef(null);
 
-  const isUSLocation = (formData.teamLocation || '').startsWith('US');
-
   const autoAdvance = useCallback(
     (nextSubStep) => {
       clearTimeout(advanceTimer.current);
-      if (nextSubStep <= 4) {
+      if (nextSubStep <= 5) {
         advanceTimer.current = setTimeout(() => {
           setSubStep(nextSubStep);
         }, 300);
@@ -86,7 +81,6 @@ export default function Step1_CompanyContext({ formData, updateField }) {
 
   const handleCompanySize = (val) => {
     updateField('companySize', val);
-    // Set smart team size defaults based on company size
     const teamSizeDefaults = {
       'Startup (1-50)': 5,
       'SMB (51-500)': 15,
@@ -100,28 +94,63 @@ export default function Step1_CompanyContext({ formData, updateField }) {
     autoAdvance(2);
   };
 
-  const handleRole = (e) => {
-    updateField('role', e.target.value);
-    if (e.target.value) autoAdvance(3);
-  };
-
   const handleLocation = (val) => {
     updateField('teamLocation', val);
-    if (val.startsWith('US')) {
-      autoAdvance(4);
+    if (val === 'Blended') {
+      // Set default contractor % and compute blended salary
+      const pct = formData.contractorPct ?? 0.30;
+      updateField('contractorPct', pct);
+      const blended = Math.round((1 - pct) * AI_TEAM_SALARY['US - Major Tech Hub'] + pct * AI_TEAM_SALARY['Offshore - Contractor']);
+      updateField('blendedAISalary', blended);
+      // Don't auto-advance — let user adjust the slider
+    } else {
+      autoAdvance(3);
     }
   };
 
-  const handleState = (e) => {
-    updateField('companyState', e.target.value);
+  const handleContractorPct = (pctInt) => {
+    const pct = pctInt / 100;
+    updateField('contractorPct', pct);
+    const blended = Math.round((1 - pct) * AI_TEAM_SALARY['US - Major Tech Hub'] + pct * AI_TEAM_SALARY['Offshore - Contractor']);
+    updateField('blendedAISalary', blended);
   };
+
+  const handleChangeReadiness = (val) => {
+    updateField('changeReadiness', val);
+    autoAdvance(4);
+  };
+
+  const handleDataReadiness = (val) => {
+    updateField('dataReadiness', val);
+    autoAdvance(5);
+  };
+
+  const handleExecSponsor = (val) => {
+    updateField('execSponsor', val);
+  };
+
+  // Determine section header based on substep
+  const isReadinessSection = subStep >= 3;
 
   return (
     <div className="mx-auto w-full max-w-xl">
       <h2 className="mb-2 text-2xl font-bold text-navy sm:text-3xl">
-        Let's start with the basics
+        {isReadinessSection ? "Let's assess your readiness" : "Let's start with the basics"}
       </h2>
-      <div className="mb-8 h-1 w-16 rounded bg-gold" />
+      <div className="mb-4 h-1 w-16 rounded bg-gold" />
+      {isReadinessSection && (
+        <div className="mb-6 space-y-2">
+          <p className="text-sm leading-relaxed text-gray-600">
+            <span className="font-bold underline">These questions drive all cost and timeline estimates.</span>
+          </p>
+          <div className="rounded-xl bg-navy px-4 py-3">
+            <p className="text-sm text-white">
+              <span className="text-base font-extrabold italic">70&ndash;85%</span> of AI implementations underperform because they skip this step.
+            </p>
+          </div>
+        </div>
+      )}
+      {!isReadinessSection && <div className="mb-4" />}
 
       <AnimatePresence mode="wait">
         {subStep === 0 && (
@@ -140,7 +169,6 @@ export default function Step1_CompanyContext({ formData, updateField }) {
               >
                 What industry are you in?
               </label>
-
               <select
                 id="industry-select"
                 value={formData.industry || ''}
@@ -152,30 +180,19 @@ export default function Step1_CompanyContext({ formData, updateField }) {
                   focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/30
                 "
               >
-                <option value="" disabled>
-                  Select your industry...
-                </option>
+                <option value="" disabled>Select your industry...</option>
                 {INDUSTRIES.map((ind) => (
-                  <option key={ind} value={ind}>
-                    {ind}
-                  </option>
+                  <option key={ind} value={ind}>{ind}</option>
                 ))}
               </select>
-
               <p className="text-sm text-gray-500">
                 Industry benchmarks affect realistic adoption timelines and success rates.
               </p>
-
               {formData.industry && (
                 <button
                   type="button"
                   onClick={() => setSubStep(1)}
-                  className="
-                    mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
-                    text-navy shadow-sm transition-all duration-150
-                    hover:bg-gold/90 focus:outline-none focus-visible:ring-2
-                    focus-visible:ring-gold focus-visible:ring-offset-2
-                  "
+                  className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
                 >
                   Continue
                 </button>
@@ -201,17 +218,11 @@ export default function Step1_CompanyContext({ formData, updateField }) {
                 onChange={handleCompanySize}
                 helperText="Larger organizations typically see longer implementation timelines but higher absolute ROI."
               />
-
               {formData.companySize && (
                 <button
                   type="button"
                   onClick={() => setSubStep(2)}
-                  className="
-                    mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
-                    text-navy shadow-sm transition-all duration-150
-                    hover:bg-gold/90 focus:outline-none focus-visible:ring-2
-                    focus-visible:ring-gold focus-visible:ring-offset-2
-                  "
+                  className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
                 >
                   Continue
                 </button>
@@ -222,66 +233,6 @@ export default function Step1_CompanyContext({ formData, updateField }) {
 
         {subStep === 2 && (
           <motion.div
-            key="role"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-          >
-            <div className="space-y-3">
-              <label
-                htmlFor="role-select"
-                className="block text-base font-semibold text-navy sm:text-lg"
-              >
-                What's your role?
-              </label>
-
-              <select
-                id="role-select"
-                value={formData.role || ''}
-                onChange={handleRole}
-                className="
-                  w-full cursor-pointer appearance-none rounded-lg border-2
-                  border-gray-200 bg-white px-4 py-4 text-lg font-medium
-                  text-navy transition-colors duration-150
-                  focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/30
-                "
-              >
-                <option value="" disabled>
-                  Select your role...
-                </option>
-                {ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-
-              <p className="text-sm text-gray-500">
-                This helps us tailor the report language and metrics to what matters most in your role.
-              </p>
-
-              {formData.role && (
-                <button
-                  type="button"
-                  onClick={() => setSubStep(3)}
-                  className="
-                    mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold
-                    text-navy shadow-sm transition-all duration-150
-                    hover:bg-gold/90 focus:outline-none focus-visible:ring-2
-                    focus-visible:ring-gold focus-visible:ring-offset-2
-                  "
-                >
-                  Continue
-                </button>
-              )}
-            </div>
-          </motion.div>
-        )}
-
-        {subStep === 3 && (
-          <motion.div
             key="teamLocation"
             variants={slideVariants}
             initial="enter"
@@ -289,58 +240,141 @@ export default function Step1_CompanyContext({ formData, updateField }) {
             exit="exit"
             transition={{ duration: 0.15, ease: 'easeOut' }}
           >
-            <SegmentedSelect
-              label="Where would the AI implementation team be based?"
-              options={TEAM_LOCATIONS}
-              value={formData.teamLocation}
-              onChange={handleLocation}
-              helperText="This drives salary assumptions for the AI engineering team in the cost model."
-            />
+            <div className="space-y-4">
+              <SegmentedSelect
+                label="Where would the AI implementation team be based?"
+                options={TEAM_LOCATIONS}
+                value={formData.teamLocation}
+                onChange={handleLocation}
+                helperText="Drives fully-loaded salary assumptions based on historical benchmarks by location, using weighted averages of AI engineering team costs (base + benefits + taxes + overhead)."
+              />
+
+              {formData.teamLocation === 'Blended' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-4"
+                >
+                  <SliderInput
+                    label="What % of the AI team will be offshore contractors?"
+                    value={Math.round((formData.contractorPct ?? 0.30) * 100)}
+                    onChange={handleContractorPct}
+                    min={10}
+                    max={90}
+                    step={5}
+                    suffix="%"
+                    helperText={`${100 - Math.round((formData.contractorPct ?? 0.30) * 100)}% US ($${(AI_TEAM_SALARY['US - Major Tech Hub'] / 1000).toFixed(0)}K) + ${Math.round((formData.contractorPct ?? 0.30) * 100)}% Offshore ($${(AI_TEAM_SALARY['Offshore - Contractor'] / 1000).toFixed(0)}K)`}
+                  />
+
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-emerald-800">Blended AI Salary</span>
+                      <span className="text-lg font-bold font-mono text-emerald-800">
+                        {formatCurrency(formData.blendedAISalary ?? 169500)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-600/70 mt-1">Weighted average fully-loaded cost per person</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSubStep(3)}
+                    className="mt-2 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                  >
+                    Continue
+                  </button>
+                </motion.div>
+              )}
+            </div>
           </motion.div>
         )}
 
-        {subStep === 4 && isUSLocation && (
+        {subStep === 3 && (
           <motion.div
-            key="companyState"
+            key="changeReadiness"
             variants={slideVariants}
             initial="enter"
             animate="center"
             exit="exit"
             transition={{ duration: 0.15, ease: 'easeOut' }}
           >
-            <div className="space-y-3">
-              <label
-                htmlFor="state-select"
-                className="block text-base font-semibold text-navy sm:text-lg"
-              >
-                Which state is the company headquartered in? (optional)
-              </label>
-
-              <select
-                id="state-select"
-                value={formData.companyState || 'Other / Not Sure'}
-                onChange={handleState}
-                className="
-                  w-full cursor-pointer appearance-none rounded-lg border-2
-                  border-gray-200 bg-white px-4 py-4 text-lg font-medium
-                  text-navy transition-colors duration-150
-                  focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/30
-                "
-              >
-                {US_STATES.map((st) => (
-                  <option key={st} value={st}>
-                    {st}
-                  </option>
-                ))}
-              </select>
-
-              <p className="text-sm text-gray-500">
-                Used to estimate state R&D tax credits. Skip if unsure — it won't affect core ROI numbers.
-              </p>
+            <ReadinessSlider
+              label="How ready is your team for this change?"
+              value={formData.changeReadiness ?? 3}
+              onChange={handleChangeReadiness}
+              descriptions={CHANGE_READINESS_DESCRIPTIONS}
+            />
+            <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-xs leading-relaxed text-orange-800">
+              <p className="font-bold text-orange-700 text-sm mb-1">Team Readiness: #1 barrier to AI success</p>
+              <p><span className="font-bold italic">70%</span> of digital transformations fail due to cultural and organizational barriers, yet companies allocate only <span className="font-bold italic">10%</span> of budgets to change management.<sup>1</sup></p>
             </div>
           </motion.div>
         )}
+
+        {subStep === 4 && (
+          <motion.div
+            key="dataReadiness"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
+            <ReadinessSlider
+              label="How clean and accessible is your data?"
+              value={formData.dataReadiness ?? 3}
+              onChange={handleDataReadiness}
+              descriptions={DATA_READINESS_DESCRIPTIONS}
+            />
+            <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-xs leading-relaxed text-orange-800">
+              <p className="font-bold text-orange-700 text-sm mb-1">Data Readiness: The silent project killer</p>
+              <p><span className="font-bold italic">63%</span> of organizations lack proper data management practices for AI. Gartner predicts <span className="font-bold italic">60%</span> of AI projects will be abandoned by 2026 due to data issues.<sup>2</sup></p>
+            </div>
+          </motion.div>
+        )}
+
+        {subStep === 5 && (
+          <motion.div
+            key="execSponsor"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
+            <ToggleQuestion
+              label="Is there a C-level executive sponsoring this initiative?"
+              value={formData.execSponsor}
+              onChange={handleExecSponsor}
+              yesLabel="Yes — active executive sponsor"
+              noLabel="No — still building the case"
+              note=""
+            />
+            {formData.execSponsor === true && (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs leading-relaxed text-emerald-800">
+                <p className="font-bold text-emerald-700 text-sm mb-1">Executive Sponsor: The success multiplier</p>
+                <p>JPMorgan's CEO-driven AI strategy delivered <span className="font-bold italic">600+</span> production use cases and a <span className="font-bold italic">20%</span> gross sales lift.<sup>3</sup></p>
+              </div>
+            )}
+            {formData.execSponsor === false && (
+              <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-xs leading-relaxed text-orange-800">
+                <p className="font-bold text-orange-700 text-sm mb-1">Executive Sponsor: The success multiplier</p>
+                <p>Only <span className="font-bold italic">10%</span> of companies have structured plans to support workers through AI disruption. Without C-suite alignment, AI stays stuck in pilot.<sup>4</sup> This report can help you build that case.</p>
+              </div>
+            )}
+          </motion.div>
+        )}
       </AnimatePresence>
+
+      {isReadinessSection && (
+        <div className="mt-6 text-left text-[10px] text-gray-400 leading-relaxed space-y-0.5">
+          <p><sup>1</sup> McKinsey, &ldquo;Reconfiguring Work: Change Management in the Age of GenAI&rdquo; (2024)</p>
+          <p><sup>2</sup> Gartner, &ldquo;Lack of AI-Ready Data Puts AI Projects at Risk&rdquo; (Feb 2025)</p>
+          <p><sup>3</sup> Harvard Business School, &ldquo;JPMorganChase: Leadership in the Age of GenAI&rdquo; (2024)</p>
+          <p><sup>4</sup> Adecco Group, &ldquo;AI Disruption Readiness Report&rdquo; (2025)</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ const categories = [
   { key: 'efficiency', label: 'Efficiency Gains', color: 'bg-emerald-500' },
   { key: 'errorReduction', label: 'Error Reduction', color: 'bg-amber-500' },
   { key: 'toolReplacement', label: 'Tool Replacement', color: 'bg-purple-500' },
+  { key: 'archetypeRevenue', label: 'Revenue Impact', color: 'bg-rose-500' },
 ];
 
 export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
@@ -27,7 +28,7 @@ export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
       {valueBreakdown.perEmployeeGain > 0 && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4">
           <div className="flex justify-between items-center">
-            <span className="text-gray-700 text-sm font-medium">Year 1: Per-employee productivity gain</span>
+            <span className="text-gray-700 text-sm font-medium">FY 1: Per-employee productivity gain</span>
             <span className="font-mono font-bold text-emerald-700">{formatCurrency(valueBreakdown.perEmployeeGain)}/person</span>
           </div>
           <p className="text-gray-500 text-xs mt-1">
@@ -90,7 +91,7 @@ export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
           </span>
         </div>
         <div className="flex justify-between items-center">
-          <span className="text-gray-500 text-sm">Less: Year 1 AI operating cost</span>
+          <span className="text-gray-500 text-sm">Less: FY 1 AI operating cost</span>
           <span className="font-mono font-semibold text-red-600">
             -{formatCurrency(valueBreakdown.ongoingAiCostYear1)}
           </span>

@@ -21,12 +21,10 @@ const ROLE_TIER_MAP = {
 };
 
 /**
- * Get the output tier for a given role string.
- * Falls back to 'detailed' if the role is unrecognized.
+ * Get the output tier. Always returns 'financial' — role-based tiers removed.
  */
-export function getOutputTier(role) {
-  if (!role) return 'detailed';
-  return ROLE_TIER_MAP[role] || 'detailed';
+export function getOutputTier(_role) {
+  return 'financial';
 }
 
 /**
@@ -53,6 +51,9 @@ export const TIER_SECTIONS = {
     peerComparison:       true,
     aiMaturityPremium:    false,
     phasedDeploymentGates: false,
+    workforceAlternatives: false,
+    breakEvenUnits:       false,
+    consultingAssumptions: false,
   },
   financial: {
     heroVerdict:          true,
@@ -72,7 +73,10 @@ export const TIER_SECTIONS = {
     capitalEfficiency:    true,
     peerComparison:       true,
     aiMaturityPremium:    false,
-    phasedDeploymentGates: true,
+    phasedDeploymentGates: false,
+    workforceAlternatives: true,
+    breakEvenUnits:       false,
+    consultingAssumptions: false,
   },
   detailed: {
     heroVerdict:          true,
@@ -87,12 +91,15 @@ export const TIER_SECTIONS = {
     investmentOverview:   true,
     sensitivityAnalysis:  true,
     monteCarloAnalysis:   true,
-    quickFacts:           true,
+    quickFacts:           false,
     valueCreationPathways: true,
     capitalEfficiency:    true,
     peerComparison:       true,
-    aiMaturityPremium:    true,
+    aiMaturityPremium:    false,
     phasedDeploymentGates: true,
+    workforceAlternatives: true,
+    breakEvenUnits:       true,
+    consultingAssumptions: true,
   },
 };
 
@@ -137,7 +144,12 @@ export const PDF_PAGES = {
     'capitalEfficiencyGates',
     'opportunityCost',
     'peerComparison',
+    'workforceAlternatives',
     'recommendations',
+    'inputAssumptions',
+    'appendixMethodology',
+    'appendixBenchmarks',
+    'appendixCostAssumptions',
   ],
   detailed: [
     'executiveSummary',
@@ -154,6 +166,9 @@ export const PDF_PAGES = {
     'monteCarlo',
     'opportunityCost',
     'peerComparison',
+    'workforceAlternatives',
+    'breakEvenUnits',
+    'consultingAssumptions',
     'recommendations',
     'qualitativeBenefits',
     'caseStudy',
@@ -168,8 +183,14 @@ export const PDF_PAGES = {
 /**
  * Excel tab inclusion by tier.
  */
+// Per-archetype assumption tab names (must match generateExcelModel.js)
+const ASSUMPTION_TABS = [
+  'Assumptions: Process', 'Assumptions: Customer', 'Assumptions: Analytics',
+  'Assumptions: Revenue', 'Assumptions: Compliance', 'Assumptions: Knowledge',
+];
+
 export const EXCEL_TABS = {
-  executive: ['Summary'],
-  financial: ['Summary', 'Inputs', 'Archetype Detail', 'P&L & Cash Flow', 'Sensitivity'],
-  detailed:  ['Summary', 'Inputs', 'Archetype Detail', 'P&L & Cash Flow', 'Sensitivity', 'Key Formulas', 'Lookups'],
+  executive: ['Summary', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Key Formulas', 'Lookups', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
 };
