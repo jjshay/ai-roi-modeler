@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react';
 import SliderInput from '../inputs/SliderInput';
 import { getArchetypeDefaults, getArchetypeById } from '../../logic/archetypes';
 import { mapArchetypeInputs } from '../../logic/archetypeInputs';
-import { getAutomationPotential } from '../../logic/benchmarks';
+import { getAutomationPotential, getErrorRate } from '../../logic/benchmarks';
 import { formatCurrency } from '../../utils/formatters';
 
 export default function Step4_ReviewAssumptions({ formData, updateField }) {
@@ -109,7 +109,7 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
             max={50}
             step={0.5}
             suffix="%"
-            helperText={`% of work requiring rework or correction.${computed.errorRate != null ? ` Computed: ${(computed.errorRate * 100).toFixed(1)}%` : ''}`}
+            helperText={`% of work requiring rework or correction. Industry avg: ${Math.round(getErrorRate(industry, formData.processType || 'Other') * 100)}%${computed.errorRate != null ? ` | Computed: ${(computed.errorRate * 100).toFixed(1)}%` : ''}`}
           />
         </div>
 

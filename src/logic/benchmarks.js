@@ -141,6 +141,149 @@ export const AUTOMATION_POTENTIAL = {
   },
 };
 
+// Error / rework rate by industry × process type (% of output requiring rework)
+// Sources:
+//   - ASQ 2024: manufacturing average rework rate 3-5% (Six Sigma baseline ~6.7% at 3σ)
+//   - AHIMA 2024: healthcare claims processing error rate 6-8%
+//   - McKinsey 2025: knowledge-work error/rework averages 10-15% across industries
+//   - Stripe "Developer Coefficient" 2023: developers spend ~42% time on debugging/maintenance
+//   - APQC 2024: document processing error rates 5-12% in manual workflows
+//   - Deloitte 2025: financial services manual processing error rates 4-6%
+// Values represent % of completed work requiring correction before it can be used.
+// Process types with higher cognitive complexity or creative output have higher rates.
+export const ERROR_RATE_BENCHMARKS = {
+  'Technology / Software': {
+    'Document Processing': 0.08,
+    'Customer Communication': 0.06,
+    'Data Analysis & Reporting': 0.07,
+    'Research & Intelligence': 0.05,
+    'Workflow Automation': 0.04,
+    'Content Creation': 0.12,
+    'Quality & Compliance': 0.05,
+    'Software Development': 0.15,
+    'HR & Talent Management': 0.08,
+    'Supply Chain & Logistics': 0.05,
+    'Other': 0.08,
+  },
+  'Financial Services / Banking': {
+    'Document Processing': 0.05,
+    'Customer Communication': 0.04,
+    'Data Analysis & Reporting': 0.06,
+    'Research & Intelligence': 0.05,
+    'Workflow Automation': 0.03,
+    'Content Creation': 0.07,
+    'Quality & Compliance': 0.04,
+    'Software Development': 0.12,
+    'HR & Talent Management': 0.06,
+    'Supply Chain & Logistics': 0.04,
+    'Other': 0.05,
+  },
+  'Healthcare / Life Sciences': {
+    'Document Processing': 0.07,
+    'Customer Communication': 0.05,
+    'Data Analysis & Reporting': 0.06,
+    'Research & Intelligence': 0.08,
+    'Workflow Automation': 0.05,
+    'Content Creation': 0.06,
+    'Quality & Compliance': 0.04,
+    'Software Development': 0.10,
+    'HR & Talent Management': 0.07,
+    'Supply Chain & Logistics': 0.06,
+    'Other': 0.06,
+  },
+  'Manufacturing / Industrial': {
+    'Document Processing': 0.06,
+    'Customer Communication': 0.05,
+    'Data Analysis & Reporting': 0.05,
+    'Research & Intelligence': 0.04,
+    'Workflow Automation': 0.04,
+    'Content Creation': 0.07,
+    'Quality & Compliance': 0.03,
+    'Software Development': 0.12,
+    'HR & Talent Management': 0.06,
+    'Supply Chain & Logistics': 0.05,
+    'Other': 0.05,
+  },
+  'Retail / E-Commerce': {
+    'Document Processing': 0.08,
+    'Customer Communication': 0.07,
+    'Data Analysis & Reporting': 0.06,
+    'Research & Intelligence': 0.05,
+    'Workflow Automation': 0.05,
+    'Content Creation': 0.10,
+    'Quality & Compliance': 0.06,
+    'Software Development': 0.14,
+    'HR & Talent Management': 0.09,
+    'Supply Chain & Logistics': 0.07,
+    'Other': 0.07,
+  },
+  'Professional Services / Consulting': {
+    'Document Processing': 0.06,
+    'Customer Communication': 0.04,
+    'Data Analysis & Reporting': 0.07,
+    'Research & Intelligence': 0.06,
+    'Workflow Automation': 0.04,
+    'Content Creation': 0.10,
+    'Quality & Compliance': 0.05,
+    'Software Development': 0.13,
+    'HR & Talent Management': 0.07,
+    'Supply Chain & Logistics': 0.04,
+    'Other': 0.06,
+  },
+  'Media / Entertainment': {
+    'Document Processing': 0.07,
+    'Customer Communication': 0.06,
+    'Data Analysis & Reporting': 0.06,
+    'Research & Intelligence': 0.05,
+    'Workflow Automation': 0.05,
+    'Content Creation': 0.12,
+    'Quality & Compliance': 0.06,
+    'Software Development': 0.14,
+    'HR & Talent Management': 0.08,
+    'Supply Chain & Logistics': 0.05,
+    'Other': 0.07,
+  },
+  'Energy / Utilities': {
+    'Document Processing': 0.05,
+    'Customer Communication': 0.04,
+    'Data Analysis & Reporting': 0.05,
+    'Research & Intelligence': 0.04,
+    'Workflow Automation': 0.04,
+    'Content Creation': 0.06,
+    'Quality & Compliance': 0.03,
+    'Software Development': 0.10,
+    'HR & Talent Management': 0.06,
+    'Supply Chain & Logistics': 0.05,
+    'Other': 0.05,
+  },
+  'Government / Public Sector': {
+    'Document Processing': 0.08,
+    'Customer Communication': 0.07,
+    'Data Analysis & Reporting': 0.06,
+    'Research & Intelligence': 0.05,
+    'Workflow Automation': 0.06,
+    'Content Creation': 0.08,
+    'Quality & Compliance': 0.05,
+    'Software Development': 0.12,
+    'HR & Talent Management': 0.07,
+    'Supply Chain & Logistics': 0.06,
+    'Other': 0.06,
+  },
+  'Other': {
+    'Document Processing': 0.07,
+    'Customer Communication': 0.06,
+    'Data Analysis & Reporting': 0.06,
+    'Research & Intelligence': 0.05,
+    'Workflow Automation': 0.05,
+    'Content Creation': 0.10,
+    'Quality & Compliance': 0.05,
+    'Software Development': 0.13,
+    'HR & Talent Management': 0.07,
+    'Supply Chain & Logistics': 0.05,
+    'Other': 0.06,
+  },
+};
+
 // AI project success rates by industry (% of projects meeting expected outcomes)
 // Sources:
 //   - Gartner 2024: only 48% of AI projects reach production
@@ -249,6 +392,11 @@ export const REALISTIC_TIMELINES = {
 
 export function getAutomationPotential(industry, processType) {
   const industryData = AUTOMATION_POTENTIAL[industry] || AUTOMATION_POTENTIAL['Other'];
+  return industryData[processType] || industryData['Other'];
+}
+
+export function getErrorRate(industry, processType) {
+  const industryData = ERROR_RATE_BENCHMARKS[industry] || ERROR_RATE_BENCHMARKS['Other'];
   return industryData[processType] || industryData['Other'];
 }
 
@@ -1158,6 +1306,10 @@ export const BENCHMARK_SOURCES = [
   { id: 42, short: 'Goldman Sachs 2025', full: 'Goldman Sachs, "Gen AI: Too Much Spend, Too Little Benefit?" 2025. Enterprise AI spending growing 60% YoY; realized productivity gains averaging 15-25% for knowledge workers in early deployments.' },
   { id: 43, short: 'KPMG AI Survey 2025', full: 'KPMG, "AI Adoption and Trust Survey," 2025. Financial services leads with 68% AI adoption in production; government sector at 25%. Average implementation timeline: 8-14 months for enterprise deployments.' },
   { id: 44, short: 'Capgemini AI ROI 2025', full: 'Capgemini Research Institute, "Harnessing the Value of Generative AI," 2025. Organizations report 6-14% cost reduction from GenAI; quality and compliance use cases show highest ROI in regulated industries.' },
+  { id: 45, short: 'ASQ 2024', full: 'American Society for Quality, "Cost of Quality Benchmarks," 2024. Manufacturing average rework rate 3-5%; Six Sigma baseline defect rate ~6.7% at 3σ. Quality & compliance processes in regulated industries achieve 2-4% error rates.' },
+  { id: 46, short: 'AHIMA 2024', full: 'AHIMA (American Health Information Management Association), "Healthcare Claims Processing Error Analysis," 2024. Claims processing error rate 6-8%; medical coding error rates 5-10%.' },
+  { id: 47, short: 'APQC 2024', full: 'APQC (American Productivity & Quality Center), "Document Processing Benchmarks," 2024. Manual document processing error rates 5-12%; data entry error rates 1-4% per field.' },
+  { id: 48, short: 'Stripe Developer 2023', full: 'Stripe, "The Developer Coefficient," 2023. Developers spend ~42% of time on debugging and maintenance; software rework rates 10-20% of total development effort.' },
 ];
 
 // ---------------------------------------------------------------------------

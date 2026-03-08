@@ -5,7 +5,7 @@ import SliderInput from '../inputs/SliderInput';
 import CurrencyInput from '../inputs/CurrencyInput';
 import { PROJECT_ARCHETYPES, getArchetypeDefaults } from '../../logic/archetypes';
 import { ARCHETYPE_INPUT_MAP, getArchetypeInputDefaults, mapArchetypeInputs } from '../../logic/archetypeInputs';
-import { getAutomationPotential } from '../../logic/benchmarks';
+import { getAutomationPotential, getErrorRate } from '../../logic/benchmarks';
 import { formatCurrency } from '../../utils/formatters';
 
 const ARCHETYPE_OPTIONS = PROJECT_ARCHETYPES.map(a => ({
@@ -202,31 +202,56 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
                 </div>
               </div>
 
-              {/* Computed Summary Card */}
+              {/* Editable Summary Card */}
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="mb-2 text-[10px] font-medium text-emerald-600">Computed from your inputs — click any value to override</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-white/70 px-3 py-2">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Automation Potential</p>
-                    <p className="text-lg font-bold text-navy">
-                      {computed.automationPotential != null ? `${Math.round(computed.automationPotential * 100)}%` : '--'}
-                    </p>
+                    <div className="mt-1 flex items-baseline gap-1">
+                      <input
+                        type="number"
+                        min={1} max={85} step={1}
+                        value={assumptions.automationPotential != null ? Math.round(assumptions.automationPotential * 100) : (computed.automationPotential != null ? Math.round(computed.automationPotential * 100) : '')}
+                        onChange={(e) => updateAssumption('automationPotential', Math.min(85, Math.max(1, Number(e.target.value))) / 100)}
+                        className="w-16 bg-transparent text-lg font-bold text-navy border-b border-dashed border-navy/30 focus:border-gold focus:outline-none text-right"
+                      />
+                      <span className="text-sm font-bold text-navy/60">%</span>
+                    </div>
+                    <p className="mt-1 text-[9px] text-emerald-600/60">Ind. avg: {Math.round(getAutomationPotential(industry, formData.processType || 'Other') * 100)}%</p>
                   </div>
                   <div className="rounded-lg bg-white/70 px-3 py-2">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Hours/Week</p>
-                    <p className="text-lg font-bold text-navy">
-                      {computed.hoursPerWeek != null ? `${computed.hoursPerWeek.toLocaleString()} hrs` : '--'}
-                    </p>
+                    <div className="mt-1 flex items-baseline gap-1">
+                      <input
+                        type="number"
+                        min={1} max={99999} step={1}
+                        value={assumptions.hoursPerWeek ?? computed.hoursPerWeek ?? ''}
+                        onChange={(e) => updateAssumption('hoursPerWeek', Math.max(1, Number(e.target.value)))}
+                        className="w-20 bg-transparent text-lg font-bold text-navy border-b border-dashed border-navy/30 focus:border-gold focus:outline-none text-right"
+                      />
+                      <span className="text-sm font-bold text-navy/60">hrs</span>
+                    </div>
+                    <p className="mt-1 text-[9px] text-emerald-600/60">Total team hrs on this process</p>
                   </div>
                   <div className="rounded-lg bg-white/70 px-3 py-2">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Error Rate</p>
-                    <p className="text-lg font-bold text-navy">
-                      {computed.errorRate != null ? `${(computed.errorRate * 100).toFixed(1)}%` : '--'}
-                    </p>
+                    <div className="mt-1 flex items-baseline gap-1">
+                      <input
+                        type="number"
+                        min={0} max={50} step={0.5}
+                        value={assumptions.errorRate != null ? Math.round(assumptions.errorRate * 1000) / 10 : (computed.errorRate != null ? Math.round(computed.errorRate * 1000) / 10 : '')}
+                        onChange={(e) => updateAssumption('errorRate', Math.min(50, Math.max(0, Number(e.target.value))) / 100)}
+                        className="w-16 bg-transparent text-lg font-bold text-navy border-b border-dashed border-navy/30 focus:border-gold focus:outline-none text-right"
+                      />
+                      <span className="text-sm font-bold text-navy/60">%</span>
+                    </div>
+                    <p className="mt-1 text-[9px] text-emerald-600/60">Ind. avg: {Math.round(getErrorRate(industry, formData.processType || 'Other') * 100)}%</p>
                   </div>
                   {computed.revenueImpact != null && computed.revenueImpact > 0 && (
                     <div className="rounded-lg bg-white/70 px-3 py-2">
                       <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Revenue Impact</p>
-                      <p className="text-lg font-bold text-navy">{formatCurrency(computed.revenueImpact)}</p>
+                      <p className="mt-1 text-lg font-bold text-navy">{formatCurrency(computed.revenueImpact)}</p>
                     </div>
                   )}
                 </div>
@@ -324,39 +349,6 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
                       <p className="text-xs text-gray-500">
                         These values are pre-set from industry benchmarks. Adjust to match your situation.
                       </p>
-
-                      <SliderInput
-                        label="Automation Potential"
-                        value={Math.round((assumptions.automationPotential ?? computed.automationPotential ?? getAutomationPotential(industry, formData.processType || 'Other')) * 100)}
-                        onChange={(v) => updateAssumption('automationPotential', v / 100)}
-                        min={5}
-                        max={85}
-                        step={1}
-                        suffix="%"
-                        helperText={`% of process work AI can automate. Industry avg: ${Math.round(getAutomationPotential(industry, formData.processType || 'Other') * 100)}%`}
-                      />
-
-                      <SliderInput
-                        label="Process Hours / Week"
-                        value={assumptions.hoursPerWeek ?? computed.hoursPerWeek ?? 20}
-                        onChange={(v) => updateAssumption('hoursPerWeek', v)}
-                        min={1}
-                        max={10000}
-                        step={1}
-                        suffix=" hrs"
-                        helperText={`Total team hours on this process per week.${computed.hoursPerWeek != null ? ` Computed: ${computed.hoursPerWeek.toLocaleString()} hrs` : ''}`}
-                      />
-
-                      <SliderInput
-                        label="Current Error / Rework Rate"
-                        value={Math.round((assumptions.errorRate ?? computed.errorRate ?? 0.10) * 100 * 10) / 10}
-                        onChange={(v) => updateAssumption('errorRate', v / 100)}
-                        min={0}
-                        max={50}
-                        step={0.5}
-                        suffix="%"
-                        helperText={`% of work requiring rework.${computed.errorRate != null ? ` Computed: ${(computed.errorRate * 100).toFixed(1)}%` : ''}`}
-                      />
 
                       <SliderInput
                         label="Expected Adoption Rate"

@@ -1,5 +1,6 @@
 import {
   getAutomationPotential,
+  getErrorRate,
   getIndustrySuccessRate,
   ADOPTION_MULTIPLIERS,
   DATA_TIMELINE_MULTIPLIER,
@@ -95,10 +96,12 @@ export function runCalculations(inputs) {
   // Archetype overrides refine hoursPerWeek and errorRate if provided
   // =====================================================================
   const assumptions = inputs.assumptions || {};
+  const industry = inputs.industry || 'Other';
+  const processType = inputs.processType || 'Other';
   const teamSize = Math.max(1, Math.min(inputs.teamSize || 10, 100000));
   const avgSalary = Math.max(10000, Math.min(inputs.avgSalary || 100000, 10000000));
   const hoursPerWeek = Math.max(1, Math.min(assumptions.hoursPerWeek ?? _archetypeOverrides.hoursPerWeek ?? inputs.hoursPerWeek ?? 20, 10000));
-  const errorRate = Math.max(0, Math.min(assumptions.errorRate ?? _archetypeOverrides.errorRate ?? inputs.errorRate ?? 0.10, 1));
+  const errorRate = Math.max(0, Math.min(assumptions.errorRate ?? _archetypeOverrides.errorRate ?? inputs.errorRate ?? getErrorRate(industry, processType), 1));
   const archetypeRevenueImpact = Math.max(0, _archetypeOverrides.revenueImpact || 0);
   const currentToolCosts = Math.max(0, inputs.currentToolCosts || 0);
   // Normalize companySize — handles truncated values from legacy share links
@@ -107,8 +110,6 @@ export function runCalculations(inputs) {
   const companySize = VALID_SIZES.includes(rawSize)
     ? rawSize
     : VALID_SIZES.find(s => s.startsWith(rawSize)) || 'Mid-Market (501-5,000)';
-  const industry = inputs.industry || 'Other';
-  const processType = inputs.processType || 'Other';
   const teamLocation = inputs.teamLocation || 'US - Major Tech Hub';
   const dataReadiness = inputs.dataReadiness ?? 3;
   const changeReadiness = inputs.changeReadiness ?? 3;

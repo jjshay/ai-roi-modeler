@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   getAutomationPotential,
+  getErrorRate,
   getIndustrySuccessRate,
   getRealisticTimeline,
   ADOPTION_MULTIPLIERS,
@@ -41,6 +42,35 @@ describe('getAutomationPotential', () => {
     for (const ind of industries) {
       for (const proc of processes) {
         const val = getAutomationPotential(ind, proc);
+        expect(val).toBeGreaterThan(0);
+        expect(val).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
+describe('getErrorRate', () => {
+  it('returns correct value for known industry/process', () => {
+    expect(getErrorRate('Technology / Software', 'Software Development')).toBe(0.15);
+    expect(getErrorRate('Manufacturing / Industrial', 'Quality & Compliance')).toBe(0.03);
+  });
+
+  it('falls back to Other industry', () => {
+    const val = getErrorRate('Unknown Industry', 'Document Processing');
+    expect(val).toBe(0.07); // Other → Document Processing
+  });
+
+  it('falls back to Other process type', () => {
+    const val = getErrorRate('Technology / Software', 'Unknown Process');
+    expect(val).toBe(0.08); // Tech → Other
+  });
+
+  it('all values are between 0 and 1', () => {
+    const industries = ['Technology / Software', 'Healthcare / Life Sciences', 'Government / Public Sector'];
+    const processes = ['Document Processing', 'Customer Communication', 'Software Development'];
+    for (const ind of industries) {
+      for (const proc of processes) {
+        const val = getErrorRate(ind, proc);
         expect(val).toBeGreaterThan(0);
         expect(val).toBeLessThanOrEqual(1);
       }
@@ -190,8 +220,8 @@ describe('Industry Peer Benchmarks', () => {
 });
 
 describe('Benchmark Sources', () => {
-  it('has 44 sources', () => {
-    expect(BENCHMARK_SOURCES).toHaveLength(44);
+  it('has 48 sources', () => {
+    expect(BENCHMARK_SOURCES).toHaveLength(48);
   });
 
   it('IDs are sequential 1-37', () => {
