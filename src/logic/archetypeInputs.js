@@ -55,6 +55,8 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
   {
     id: 'internal-process-automation',
+    // Top 3-5 inputs shown prominently; remaining are collapsible "advanced"
+    primaryKeys: ['processVolume', 'handlingTimeMin', 'errorRate', 'pctAutomatable'],
     inputs: [
       numInput('processVolume', 'Process volume (transactions/month)', {
         default: 5000, max: 1000000, note: 'Monthly volume of transactions processed',
@@ -105,6 +107,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
   {
     id: 'customer-facing-ai',
+    primaryKeys: ['ticketsPerMonth', 'resolutionTimeMin', 'churnRate', 'revenuePerUser', 'deflectionTarget'],
     inputs: [
       numInput('ticketsPerMonth', 'Support tickets/month', {
         default: 8000, max: 5000000, note: 'Total inbound support volume',
@@ -156,6 +159,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
   {
     id: 'data-analytics-automation',
+    primaryKeys: ['reportsPerMonth', 'hoursPerReport', 'dataSources', 'manualDataPrepPct'],
     inputs: [
       numInput('reportsPerMonth', 'Reports generated/month', {
         default: 40, max: 10000, note: 'Number of reports produced monthly',
@@ -206,6 +210,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
   {
     id: 'revenue-growth-ai',
+    primaryKeys: ['pipelineVolume', 'closeRate', 'avgDealSize', 'leadQualRate', 'closeRateImprovementTarget'],
     inputs: [
       numInput('pipelineVolume', 'Monthly pipeline volume ($)', {
         default: 2000000, max: 1000000000, format: '$#,##0', note: 'Total monthly pipeline value',
@@ -258,6 +263,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
   {
     id: 'risk-compliance-legal-ai',
+    primaryKeys: ['reviewsPerMonth', 'hoursPerReview', 'findingsPerYear', 'fineExposure', 'falsePositiveRate'],
     inputs: [
       numInput('reviewsPerMonth', 'Reviews/audits per month', {
         default: 200, max: 100000, note: 'Monthly compliance review volume',
@@ -315,6 +321,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
   // =========================================================================
   {
     id: 'knowledge-management-ai',
+    primaryKeys: ['searchQueriesPerDay', 'timeToFindMin', 'searchSuccessRate', 'duplicateWorkRate'],
     inputs: [
       numInput('articleCount', 'Knowledge articles', {
         default: 2000, max: 10000000, format: '#,##0', note: 'Total articles/docs in knowledge base',
