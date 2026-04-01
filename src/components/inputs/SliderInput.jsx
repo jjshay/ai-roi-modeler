@@ -43,6 +43,11 @@ export default function SliderInput({
           step={step}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
+          aria-label={label}
+          aria-valuemin={min}
+          aria-valuemax={max}
+          aria-valuenow={value}
+          aria-valuetext={`${value}${suffix}`}
           className="slider-gold w-full cursor-pointer appearance-none bg-transparent focus:outline-none"
           style={{
             '--slider-pct': `${pct}%`,

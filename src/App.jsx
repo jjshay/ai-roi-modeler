@@ -217,9 +217,26 @@ async function saveModelToAPI(formData) {
 
 export default function App() {
   const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results
-  const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
+  const [formData, setFormData] = useState(() => {
+    // Restore draft from localStorage if available
+    try {
+      const draft = localStorage.getItem('roi_draft');
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed && parsed.industry) return { ...DEFAULT_FORM_DATA, ...parsed };
+      }
+    } catch { /* ignore corrupt data */ }
+    return DEFAULT_FORM_DATA;
+  });
   const [modelId, setModelId] = useState(null);
   const initialLoadDone = useRef(false);
+
+  // Auto-save draft to localStorage on form changes
+  useEffect(() => {
+    if (formData && formData !== DEFAULT_FORM_DATA && formData.industry) {
+      try { localStorage.setItem('roi_draft', JSON.stringify(formData)); } catch { /* quota exceeded */ }
+    }
+  }, [formData]);
 
   // Restore from share token (/share/:token) or URL hash on initial load
   useEffect(() => {
@@ -250,6 +267,7 @@ export default function App() {
     }
   }, []);
 
+  const hasDraft = formData && formData.industry && formData !== DEFAULT_FORM_DATA;
   const handleStart = useCallback(() => setScreen('wizard'), []);
   const handleWizardComplete = useCallback(() => setScreen('analyzing'), []);
   const handleAnalysisComplete = useCallback(() => setScreen('results'), []);
@@ -286,10 +304,11 @@ export default function App() {
     setFormData(DEFAULT_FORM_DATA);
     setModelId(null);
     setScreen('landing');
+    try { localStorage.removeItem('roi_draft'); } catch { /* ignore */ }
   }, []);
 
   if (screen === 'landing') {
-    return <LandingPage onStart={handleStart} />;
+    return <LandingPage onStart={handleStart} hasDraft={hasDraft} />;
   }
 
   if (screen === 'wizard') {

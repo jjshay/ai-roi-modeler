@@ -16,10 +16,14 @@ const STEP_COMPONENTS = [
 ];
 
 const STEP_LABELS = [
-  'Context & Readiness',
+  'Company & Readiness',
   'Project & Costs',
   'AI Investment',
 ];
+
+// Substep counts per step for accurate progress display
+const SUBSTEP_COUNTS = [6, 7, 4]; // Step1: 6, Step3: 7, Step5: 4
+const TOTAL_SUBSTEPS = SUBSTEP_COUNTS.reduce((a, b) => a + b, 0);
 
 const REQUIRED_FIELDS = {
   1: ['industry', 'companySize', 'teamLocation', 'changeReadiness', 'dataReadiness', 'execSponsor'],
@@ -157,32 +161,29 @@ export default function StepWizard({ formData, setFormData, onComplete }) {
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col bg-white pt-6">
       {/* Header with back button and progress */}
       <div className="flex items-center gap-2">
-        {currentStep > 1 ? (
-          <button
-            type="button"
-            onClick={handleBack}
-            className="flex min-h-[44px] items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-navy transition-colors hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
-            aria-label="Go to previous step"
+        <button
+          type="button"
+          onClick={handleBack}
+          disabled={currentStep <= 1}
+          className="flex min-h-[44px] items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-navy transition-colors hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          aria-label="Go to previous step"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            Back
-          </button>
-        ) : (
-          <div className="w-[72px]" />
-        )}
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+          Back
+        </button>
         <div className="flex-1">
           <ProgressBar
             currentStep={currentStep}

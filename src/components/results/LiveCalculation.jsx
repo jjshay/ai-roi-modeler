@@ -410,11 +410,14 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
   // Monte Carlo simulation (async dynamic import to avoid blocking initial render)
   const [mcResults, setMcResults] = useState(null);
+  const [mcLoading, setMcLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
+    setMcLoading(true);
     import('../../logic/monteCarlo').then(({ runMonteCarlo }) => {
       if (!cancelled) {
         setMcResults(runMonteCarlo(effectiveFormData, 500));
+        setMcLoading(false);
       }
     });
     return () => { cancelled = true; };
@@ -989,7 +992,32 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
 
         {/* ============================================ */}
-        {/* ZONE B — Detail Sections (below the fold)   */}
+        {/* ZONE B — Decision Framework (C-suite first) */}
+        {/* ============================================ */}
+
+        {/* V6: Board Actions — Governance-ready decision framework */}
+        {effectiveShow('boardActions') && recommendation && (
+          <CollapsibleSection title="Board Decision Package" subtitle="Approval motion, success metrics, escalation triggers, and exit costs" defaultOpen={effectiveAutoExpand.includes('boardActions')}>
+            <BoardActions results={results} formData={formData} recommendation={recommendation} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Quarterly Cash Flow — CFO budgeting view */}
+        {effectiveShow('quarterlyCashFlow') && (
+          <CollapsibleSection title="Quarterly Cash Flow" subtitle="Quarter-by-quarter cash position for budget planning" defaultOpen={effectiveAutoExpand.includes('quarterlyCashFlow')}>
+            <QuarterlyCashFlow results={results} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Risk Register — Probability x Impact matrix */}
+        {effectiveShow('riskRegister') && (
+          <CollapsibleSection title="Risk Register" subtitle="Probability, dollar impact, mitigations, and owners for each risk" defaultOpen={effectiveAutoExpand.includes('riskRegister')}>
+            <RiskRegister results={results} formData={formData} />
+          </CollapsibleSection>
+        )}
+
+        {/* ============================================ */}
+        {/* ZONE C — Financial Detail                    */}
         {/* ============================================ */}
 
         {/* Financial Detail (old 3-card grid, now collapsible) */}
@@ -1219,6 +1247,14 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
 
         {/* Monte Carlo Analysis */}
+        {effectiveShow('monteCarloAnalysis') && mcLoading && (
+          <CollapsibleSection title="Monte Carlo Analysis" subtitle="Running 500 simulations...">
+            <div className="flex items-center justify-center py-8 gap-3">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-gold border-t-transparent" />
+              <span className="text-sm text-gray-500">Running probabilistic simulation...</span>
+            </div>
+          </CollapsibleSection>
+        )}
         {effectiveShow('monteCarloAnalysis') && mcResults && (
           <CollapsibleSection title="Monte Carlo Analysis" subtitle={`Probabilistic analysis based on ${mcResults.sampleSize} simulated scenarios`}>
             {/* Hero: Probability of Positive NPV */}
@@ -1608,27 +1644,6 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 );
               })}
             </div>
-          </CollapsibleSection>
-        )}
-
-        {/* V6: Quarterly Cash Flow — CFO budgeting view */}
-        {effectiveShow('quarterlyCashFlow') && (
-          <CollapsibleSection title="Quarterly Cash Flow" subtitle="Quarter-by-quarter cash position for budget planning" defaultOpen={effectiveAutoExpand.includes('quarterlyCashFlow')}>
-            <QuarterlyCashFlow results={results} />
-          </CollapsibleSection>
-        )}
-
-        {/* V6: Risk Register — Probability x Impact matrix */}
-        {effectiveShow('riskRegister') && (
-          <CollapsibleSection title="Risk Register" subtitle="Probability, dollar impact, mitigations, and owners for each risk" defaultOpen={effectiveAutoExpand.includes('riskRegister')}>
-            <RiskRegister results={results} formData={formData} />
-          </CollapsibleSection>
-        )}
-
-        {/* V6: Board Actions — Governance-ready decision framework */}
-        {effectiveShow('boardActions') && recommendation && (
-          <CollapsibleSection title="Board Decision Package" subtitle="Approval motion, success metrics, escalation triggers, and exit costs" defaultOpen={effectiveAutoExpand.includes('boardActions')}>
-            <BoardActions results={results} formData={formData} recommendation={recommendation} />
           </CollapsibleSection>
         )}
 

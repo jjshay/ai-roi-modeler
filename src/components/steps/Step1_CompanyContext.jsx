@@ -68,7 +68,7 @@ export default function Step1_CompanyContext({ formData, updateField }) {
       if (nextSubStep <= 5) {
         advanceTimer.current = setTimeout(() => {
           setSubStep(nextSubStep);
-        }, 300);
+        }, 600);
       }
     },
     [],

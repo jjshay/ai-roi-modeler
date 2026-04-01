@@ -23,21 +23,12 @@ export default function ProgressBar({ currentStep = 1, totalSteps = 3, stepLabel
                     : 'text-gray-400'
                 }`}
               >
-                {label}
+                {isDone ? '\u2713 ' : ''}{label}
               </span>
             );
           })}
         </div>
       )}
-
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-navy">
-          Step {currentStep} of {totalSteps}
-        </span>
-        <span className="hidden text-sm font-medium text-navy/60 sm:inline">
-          {Math.round(progress)}%
-        </span>
-      </div>
 
       <div className="h-2 w-full overflow-hidden rounded-full bg-navy-dark/20">
         <motion.div

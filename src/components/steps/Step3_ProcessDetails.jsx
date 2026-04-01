@@ -42,7 +42,7 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
       if (nextSubStep <= 6) {
         advanceTimer.current = setTimeout(() => {
           setSubStep(nextSubStep);
-        }, 300);
+        }, 600);
       }
     },
     [],
