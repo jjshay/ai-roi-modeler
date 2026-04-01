@@ -111,7 +111,10 @@ describe('Excel Model: formula reference audit', () => {
   let source;
   beforeAll(async () => {
     const { readFileSync } = await import('fs');
-    source = readFileSync('/Users/johnshay/ai-roi-modeler/src/excel/generateExcelModel.js', 'utf-8');
+    const { fileURLToPath } = await import('url');
+    const { dirname, resolve } = await import('path');
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    source = readFileSync(resolve(__dirname, '..', 'generateExcelModel.js'), 'utf-8');
   });
 
   it('no references to old 8-location salary range (A45:B52 or $A$45:$A$52)', () => {
