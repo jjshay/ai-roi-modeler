@@ -5,6 +5,9 @@ import { getRecommendation } from '../../logic/recommendations';
 import { AI_MATURITY_PREMIUM } from '../../logic/benchmarks';
 import { formatCurrency, formatPercent, formatCompact } from '../../utils/formatters';
 import { getOutputTier, tierShows, AUTO_EXPAND } from '../../utils/outputTier';
+import QuarterlyCashFlow from './QuarterlyCashFlow';
+import RiskRegister from './RiskRegister';
+import BoardActions from './BoardActions';
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
   return (
@@ -1605,6 +1608,27 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 );
               })}
             </div>
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Quarterly Cash Flow — CFO budgeting view */}
+        {effectiveShow('quarterlyCashFlow') && (
+          <CollapsibleSection title="Quarterly Cash Flow" subtitle="Quarter-by-quarter cash position for budget planning" defaultOpen={effectiveAutoExpand.includes('quarterlyCashFlow')}>
+            <QuarterlyCashFlow results={results} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Risk Register — Probability x Impact matrix */}
+        {effectiveShow('riskRegister') && (
+          <CollapsibleSection title="Risk Register" subtitle="Probability, dollar impact, mitigations, and owners for each risk" defaultOpen={effectiveAutoExpand.includes('riskRegister')}>
+            <RiskRegister results={results} formData={formData} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Board Actions — Governance-ready decision framework */}
+        {effectiveShow('boardActions') && recommendation && (
+          <CollapsibleSection title="Board Decision Package" subtitle="Approval motion, success metrics, escalation triggers, and exit costs" defaultOpen={effectiveAutoExpand.includes('boardActions')}>
+            <BoardActions results={results} formData={formData} recommendation={recommendation} />
           </CollapsibleSection>
         )}
 

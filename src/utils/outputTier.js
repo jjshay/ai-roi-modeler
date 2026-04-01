@@ -54,6 +54,10 @@ export const TIER_SECTIONS = {
     workforceAlternatives: false,
     breakEvenUnits:       false,
     consultingAssumptions: false,
+    // V6: C-suite decision tools
+    quarterlyCashFlow:    true,
+    riskRegister:         true,
+    boardActions:         true,
   },
   financial: {
     heroVerdict:          true,
@@ -77,6 +81,10 @@ export const TIER_SECTIONS = {
     workforceAlternatives: true,
     breakEvenUnits:       false,
     consultingAssumptions: false,
+    // V6: C-suite decision tools
+    quarterlyCashFlow:    true,
+    riskRegister:         true,
+    boardActions:         true,
   },
   detailed: {
     heroVerdict:          true,
@@ -100,6 +108,10 @@ export const TIER_SECTIONS = {
     workforceAlternatives: true,
     breakEvenUnits:       true,
     consultingAssumptions: true,
+    // V6: C-suite decision tools
+    quarterlyCashFlow:    true,
+    riskRegister:         true,
+    boardActions:         true,
   },
 };
 
