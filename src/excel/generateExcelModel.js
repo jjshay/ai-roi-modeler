@@ -2030,89 +2030,106 @@ export async function generateExcelModel(formData, mcResults, results) {
   printSetup(AU);
 
   // ===================================================================
-  // TAB: ASSUMPTION DEFINITIONS — Archetype cases with key drivers
+  // TAB: ASSUMPTION DEFINITIONS — CEO-friendly glossary
+  // Every term, what it means in plain English, an example, and where
+  // to find it in the model.
   // ===================================================================
-  cols(DF, [30, 45, 55, 40]);
-  hdr(DF, 1, 'ASSUMPTION DEFINITIONS BY USE CASE', 4);
+  cols(DF, [28, 50, 45, 25]);
+  hdr(DF, 1, 'GLOSSARY & DEFINITIONS', 4);
 
-  // Column headers
   const defHdrRow = DF.getRow(3);
-  ['Use Case', 'Key Drivers', 'Definition', 'Why It Matters'].forEach((h, ci) => {
+  ['Term', 'What It Means (Plain English)', 'Example', 'Where in Model'].forEach((h, ci) => {
     const cell = defHdrRow.getCell(ci + 1);
     cell.value = h;
     cell.font = headerFont;
     cell.fill = headerFill;
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
-  defHdrRow.height = 22;
+  defHdrRow.height = 24;
 
-  const ARCHETYPE_DEFINITIONS = [
-    {
-      label: 'Internal Process Automation',
-      drivers: 'Process volume, handling time, error rate, automation %',
-      definition: 'Automate repetitive internal workflows, document handling, and back-office operations using AI to reduce manual effort and errors.',
-      importance: 'Typically the fastest ROI path — high volume processes with measurable time savings and error reduction compound quickly.',
-    },
-    {
-      label: 'Customer-Facing AI',
-      drivers: 'Ticket volume, resolution time, CSAT, churn rate',
-      definition: 'Deploy AI-powered customer interactions including chatbots, intelligent routing, and personalized support experiences.',
-      importance: 'Directly impacts revenue retention and customer satisfaction — a 1-point CSAT improvement can increase retention by 5-10%.',
-    },
-    {
-      label: 'Data, Analytics & FP&A',
-      drivers: 'Reports/month, analyst hours, data sources, close cycle, reconciliation volume',
-      definition: 'Automate reporting, forecasting, financial close, reconciliation, and data-driven decision making to reduce analyst burden and improve insight speed.',
-      importance: 'Frees expensive analyst and finance team time for strategic work. Days-to-close reduction and faster forecasting compound across the organization.',
-    },
-    {
-      label: 'Revenue & Growth AI',
-      drivers: 'Pipeline value, conversion rate, deal cycle, lead volume',
-      definition: 'Drive revenue through AI-enhanced sales intelligence, marketing optimization, and market opportunity identification.',
-      importance: 'Revenue-eligible archetype — models both cost savings and top-line revenue impact from improved conversion.',
-    },
-    {
-      label: 'Risk, Compliance & Legal AI',
-      drivers: 'Audit volume, compliance checks, violation cost, contracts/month, review hours',
-      definition: 'Reduce compliance risk, automate contract review, improve audit quality, and streamline regulatory and legal processes with AI-driven monitoring.',
-      importance: 'Penalty avoidance, audit efficiency, and contract acceleration — a single compliance failure can cost 10-100x the annual AI investment.',
-    },
-    {
-      label: 'Knowledge Management AI',
-      drivers: 'Search queries/day, onboarding time, document count, resolution rate',
-      definition: 'Capture institutional knowledge, power enterprise search, and automate documentation with AI-driven knowledge systems.',
-      importance: 'Reduces knowledge loss from turnover and cuts onboarding time — critical for scaling organizations.',
-    },
+  const GLOSSARY = [
+    // --- Financial Metrics ---
+    { section: 'FINANCIAL METRICS' },
+    { term: 'NPV (Net Present Value)', desc: 'The total value of this investment in today\'s dollars, after accounting for the time value of money. A positive NPV means the project creates more value than it costs.', example: 'If NPV = $1.1M, the project generates $1.1M more than you\'d earn by putting the same money in the bank.', ref: 'Summary → B4' },
+    { term: 'IRR (Internal Rate of Return)', desc: 'The annualized percentage return this project generates. Compare it to your company\'s cost of capital — if IRR > cost of capital, the project creates value.', example: 'An IRR of 28% means each dollar invested grows at 28%/year over 5 years.', ref: 'Summary → B5' },
+    { term: 'ROIC (Return on Invested Capital)', desc: 'Total net profit divided by total capital invested. Shows how efficiently the project converts dollars invested into dollars returned.', example: 'ROIC of 72% means for every $1 invested, you get $1.72 back over 5 years.', ref: 'Summary → B6' },
+    { term: 'Payback Period', desc: 'How many months until cumulative savings exceed cumulative costs. After this point, the project is "in the money."', example: '39 months means the investment pays for itself in ~3.3 years.', ref: 'Summary → B7' },
+    { term: 'DCF (Discounted Cash Flow)', desc: 'The method used to calculate NPV. Future cash flows are "discounted" to today\'s dollars because $1 today is worth more than $1 in 5 years.', example: '$100K in Year 3 at a 10% discount rate is worth $75K today.', ref: 'P&L & Cash Flow tab' },
+    { term: 'Discount Rate', desc: 'The annual rate used to convert future dollars to today\'s value. Higher = more conservative (future savings are worth less). Based on company size and risk.', example: 'Mid-market companies use 10%; startups use 15%.', ref: 'Summary → B27' },
+    // --- Investment Terms ---
+    { section: 'INVESTMENT & COSTS' },
+    { term: 'Upfront Investment', desc: 'The one-time cost to build and deploy the AI solution. Includes engineering, project management, legal review, security audit, and contingency.', example: '$1.7M for a 25-person team automation project.', ref: 'Summary → B11' },
+    { term: 'Ongoing Annual Cost', desc: 'Annual recurring costs after launch — API fees, hosting, model retraining, compliance audits, cyber insurance, tech debt.', example: '$250K/year for platform licenses + monitoring + maintenance.', ref: 'Summary → B14' },
+    { term: 'Total Capital Deployed', desc: 'Upfront investment + separation costs. The total check the company writes before seeing returns.', example: 'Upfront $1.7M + separation $200K = $1.9M total.', ref: 'Summary → B13' },
+    { term: 'Hidden Costs', desc: 'Costs that most vendors don\'t include: change management, cultural resistance, data cleanup, productivity dip during transition, integration testing.', example: 'Change management alone is typically 12-15% of implementation cost.', ref: 'Key Formulas → row 60+' },
+    { term: 'Separation Cost', desc: 'Cost of transitioning displaced employees — severance, benefits continuation, outplacement, retraining. Phased over Years 2-5, not immediate.', example: '1.3x annual salary per displaced employee, spread over 4 years.', ref: 'Key Formulas → B67' },
+    // --- Savings & Value ---
+    { section: 'SAVINGS & VALUE CREATION' },
+    { term: 'Gross Annual Savings', desc: 'Total annual savings before subtracting ongoing AI costs. Includes labor efficiency, headcount displacement, error reduction, and tool replacement.', example: 'A 25-person team with 47% automation potential saves ~$2.1M/year gross.', ref: 'P&L & Cash Flow → row 11' },
+    { term: 'Net Cash Flow', desc: 'Gross savings minus ongoing costs minus separation costs. The actual cash the company keeps each year.', example: 'Year 3: $500K gross savings - $150K ongoing = $350K net.', ref: 'P&L & Cash Flow → row 24' },
+    { term: 'Automation Potential', desc: 'The percentage of the current process that AI can realistically automate, based on industry benchmarks. Capped at 85% (humans always needed for edge cases).', example: '47% means AI handles roughly half the work; people handle the rest.', ref: 'Key Formulas → B4' },
+    { term: 'Risk Multiplier', desc: 'A blended factor that reduces projected savings to account for organizational readiness and industry success rates. Lower readiness = bigger discount.', example: 'A risk multiplier of 0.65 means projected savings are reduced by 35%.', ref: 'Key Formulas → B9' },
+    { term: 'Adoption Rate', desc: 'The percentage of the team that actively uses the AI tool. Driven by change readiness, training quality, and executive support.', example: 'Change readiness of 3/5 → ~70% adoption rate.', ref: 'Key Formulas → B5' },
+    // --- Scenario Analysis ---
+    { section: 'SCENARIOS & RISK' },
+    { term: 'Conservative Scenario', desc: 'Worst-case assumptions: 25% lower automation, no error reduction, longer timeline. If NPV is positive here, the investment is very safe.', example: 'Conservative NPV of $168K = still positive even in worst case.', ref: 'Sensitivity → B14' },
+    { term: 'Base Case', desc: 'Most likely outcome using central estimates from industry benchmarks. This is the "expected" result.', example: 'Base NPV of $1.1M = our best estimate of the return.', ref: 'Sensitivity → C14' },
+    { term: 'Optimistic Scenario', desc: 'Best-case assumptions: 25% higher automation, full error reduction, faster timeline. The upside potential.', example: 'Optimistic NPV of $2.1M = what\'s possible if everything goes well.', ref: 'Sensitivity → D14' },
+    { term: 'Expected Value', desc: 'Probability-weighted average: 25% conservative + 50% base + 25% optimistic. A single "blended" number that accounts for uncertainty.', example: 'Expected NPV = 0.25 × $168K + 0.50 × $1.1M + 0.25 × $2.1M.', ref: 'Summary → B22' },
+    { term: 'Monte Carlo Simulation', desc: '500 random simulations that vary all inputs simultaneously. Shows the range of possible outcomes and the probability of hitting your target.', example: '"85% probability of positive NPV" means 425 of 500 simulations were profitable.', ref: 'Web app → Monte Carlo section' },
+    { term: 'Sensitivity Analysis', desc: 'Shows which inputs have the biggest impact on NPV. Change one variable at a time and measure the effect. The "tornado chart."', example: 'Team size has a $400K NPV swing — it\'s the biggest lever.', ref: 'Sensitivity tab → Tornado' },
+    // --- Organizational ---
+    { section: 'ORGANIZATIONAL INPUTS' },
+    { term: 'Change Readiness (1-5)', desc: 'How open is your team to new tools? 1 = highly resistant, 5 = eagerly adopting. This is the #1 predictor of AI project success.', example: '3 = neutral; team will adopt with proper support and training.', ref: 'Inputs → B18' },
+    { term: 'Data Readiness (1-5)', desc: 'How clean and accessible is your data? 1 = messy/siloed, 5 = governed/API-ready. Poor data adds 25-40% to timeline and costs.', example: '2 = significant cleanup needed before AI can work effectively.', ref: 'Inputs → B19' },
+    { term: 'Executive Sponsor', desc: 'Does a C-level or VP actively champion this project? Projects without sponsors fail 2x more often (Gartner 2024).', example: 'Yes = 15% higher success rate built into the model.', ref: 'Inputs → B20' },
+    { term: 'Team Size', desc: 'Number of people currently working on this process. The #1 driver of absolute ROI — larger teams = bigger savings.', example: '25 people at $130K avg = $3.25M annual labor cost to optimize.', ref: 'Inputs → B11' },
+    // --- Use Cases ---
+    { section: 'AI PROJECT ARCHETYPES' },
+    { term: 'Internal Process Automation', desc: 'Back-office workflow automation (AP, HR, document processing). Fastest ROI path with measurable time/error savings.', example: 'JPMorgan COiN: loan document processing from 360K hours to seconds.', ref: 'Archetype Detail tab' },
+    { term: 'Customer-Facing AI', desc: 'AI chatbots, support automation, personalized experiences. Revenue-eligible via churn reduction.', example: 'Klarna AI handles 2/3 of customer chats in 2 min vs 11 min.', ref: 'Archetype Detail tab' },
+    { term: 'Data, Analytics & FP&A', desc: 'Automated reporting, forecasting, financial close. Frees expensive analyst time for strategic work.', example: 'Siemens AI: financial close from 10 days to 3 days.', ref: 'Archetype Detail tab' },
+    { term: 'Revenue & Growth AI', desc: 'AI-enhanced sales, marketing, lead scoring. Models both cost savings and revenue uplift.', example: 'Salesforce Einstein: 30% increase in lead conversion rates.', ref: 'Archetype Detail tab' },
+    { term: 'Risk, Compliance & Legal AI', desc: 'Compliance monitoring, contract review, audit automation. ROI includes penalty avoidance.', example: 'HSBC AI monitoring: 20% reduction in false positive alerts.', ref: 'Archetype Detail tab' },
+    { term: 'Knowledge Management AI', desc: 'Enterprise search, documentation, onboarding acceleration. Reduces knowledge loss from turnover.', example: 'Novo Nordisk: 40% reduction in new hire onboarding time.', ref: 'Archetype Detail tab' },
   ];
 
-  ARCHETYPE_DEFINITIONS.forEach((arch, i) => {
-    const r = DF.getRow(4 + i);
-    r.getCell(1).value = arch.label;
+  let dfRow = 4;
+  GLOSSARY.forEach((entry, i) => {
+    if (entry.section) {
+      sub(DF, dfRow, entry.section, 4);
+      dfRow++;
+      return;
+    }
+    const r = DF.getRow(dfRow);
+    r.getCell(1).value = entry.term;
     r.getCell(1).font = fontBold;
-    r.getCell(2).value = arch.drivers;
+    r.getCell(2).value = entry.desc;
     r.getCell(2).font = font10;
-    r.getCell(3).value = arch.definition;
-    r.getCell(3).font = font10;
-    r.getCell(4).value = arch.importance;
-    r.getCell(4).font = font10;
+    r.getCell(3).value = entry.example;
+    r.getCell(3).font = { ...font10, italic: true, color: { argb: 'FF555555' } };
+    r.getCell(4).value = entry.ref;
+    r.getCell(4).font = { ...font10, color: { argb: 'FF0000FF' } };
     [1, 2, 3, 4].forEach(c => {
       r.getCell(c).alignment = { vertical: 'top', wrapText: true };
       r.getCell(c).border = thinBorder;
     });
-    r.height = 45;
-    if (i % 2 === 1) {
+    r.height = 50;
+    if (i % 2 === 0) {
       [1, 2, 3, 4].forEach(c => {
-        r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+        r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F9FA' } };
       });
     }
+    dfRow++;
   });
 
-  // Add selected archetype highlight note
-  const noteRow = DF.getRow(4 + ARCHETYPE_DEFINITIONS.length + 1);
-  noteRow.getCell(1).value = 'Selected Use Case:';
-  noteRow.getCell(1).font = fontBold;
-  noteRow.getCell(2).value = { formula: 'Inputs!B10' };
-  noteRow.getCell(2).font = { ...fontBold, color: { argb: 'FF0000FF' } };
+  // Selected archetype note
+  dfRow += 1;
+  const noteRowDf = DF.getRow(dfRow);
+  noteRowDf.getCell(1).value = 'Your Selected Use Case:';
+  noteRowDf.getCell(1).font = fontBold;
+  noteRowDf.getCell(2).value = { formula: 'Inputs!B10' };
+  noteRowDf.getCell(2).font = { ...fontBold, color: { argb: 'FF0000FF' } };
 
   printSetup(DF);
   DF.protect('', { selectLockedCells: true, selectUnlockedCells: true });
