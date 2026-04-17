@@ -140,29 +140,21 @@ export const AUTO_EXPAND = {
  * PDF page inclusion by tier.
  */
 export const PDF_PAGES = {
+  // Executive deck: 5-7 pages, BCG-quality, answer-first
   executive: [
-    'executiveSummary',
-    'tableOfContents',
-    'recommendations',
+    'executiveSummary',          // P1: Verdict + ROIC + NPV + Top 3 Levers
+    'scenarioProjections',       // P2: 3 scenarios + 5-year cash flow table
+    'recommendations',           // P3: Next steps + risk mitigations
   ],
+  // Financial deck: 5-7 pages, CFO-ready
   financial: [
-    'executiveSummary',
-    'tableOfContents',
-    'currentState',
-    'investmentAnalysis',
-    'scenarioProjections',
-    'riskAssessment',
-    'sensitivityAnalysis',
-    'valueBreakdown',
-    'capitalEfficiencyGates',
-    'opportunityCost',
-    'peerComparison',
-    'workforceAlternatives',
-    'recommendations',
-    'inputAssumptions',
-    'appendixMethodology',
-    'appendixBenchmarks',
-    'appendixCostAssumptions',
+    'executiveSummary',          // P1: Verdict + ROIC + key metrics
+    'investmentAnalysis',        // P2: What it costs + hidden costs
+    'scenarioProjections',       // P3: 3 scenarios + cash flows
+    'sensitivityAnalysis',       // P4: What moves the needle
+    'recommendations',           // P5: Next steps
+    'opportunityCost',           // P6: Cost of inaction
+    'inputAssumptions',          // P7: Assumptions + sources
   ],
   detailed: [
     'executiveSummary',

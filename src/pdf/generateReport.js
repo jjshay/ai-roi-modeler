@@ -95,7 +95,7 @@ function addPageFooter(doc, pageNum) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...MID_GRAY);
-  doc.text('Confidential — For Directional Guidance Only — Not Financial or Investment Advice', MARGIN, footerY);
+  doc.text('DISCLAIMER: Initial directional estimate only. Not financial advice. Review with your own financial, legal, and operational experts.', MARGIN, footerY);
   doc.text(`p.${pageNum}`, PAGE_W - MARGIN, footerY, { align: 'right' });
 }
 
@@ -4396,7 +4396,9 @@ export default function generateReport(formData, results, recommendation, mcResu
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'AI-ROI-Analysis.pdf';
+  const archName = (getArchetypeById(formData.projectArchetype)?.label || 'Custom').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.download = `Gauntlet_Gallery_ROI_${archName}_${dateStr}.pdf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

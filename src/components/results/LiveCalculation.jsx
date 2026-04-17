@@ -469,6 +469,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
   const [excelLoading, setExcelLoading] = useState(false);
   const [emailGateAction, setEmailGateAction] = useState(null); // null | 'pdf' | 'excel'
   const [shareCopied, setShareCopied] = useState(false);
+  const [showFullAnalysis, setShowFullAnalysis] = useState(false);
 
   const hasEmail = () => !!localStorage.getItem('roi_lead_email');
 
@@ -958,8 +959,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </div>
         </motion.div>
 
-        {/* "View Full Analysis" toggle for executive tier */}
-        {tier === 'executive' && (
+        {/* "View Full Analysis" toggle */}
+        {(
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1018,6 +1019,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             </p>
           </motion.div>
         )}
+
+        {/* ============================================ */}
+        {/* ZONE B+ — Full Analysis (hidden by default) */}
+        {/* ============================================ */}
+        {showFullAnalysis && (<>
 
         {/* ============================================ */}
         {/* ZONE B — Decision Framework (C-suite first) */}
@@ -1682,6 +1688,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </CollapsibleSection>
         )}
 
+        </>)}
+        {/* End showFullAnalysis conditional */}
+
+        {/* Disclaimer footer */}
+        <p className="text-[9px] text-gray-400 text-center mt-8 px-4 leading-relaxed">
+          DISCLAIMER: This is an initial directional estimate only. All projections are based on industry benchmarks and
+          user-provided inputs. This is not financial advice. Results should be reviewed and validated by your own financial,
+          legal, and operational experts before any investment decision.
+        </p>
       </div>
 
       {/* Email Gate Modal */}
