@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import LandingPage from './components/LandingPage';
 import StepWizard from './components/StepWizard';
 import LiveCalculation from './components/results/LiveCalculation';
+import ShareCard from './components/ShareCard';
+import CostOfWaiting from './components/CostOfWaiting';
 
 const DEFAULT_FORM_DATA = {
   // Step 1: Company Context
@@ -216,7 +218,7 @@ async function saveModelToAPI(formData) {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results
+  const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results | shareView
   const [formData, setFormData] = useState(() => {
     // Restore draft from localStorage if available
     try {
@@ -250,7 +252,7 @@ export default function App() {
       loadSharedModel(shareMatch[1]).then((loaded) => {
         if (loaded && loaded.industry) {
           setFormData({ ...DEFAULT_FORM_DATA, ...loaded });
-          setScreen('results');
+          setScreen('shareView');
         }
       });
       return;
@@ -307,8 +309,30 @@ export default function App() {
     try { localStorage.removeItem('roi_draft'); } catch { /* ignore */ }
   }, []);
 
+  if (screen === 'shareView') {
+    return (
+      <ShareCard
+        formData={formData}
+        onBuildOwn={() => {
+          setFormData(DEFAULT_FORM_DATA);
+          window.history.replaceState(null, '', '/');
+          setScreen('landing');
+        }}
+      />
+    );
+  }
+
+  if (screen === 'costOfWaiting') {
+    return (
+      <CostOfWaiting
+        onStartFull={() => setScreen('wizard')}
+        onBack={() => setScreen('landing')}
+      />
+    );
+  }
+
   if (screen === 'landing') {
-    return <LandingPage onStart={handleStart} hasDraft={hasDraft} />;
+    return <LandingPage onStart={handleStart} hasDraft={hasDraft} onCostOfWaiting={() => setScreen('costOfWaiting')} />;
   }
 
   if (screen === 'wizard') {

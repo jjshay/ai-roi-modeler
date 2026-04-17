@@ -24,7 +24,7 @@ const outputHighlights = [
   'Exportable PDF & Excel',
 ];
 
-export default function LandingPage({ onStart, hasDraft }) {
+export default function LandingPage({ onStart, hasDraft, onCostOfWaiting }) {
   return (
     <div className="min-h-screen bg-navy-dark flex flex-col">
       <div className="flex-1 flex items-center justify-center px-4 py-12">
@@ -110,6 +110,19 @@ export default function LandingPage({ onStart, hasDraft }) {
               ))}
             </div>
           </motion.div>
+
+          {/* Cost of Waiting CTA */}
+          {onCostOfWaiting && (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.1 }}
+              onClick={onCostOfWaiting}
+              className="text-gold/80 text-sm mt-6 hover:text-gold transition-colors cursor-pointer underline underline-offset-4"
+            >
+              What's your cost of waiting? Find out in 10 seconds →
+            </motion.button>
+          )}
 
           {/* Social proof */}
           <motion.div
