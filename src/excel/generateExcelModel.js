@@ -947,94 +947,118 @@ export async function generateExcelModel(formData, mcResults, results) {
   hdr(SU, 1, 'EXECUTIVE SUMMARY', 4);
   colorLegend(SU, 2);
 
-  // --- Key Metrics (rows 3-8) ---
-  sub(SU, 3, 'Key Metrics (Base Case)', 4);
-  val(SU, 4, 1, 'Net Present Value (NPV)');
-  fmlBold(SU, 4, 2, "'P&L & Cash Flow'!B27", DOL);
-  val(SU, 5, 1, 'Internal Rate of Return');
-  fml(SU, 5, 2, "'P&L & Cash Flow'!B28", PCT);
-  val(SU, 6, 1, 'ROIC (net profit / capital)');
-  fml(SU, 6, 2, "'P&L & Cash Flow'!B30", PCT);
-  val(SU, 7, 1, 'Payback Period (months)');
-  fml(SU, 7, 2, "'P&L & Cash Flow'!B29", '0');
-  val(SU, 8, 1, '5-Year Net Savings');
-  fml(SU, 8, 2, "'P&L & Cash Flow'!G24", DOL);
-  note(SU, 8, 3, 'Cumulative undiscounted');
+  // --- VERDICT (McKinsey-style: answer first) ---
+  {
+    const verdict = results?.scenarios?.conservative?.npv > 0 ? 'INVEST' :
+                    results?.scenarios?.base?.npv > 0 ? 'PROCEED WITH CAUTION' :
+                    results?.scenarios?.optimistic?.npv > 0 ? 'PILOT ONLY' : 'DO NOT INVEST';
+    const verdictColor = verdict === 'INVEST' ? 'FF2E7D32' : verdict === 'DO NOT INVEST' ? 'FFE53935' : `FF${GOLD}`;
+    const row3 = SU.getRow(3);
+    row3.height = 32;
+    for (let c = 1; c <= 4; c++) row3.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B2A4A' } };
+    row3.getCell(1).value = 'RECOMMENDATION:';
+    row3.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+    row3.getCell(1).alignment = { vertical: 'middle' };
+    row3.getCell(2).value = verdict;
+    row3.getCell(2).font = { name: 'Calibri', size: 14, bold: true, color: { argb: verdictColor } };
+    row3.getCell(2).alignment = { vertical: 'middle' };
+    SU.mergeCells(3, 2, 3, 4);
+  }
 
-  // --- Investment Required (rows 10-14) ---
-  sub(SU, 10, 'Investment Required', 4);
-  val(SU, 11, 1, 'Upfront Investment');
-  fml(SU, 11, 2, "'Key Formulas'!B64", DOL);
-  val(SU, 12, 1, 'Phased Separation Cost');
-  fml(SU, 12, 2, "'Key Formulas'!B67", DOL);
-  val(SU, 13, 1, 'Total Capital Deployed');
-  fmlBold(SU, 13, 2, "'Key Formulas'!B68", DOL);
-  val(SU, 14, 1, 'Annual Ongoing (Yr 1)');
-  fml(SU, 14, 2, "'Key Formulas'!B51", DOL);
+  // --- TOP 3 LEVERS (the only variables that matter) ---
+  sub(SU, 5, 'TOP 3 VALUE DRIVERS — Focus Here', 4);
+  {
+    const topLevers = results?.executiveSummary?.topLevers || [];
+    for (let i = 0; i < Math.min(3, topLevers.length); i++) {
+      const lever = topLevers[i];
+      val(SU, 6 + i, 1, `${i + 1}. ${lever.label}`);
+      SU.getRow(6 + i).getCell(1).font = { ...fontBold, size: 11 };
+      val(SU, 6 + i, 2, lever.npvSwing, DOL, goldFill);
+      SU.getRow(6 + i).getCell(2).font = goldFont;
+      note(SU, 6 + i, 3, `NPV swings ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(lever.npvLow)} to ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(lever.npvHigh)}`);
+    }
+    note(SU, 9, 1, 'These 3 inputs drive 80%+ of your ROI. Everything else is a tuning knob.');
+    SU.getRow(9).getCell(1).font = { ...font10, italic: true, bold: true, color: { argb: `FF${NAVY}` } };
+  }
 
-  // --- Scenario Comparison (rows 16-22) ---
-  sub(SU, 16, 'Scenario Comparison', 4);
-  tableHeaders(SU, 17, ['', 'Conservative', 'Base Case', 'Optimistic']);
-  val(SU, 18, 1, 'NPV');
-  fml(SU, 18, 2, 'Sensitivity!B14', DOL, warnFill);
-  fml(SU, 18, 3, 'Sensitivity!C14', DOL, calcFill);
-  fml(SU, 18, 4, 'Sensitivity!D14', DOL, resultFill);
-  val(SU, 19, 1, 'ROIC');
-  fml(SU, 19, 2, 'Sensitivity!B16', PCT, warnFill);
-  fml(SU, 19, 3, 'Sensitivity!C16', PCT, calcFill);
-  fml(SU, 19, 4, 'Sensitivity!D16', PCT, resultFill);
-  val(SU, 20, 1, 'Payback (months)');
-  fml(SU, 20, 2, 'Sensitivity!B17', '0', warnFill);
-  fml(SU, 20, 3, 'Sensitivity!C17', '0', calcFill);
-  fml(SU, 20, 4, 'Sensitivity!D17', '0', resultFill);
-  val(SU, 21, 1, '5-Yr Net');
-  fml(SU, 21, 2, 'Sensitivity!B18', DOL, warnFill);
-  fml(SU, 21, 3, 'Sensitivity!C18', DOL, calcFill);
-  fml(SU, 21, 4, 'Sensitivity!D18', DOL, resultFill);
-  val(SU, 22, 1, 'Expected NPV (25/50/25)');
-  fmlBold(SU, 22, 2, 'Sensitivity!B19', DOL);
+  // --- Key Metrics ---
+  sub(SU, 11, 'Key Metrics (Base Case)', 4);
+  val(SU, 12, 1, 'Net Present Value (NPV)');
+  fmlBold(SU, 12, 2, "'P&L & Cash Flow'!B27", DOL);
+  val(SU, 13, 1, 'Internal Rate of Return');
+  fml(SU, 13, 2, "'P&L & Cash Flow'!B28", PCT);
+  val(SU, 14, 1, 'ROIC (net profit / capital)');
+  fml(SU, 14, 2, "'P&L & Cash Flow'!B30", PCT);
+  val(SU, 15, 1, 'Payback Period (months)');
+  fml(SU, 15, 2, "'P&L & Cash Flow'!B29", '0');
+  val(SU, 16, 1, '5-Year Net Savings');
+  fml(SU, 16, 2, "'P&L & Cash Flow'!G24", DOL);
+  note(SU, 16, 3, 'Cumulative undiscounted');
 
-  // --- Key Assumptions (rows 24-30) ---
-  sub(SU, 24, 'Key Assumptions', 4);
-  val(SU, 25, 1, 'Automation Potential');
-  fml(SU, 25, 2, "'Key Formulas'!B4", PCT);
-  val(SU, 26, 1, 'Risk Multiplier');
-  fml(SU, 26, 2, "'Key Formulas'!B9", PCT);
-  val(SU, 27, 1, 'Discount Rate');
-  fml(SU, 27, 2, "'Key Formulas'!B69", PCT);
-  val(SU, 28, 1, 'Displaced FTEs');
-  fml(SU, 28, 2, "'Key Formulas'!B20", '0');
-  val(SU, 29, 1, 'Retained FTEs');
-  fml(SU, 29, 2, "'Key Formulas'!B21", '0');
-  val(SU, 30, 1, 'Confidence Level');
-  fml(SU, 30, 2, 'IF(AND((Inputs!B18+Inputs!B19)/2>=4,Inputs!B20="Yes"),"High",IF((Inputs!B18+Inputs!B19)/2>=3,"Moderate","Conservative"))');
+  // --- Investment Required ---
+  sub(SU, 18, 'Investment Required', 4);
+  val(SU, 19, 1, 'Upfront Investment');
+  fml(SU, 19, 2, "'Key Formulas'!B64", DOL);
+  val(SU, 20, 1, 'Phased Separation Cost');
+  fml(SU, 20, 2, "'Key Formulas'!B67", DOL);
+  val(SU, 21, 1, 'Total Capital Deployed');
+  fmlBold(SU, 21, 2, "'Key Formulas'!B68", DOL);
+  val(SU, 22, 1, 'Annual Ongoing (Yr 1)');
+  fml(SU, 22, 2, "'Key Formulas'!B51", DOL);
 
-  // --- Capital Allocation Comparison (rows 32-37) ---
-  sub(SU, 32, 'Capital Allocation Comparison', 4);
-  val(SU, 33, 1, 'AI Project IRR');
-  fml(SU, 33, 2, "'P&L & Cash Flow'!B28", PCT);
-  val(SU, 34, 1, 'vs Stock Buyback (8%)');
-  fml(SU, 34, 2, "'P&L & Cash Flow'!B28-0.08", PCT);
-  note(SU, 34, 3, 'Typical equity return benchmark');
-  val(SU, 35, 1, 'vs M&A Hurdle (15%)');
-  fml(SU, 35, 2, "'P&L & Cash Flow'!B28-0.15", PCT);
-  note(SU, 35, 3, 'Standard M&A return threshold');
-  val(SU, 36, 1, 'vs Treasury Bond (4.5%)');
-  fml(SU, 36, 2, "'P&L & Cash Flow'!B28-0.045", PCT);
-  note(SU, 36, 3, 'Risk-free rate benchmark');
+  // --- Scenario Comparison ---
+  sub(SU, 24, 'Scenario Comparison', 4);
+  tableHeaders(SU, 25, ['', 'Conservative', 'Base Case', 'Optimistic']);
+  val(SU, 26, 1, 'NPV');
+  fml(SU, 26, 2, 'Sensitivity!B14', DOL, warnFill);
+  fml(SU, 26, 3, 'Sensitivity!C14', DOL, calcFill);
+  fml(SU, 26, 4, 'Sensitivity!D14', DOL, resultFill);
+  val(SU, 27, 1, 'ROIC');
+  fml(SU, 27, 2, 'Sensitivity!B16', PCT, warnFill);
+  fml(SU, 27, 3, 'Sensitivity!C16', PCT, calcFill);
+  fml(SU, 27, 4, 'Sensitivity!D16', PCT, resultFill);
+  val(SU, 28, 1, 'Payback (months)');
+  fml(SU, 28, 2, 'Sensitivity!B17', '0', warnFill);
+  fml(SU, 28, 3, 'Sensitivity!C17', '0', calcFill);
+  fml(SU, 28, 4, 'Sensitivity!D17', '0', resultFill);
+  val(SU, 29, 1, '5-Yr Net');
+  fml(SU, 29, 2, 'Sensitivity!B18', DOL, warnFill);
+  fml(SU, 29, 3, 'Sensitivity!C18', DOL, calcFill);
+  fml(SU, 29, 4, 'Sensitivity!D18', DOL, resultFill);
+  val(SU, 30, 1, 'Expected NPV (25/50/25)');
+  fmlBold(SU, 30, 2, 'Sensitivity!B19', DOL);
 
-  // --- Cost of Inaction (rows 38-41) ---
-  sub(SU, 38, 'Cost of Inaction (Do-Nothing Scenario)', 4);
-  val(SU, 39, 1, '5-Year Do-Nothing Cost');
-  fml(SU, 39, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+Lookups!B86)^0+(1+Lookups!B86)^1+(1+Lookups!B86)^2+(1+Lookups!B86)^3+(1+Lookups!B86)^4)", DOL);
-  note(SU, 39, 3, 'Competitive penalty + compliance risk over 5 years');
-  val(SU, 40, 1, 'Net Advantage of AI Project');
-  fml(SU, 40, 2, "B39+'P&L & Cash Flow'!B27", DOL);
-  note(SU, 40, 3, 'Do-Nothing cost + AI project NPV');
+  // --- Key Assumptions ---
+  sub(SU, 32, 'Key Assumptions', 4);
+  val(SU, 33, 1, 'Automation Potential');
+  fml(SU, 33, 2, "'Key Formulas'!B4", PCT);
+  val(SU, 34, 1, 'Risk Multiplier');
+  fml(SU, 34, 2, "'Key Formulas'!B9", PCT);
+  val(SU, 35, 1, 'Discount Rate');
+  fml(SU, 35, 2, "'Key Formulas'!B69", PCT);
+
+  // --- Capital Allocation ---
+  sub(SU, 37, 'Capital Allocation Comparison', 4);
+  val(SU, 38, 1, 'AI Project IRR');
+  fml(SU, 38, 2, "'P&L & Cash Flow'!B28", PCT);
+  val(SU, 39, 1, 'vs Stock Buyback (8%)');
+  fml(SU, 39, 2, "'P&L & Cash Flow'!B28-0.08", PCT);
+  note(SU, 39, 3, 'Typical equity return benchmark');
+  val(SU, 40, 1, 'vs M&A Hurdle (15%)');
+  fml(SU, 40, 2, "'P&L & Cash Flow'!B28-0.15", PCT);
+  note(SU, 40, 3, 'Standard M&A return threshold');
+
+  // --- Cost of Inaction ---
+  sub(SU, 42, 'Cost of Inaction', 4);
+  val(SU, 43, 1, '5-Year Do-Nothing Cost');
+  fml(SU, 43, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+Lookups!B86)^0+(1+Lookups!B86)^1+(1+Lookups!B86)^2+(1+Lookups!B86)^3+(1+Lookups!B86)^4)", DOL);
+  note(SU, 43, 3, 'See Cost of Inaction tab for full breakdown');
+  val(SU, 44, 1, 'Net Advantage of AI');
+  fml(SU, 44, 2, "B43+'P&L & Cash Flow'!B27", DOL);
 
   // Conditional formatting on NPV
   SU.addConditionalFormatting({
-    ref: 'B4', rules: [
+    ref: 'B12', rules: [
       { type: 'cellIs', operator: 'greaterThan', formulae: ['0'], style: { font: { color: { argb: 'FF66BB6A' }, bold: true } } },
       { type: 'cellIs', operator: 'lessThan', formulae: ['0'], style: { font: { color: { argb: 'FFEF5350' }, bold: true } } },
     ]
@@ -2135,6 +2159,203 @@ export async function generateExcelModel(formData, mcResults, results) {
   DF.protect('', { selectLockedCells: true, selectUnlockedCells: true });
 
   // ===================================================================
+  // TAB: COST OF INACTION — What happens if you do nothing
+  // ===================================================================
+  const CI = wb.addWorksheet('Cost of Inaction', { tabColor: { argb: 'FFE53935' } });
+  cols(CI, [35, 18, 18, 18, 18, 18, 22]);
+  hdr(CI, 1, 'COST OF INACTION — 5-YEAR DO-NOTHING ANALYSIS', 7);
+  colorLegend(CI, 2);
+
+  sub(CI, 3, 'THE PRICE OF WAITING', 7);
+  {
+    const inaction = results?.opportunityCost;
+    const breakdown = results?.doNothingProjection;
+    const yearlyData = inaction?.yearlyBreakdown || [];
+
+    // Year headers
+    tableHeaders(CI, 4, ['Cost Category', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', '5-Year Total']);
+
+    // Data rows with formulas referencing the calculation
+    const categories = [
+      { label: 'Wage Inflation', key: 'wageInflation', desc: 'Your labor costs grow every year — these are dollars you cannot avoid' },
+      { label: 'Legacy System Creep', key: 'legacyCreep', desc: 'Maintenance costs on aging tools increase 5-8% annually' },
+      { label: 'Forgone AI Savings', key: 'forgoneSavings', desc: 'Savings you would have realized if you had started this year' },
+      { label: 'Competitive Loss', key: 'competitiveLoss', desc: 'Revenue erosion as competitors adopt AI and compress your margins' },
+      { label: 'Compliance Risk', key: 'complianceRisk', desc: 'Regulatory costs escalate 4-6% annually (industry benchmark)' },
+    ];
+
+    let ciRow = 5;
+    categories.forEach(cat => {
+      val(CI, ciRow, 1, cat.label);
+      CI.getRow(ciRow).getCell(1).font = fontBold;
+      for (let y = 0; y < 5; y++) {
+        const v = yearlyData[y]?.[cat.key] || 0;
+        val(CI, ciRow, y + 2, v, DOL);
+      }
+      const total = yearlyData.reduce((s, yr) => s + (yr[cat.key] || 0), 0);
+      val(CI, ciRow, 7, total, DOL, warnFill);
+      CI.getRow(ciRow).getCell(7).font = { ...fontBold, color: { argb: 'FFE53935' } };
+      ciRow++;
+    });
+
+    // Total row
+    ciRow++;
+    sub(CI, ciRow, '', 7);
+    val(CI, ciRow, 1, 'TOTAL COST OF INACTION');
+    CI.getRow(ciRow).getCell(1).font = { ...fontBold, size: 11 };
+    for (let y = 0; y < 5; y++) {
+      const v = yearlyData[y]?.total || 0;
+      val(CI, ciRow, y + 2, v, DOL, resultFill);
+      CI.getRow(ciRow).getCell(y + 2).font = outputFont;
+    }
+    const grandTotal = yearlyData.reduce((s, yr) => s + (yr.total || 0), 0);
+    val(CI, ciRow, 7, grandTotal, DOL, goldFill);
+    CI.getRow(ciRow).getCell(7).font = { ...goldFont, size: 12 };
+
+    // Comparison section
+    ciRow += 2;
+    sub(CI, ciRow, 'DECISION COMPARISON', 7);
+    ciRow++;
+    val(CI, ciRow, 1, 'Cost of Doing Nothing (5 years)');
+    val(CI, ciRow, 2, grandTotal, DOL, warnFill);
+    CI.getRow(ciRow).getCell(2).font = { ...fontBold, color: { argb: 'FFE53935' } };
+    ciRow++;
+    val(CI, ciRow, 1, 'AI Investment (NPV)');
+    fml(CI, ciRow, 2, "'P&L & Cash Flow'!B27", DOL, calcFill);
+    ciRow++;
+    val(CI, ciRow, 1, 'NET ADVANTAGE OF AI');
+    CI.getRow(ciRow).getCell(1).font = { ...fontBold, size: 11 };
+    val(CI, ciRow, 2, grandTotal + (results?.scenarios?.base?.npv || 0), DOL, goldFill);
+    CI.getRow(ciRow).getCell(2).font = { ...goldFont, size: 12 };
+    note(CI, ciRow, 3, 'Do-Nothing cost + AI project NPV = total value of acting now');
+
+    // Plain English summary
+    ciRow += 2;
+    sub(CI, ciRow, 'WHAT THIS MEANS', 7);
+    ciRow++;
+    const summaryText = grandTotal > 0
+      ? `Waiting 5 years costs your organization approximately ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(grandTotal)} in wage inflation, competitive erosion, and forgone savings. Every month of delay costs roughly ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Math.round(grandTotal / 60))}.`
+      : 'Cost of inaction data not available — ensure all inputs are provided.';
+    const sumRow = CI.getRow(ciRow);
+    sumRow.getCell(1).value = summaryText;
+    sumRow.getCell(1).font = { ...font10, italic: true };
+    sumRow.getCell(1).alignment = { wrapText: true };
+    CI.mergeCells(ciRow, 1, ciRow, 7);
+    sumRow.height = 40;
+  }
+  printSetup(CI);
+
+  // ===================================================================
+  // TAB: STRANDED COSTS — Vendor exit / switching cost phasing
+  // ===================================================================
+  const SC = wb.addWorksheet('Stranded Costs', { tabColor: { argb: 'FFFF9800' } });
+  cols(SC, [35, 18, 18, 18, 18, 18, 22]);
+  hdr(SC, 1, 'STRANDED & SWITCHING COSTS', 7);
+  colorLegend(SC, 2);
+
+  {
+    const vendorLockIn = results?.vendorLockIn || {};
+    const oneTime = results?.oneTimeCosts || {};
+    const vendorsReplaced = oneTime.vendorsReplaced || 0;
+    const termCost = oneTime.vendorTerminationCost || 0;
+    const switchCost = oneTime.vendorSwitchingCost || 0;
+
+    // Section 1: Current vendor exit costs
+    sub(SC, 3, 'CURRENT VENDOR EXIT COSTS', 7);
+    tableHeaders(SC, 4, ['Cost Item', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
+
+    let scRow = 5;
+    // Early termination fees — phased 60/40 over 2 years
+    val(SC, scRow, 1, 'Early Termination Fees');
+    note(SC, scRow, 1, '');
+    SC.getRow(scRow).getCell(1).font = fontBold;
+    val(SC, scRow, 2, Math.round(termCost * 0.60), DOL, warnFill);
+    val(SC, scRow, 3, Math.round(termCost * 0.40), DOL, warnFill);
+    val(SC, scRow, 4, 0, DOL);
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, termCost, DOL, warnFill);
+    scRow++;
+
+    // Migration costs — spread over 3 years
+    const migrationCost = Math.round(termCost * 0.30); // 30% of term cost for data migration
+    val(SC, scRow, 1, 'Data Migration');
+    SC.getRow(scRow).getCell(1).font = fontBold;
+    val(SC, scRow, 2, Math.round(migrationCost * 0.50), DOL);
+    val(SC, scRow, 3, Math.round(migrationCost * 0.35), DOL);
+    val(SC, scRow, 4, Math.round(migrationCost * 0.15), DOL);
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, migrationCost, DOL);
+    scRow++;
+
+    // Contract minimums
+    const contractMin = Math.round(termCost * 0.20);
+    val(SC, scRow, 1, 'Contract Minimum Commitments');
+    SC.getRow(scRow).getCell(1).font = fontBold;
+    val(SC, scRow, 2, Math.round(contractMin * 0.50), DOL, warnFill);
+    val(SC, scRow, 3, Math.round(contractMin * 0.50), DOL, warnFill);
+    val(SC, scRow, 4, 0, DOL);
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, contractMin, DOL, warnFill);
+    scRow++;
+
+    // Total stranded
+    scRow++;
+    val(SC, scRow, 1, 'TOTAL STRANDED COSTS');
+    SC.getRow(scRow).getCell(1).font = { ...fontBold, size: 11 };
+    const totalStranded = termCost + migrationCost + contractMin;
+    const yr1 = Math.round(termCost * 0.60) + Math.round(migrationCost * 0.50) + Math.round(contractMin * 0.50);
+    const yr2 = Math.round(termCost * 0.40) + Math.round(migrationCost * 0.35) + Math.round(contractMin * 0.50);
+    const yr3 = Math.round(migrationCost * 0.15);
+    val(SC, scRow, 2, yr1, DOL, goldFill); SC.getRow(scRow).getCell(2).font = goldFont;
+    val(SC, scRow, 3, yr2, DOL, goldFill); SC.getRow(scRow).getCell(3).font = goldFont;
+    val(SC, scRow, 4, yr3, DOL, goldFill); SC.getRow(scRow).getCell(4).font = goldFont;
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, totalStranded, DOL, goldFill); SC.getRow(scRow).getCell(7).font = { ...goldFont, size: 12 };
+
+    // Section 2: Future AI vendor lock-in risk
+    scRow += 2;
+    sub(SC, scRow, 'FUTURE AI VENDOR LOCK-IN RISK', 7);
+    scRow++;
+    val(SC, scRow, 1, 'Lock-In Level'); val(SC, scRow, 2, vendorLockIn.level || 'Medium'); SC.getRow(scRow).getCell(2).font = fontBold;
+    scRow++;
+    val(SC, scRow, 1, 'Estimated Switching Cost'); val(SC, scRow, 2, switchCost, DOL, warnFill);
+    note(SC, scRow, 3, `${Math.round((oneTime.vendorSwitchingRate || 0.35) * 100)}% of implementation cost`);
+    scRow++;
+    val(SC, scRow, 1, 'Year 5 Ongoing Cost'); val(SC, scRow, 2, vendorLockIn.year5OngoingCost || 0, DOL);
+    scRow++;
+    val(SC, scRow, 1, 'Total 5-Year Ongoing'); val(SC, scRow, 2, vendorLockIn.totalOngoing5Year || 0, DOL, warnFill);
+    scRow++;
+    val(SC, scRow, 1, 'Cost Escalation Schedule');
+    const sched = vendorLockIn.escalationSchedule || [];
+    for (let y = 0; y < Math.min(sched.length, 5); y++) {
+      val(SC, scRow, y + 2, sched[y], PCT);
+    }
+
+    // Recommendations
+    scRow += 2;
+    sub(SC, scRow, 'MITIGATION RECOMMENDATIONS', 7);
+    scRow++;
+    const mitigations = [
+      'Negotiate multi-year pricing caps with annual escalation limits (< 5%)',
+      'Require contractual exit provisions with maximum 90-day termination notice',
+      'Maintain API abstraction layer for model portability between vendors',
+      'Budget vendor switching reserve = 10% of implementation cost annually',
+      'Conduct annual vendor market review to maintain negotiating leverage',
+    ];
+    mitigations.forEach(m => {
+      val(SC, scRow, 1, m);
+      SC.getRow(scRow).getCell(1).alignment = { wrapText: true };
+      CI.mergeCells?.(scRow, 1, scRow, 7);
+      scRow++;
+    });
+  }
+  printSetup(SC);
+
+  // ===================================================================
   // TABS: PER-ARCHETYPE ASSUMPTION SHEETS
   // One tab per archetype with key drivers, input variables, computed
   // formulas, and real-world benchmarks.
@@ -2355,6 +2576,8 @@ export async function generateExcelModel(formData, mcResults, results) {
     { ws: V5, name: 'V5 Analysis' },
     { ws: AU, name: 'Model Audit' },
     { ws: DF, name: 'Assumption Definitions' },
+    { ws: CI, name: 'Cost of Inaction' },
+    { ws: SC, name: 'Stranded Costs' },
     ...archetypeSheets,
   ];
   const activeTabName = ARCHETYPE_TAB_NAMES[activeArchetypeId];

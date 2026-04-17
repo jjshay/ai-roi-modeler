@@ -202,7 +202,7 @@ const ASSUMPTION_TABS = [
 ];
 
 export const EXCEL_TABS = {
-  executive: ['Summary', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
-  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
-  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Key Formulas', 'Lookups', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  executive: ['Summary', 'P&L & Cash Flow', 'Cost of Inaction', 'Stranded Costs', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'Cost of Inaction', 'Stranded Costs', 'V5 Analysis', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'Cost of Inaction', 'Stranded Costs', 'V5 Analysis', 'Key Formulas', 'Lookups', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
 };
