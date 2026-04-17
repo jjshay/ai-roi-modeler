@@ -222,7 +222,7 @@ export function runCalculations(inputs) {
     ? Math.round(teamSize * automationPotential * adoptionRate)
     : 0; // no headcount reduction when <50% allocation
   const maxDisplaced = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
-  const displacedFTEs = Math.min(rawDisplacedFTEs, maxDisplaced);
+  const displacedFTEs = Math.max(0, Math.min(rawDisplacedFTEs, maxDisplaced));
   const retainedFTEs = teamSize - displacedFTEs;
 
   // =====================================================================
@@ -621,16 +621,20 @@ export function runCalculations(inputs) {
         falseNegativeRiskCost: archetypeFalseNegativeRiskCost,
       },
     },
+    // Totals use individual riskAdjusted values to avoid double-application
     totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings,
-    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings) * riskMultiplier,
-    // Per-employee productivity gain in Year 1 (enhancement phase, before any layoffs)
+    totalRiskAdjusted: headcountSavingsGross
+      + efficiencySavingsGross * riskMultiplier
+      + errorReductionGross * riskMultiplier
+      + toolReplacementGross * riskMultiplier
+      + archetypeRevenueGross * riskMultiplier
+      + archetypeKpiSavings * riskMultiplier,
     perEmployeeGain: teamSize > 0
       ? enhancementRiskAdjusted / teamSize
       : 0,
-    // Enhancement phase: Year 1 savings (efficiency + error + tool, NO headcount)
     enhancementPhaseAnnual: enhancementRiskAdjusted,
-    // Headcount phase: additional annual savings when fully phased out
-    headcountPhaseAnnual: headcountSavingsGross * riskMultiplier,
+    // Headcount phase: no risk multiplier — gated by HR phasing schedule
+    headcountPhaseAnnual: headcountSavingsGross,
     // Ongoing AI cost (so UI can show net)
     ongoingAiCostYear1: baseOngoingCost,
   };
@@ -649,31 +653,39 @@ export function runCalculations(inputs) {
     let cumulativeReduction = 0;
     let cumulativeNet = -upfrontInvestment;
 
+    // Decompose enhancement into labor-indexed (affected by wage growth)
+    // vs non-labor (tool, revenue, KPI — not wage-indexed)
+    const laborEnhancementRA = efficiencySavingsGross * riskMultiplier;
+    const aiDrivenEnhancementRA = (efficiencySavingsGross + errorReductionGross) * riskMultiplier;
+    const nonLaborEnhancementRA = (toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings) * riskMultiplier;
+
     for (let yr = 0; yr < DCF_YEARS; yr++) {
-      // Savings inflate with wage growth (the labor costs being avoided grow annually)
+      // Wage growth applies only to labor-based savings
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
 
-      // Model drift — AI benefit degradation from data/model staleness
-      // Year 0 = no drift; subsequent years degrade unless maintained
+      // Model drift applies only to AI-driven components (efficiency, error)
+      // NOT to headcount (people stay cut), tools (contract cancelled), or revenue
       const driftFactor = Math.pow(1 - modelDriftRate, yr);
 
-      // Enhancement savings (efficiency + error + tool + revenue) — adoption ramp + drift
-      const enhancementSavings = enhancementRiskAdjusted * adoptionRamp[yr] * scenarioMultiplier * wageGrowth * driftFactor;
+      // AI-driven savings: wage-indexed + drift-affected
+      const aiSavings = aiDrivenEnhancementRA * adoptionRamp[yr] * scenarioMultiplier * wageGrowth * driftFactor;
+      // Non-labor savings: no wage growth, no drift (tool/revenue/KPI)
+      const nonLaborSavings = nonLaborEnhancementRA * adoptionRamp[yr] * scenarioMultiplier;
+      const enhancementSavings = aiSavings + nonLaborSavings;
 
-      // Headcount savings — phased reduction (cumulative), also subject to drift
+      // Headcount: gated by HR schedule, wage-indexed, NO drift (cuts are permanent)
+      // NO scenario multiplier — phasing schedule IS the realization constraint
       cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
-      const headcountSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * scenarioMultiplier * wageGrowth * driftFactor;
+      const headcountSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * wageGrowth;
 
-      // Total gross savings this year
       const grossSavings = enhancementSavings + headcountSavings;
 
-      // Separation costs incurred this year (people let go this year)
-      const separationCost = separationByYear[yr];
+      // Separation costs escalated for future-year wage inflation
+      const separationCost = separationByYear[yr] * Math.pow(1 + wageInflationRate, yr);
 
-      // Ongoing AI costs (escalating)
+      // Ongoing AI costs (escalating per schedule)
       const ongoingCost = ongoingCostsByYear[yr];
 
-      // Net cash flow
       const netCashFlow = grossSavings - separationCost - ongoingCost;
       cumulativeNet += netCashFlow;
 
@@ -711,10 +723,12 @@ export function runCalculations(inputs) {
     const hasNegative = cashFlows.some(cf => cf < 0);
     if (!hasPositive || !hasNegative) return NaN;
 
-    // Newton-Raphson with dampening and bounds
+    // Newton-Raphson with dampening and consistent bounds
+    const IRR_FLOOR = -0.95;
+    const IRR_CEILING = 5.0; // 500% max — anything higher is not credible for AI
     let rate = 0.10;
     for (let i = 0; i < maxIterations; i++) {
-      if (!isFinite(rate) || rate <= -0.99 || rate > 100) return NaN;
+      if (!isFinite(rate) || rate <= IRR_FLOOR || rate > IRR_CEILING) return NaN;
 
       let npv = 0;
       let dnpv = 0;
@@ -732,13 +746,12 @@ export function runCalculations(inputs) {
       if (!isFinite(newRate)) return NaN;
       if (Math.abs(newRate - rate) < 0.0001) {
         // Converged — sanity check result
-        if (newRate < -1 || newRate > 10) return NaN; // >1000% is not credible
+        if (newRate < IRR_FLOOR || newRate > IRR_CEILING) return NaN;
         return newRate;
       }
       rate = newRate;
     }
-    // Solver didn't converge or result is absurd
-    if (rate < -1 || rate > 10 || !isFinite(rate)) return NaN;
+    if (rate < IRR_FLOOR || rate > IRR_CEILING || !isFinite(rate)) return NaN;
     return rate;
   }
 
@@ -855,10 +868,12 @@ export function runCalculations(inputs) {
     for (let yr = 0; yr < DCF_YEARS; yr++) {
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
       const driftFactor = Math.pow(1 - modelDriftRate, yr);
+      // Enhancement: drift applies to AI-driven portion only
       const eSavings = modEnhancementRA * adoptionRamp[yr] * wageGrowth * driftFactor;
+      // Headcount: NO drift (cuts are permanent), NO scenario multiplier
       cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
-      const hSavings = modHeadcountRA * cumulativeReduction * wageGrowth * driftFactor;
-      const sepCost = separationByYear[yr];
+      const hSavings = modHeadcountRA * cumulativeReduction * wageGrowth;
+      const sepCost = separationByYear[yr] * Math.pow(1 + wageInflationRate, yr);
       const ongCost = modOngoingByYear[yr];
       const net = eSavings + hSavings - sepCost - ongCost;
       cumulativeNet += net;
