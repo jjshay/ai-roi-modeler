@@ -141,6 +141,22 @@ function dataRow(ws, r, values, fmts) {
 
 function printSetup(ws) {
   ws.pageSetup = { fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  ws.headerFooter = {
+    oddFooter: '&L&8&I&KA0A0A0DISCLAIMER: Initial directional estimate only. Not financial advice. Review with your own financial, legal, and operational experts.&R&8&KA0A0A0Gauntlet Gallery | &D',
+  };
+}
+
+const DISCLAIMER_TEXT = 'DISCLAIMER: This model provides an initial directional estimate only. All projections are based on industry benchmarks and user-provided inputs. This is not financial advice. Results should be reviewed and validated by your own financial, legal, and operational experts before any investment decision. Gauntlet Gallery assumes no liability for decisions made based on this analysis.';
+
+function addDisclaimer(ws, startRow, numCols) {
+  const r = startRow + 2;
+  const row = ws.getRow(r);
+  ws.mergeCells(r, 1, r, numCols);
+  row.getCell(1).value = DISCLAIMER_TEXT;
+  row.getCell(1).font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF999999' } };
+  row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+  row.height = 36;
+  return r;
 }
 
 // --- Data ---
@@ -1063,6 +1079,59 @@ export async function generateExcelModel(formData, mcResults, results) {
       { type: 'cellIs', operator: 'lessThan', formulae: ['0'], style: { font: { color: { argb: 'FFEF5350' }, bold: true } } },
     ]
   });
+
+  // --- Visual Dashboard: Value Breakdown Bars ---
+  sub(SU, 46, 'VALUE BREAKDOWN (Visual)', 4);
+  {
+    const cats = [
+      { label: 'Efficiency Savings', value: results?.valueBreakdown?.efficiency?.gross || 0 },
+      { label: 'Headcount Savings', value: results?.valueBreakdown?.headcount?.gross || 0 },
+      { label: 'Error Reduction', value: results?.valueBreakdown?.errorReduction?.gross || 0 },
+      { label: 'Tool Replacement', value: results?.valueBreakdown?.toolReplacement?.gross || 0 },
+      { label: 'Revenue / KPI Impact', value: (results?.valueBreakdown?.archetypeRevenue?.gross || 0) + (results?.valueBreakdown?.archetypeKpi?.gross || 0) },
+    ];
+    const maxVal = Math.max(...cats.map(c => c.value), 1);
+    cats.forEach((cat, i) => {
+      const row = SU.getRow(47 + i);
+      row.getCell(1).value = cat.label;
+      row.getCell(1).font = font10;
+      row.getCell(2).value = cat.value;
+      row.getCell(2).numFmt = DOL;
+      row.getCell(2).font = fontBold;
+      row.getCell(2).alignment = { horizontal: 'right' };
+      // Text-based bar
+      const barLen = Math.round((cat.value / maxVal) * 30);
+      const bar = '\u2588'.repeat(Math.max(0, barLen)) + '\u2591'.repeat(Math.max(0, 30 - barLen));
+      row.getCell(3).value = bar;
+      row.getCell(3).font = { name: 'Calibri', size: 9, color: { argb: cat.value > 0 ? 'FF2E7D32' : 'FFE53935' } };
+      SU.mergeCells(47 + i, 3, 47 + i, 4);
+    });
+  }
+
+  // --- 5-Year Cash Flow Visual ---
+  sub(SU, 53, '5-YEAR CASH FLOW (Visual)', 4);
+  {
+    const projections = results?.scenarios?.base?.projections || [];
+    const maxCf = Math.max(...projections.map(p => Math.abs(p.netCashFlow)), 1);
+    projections.forEach((p, i) => {
+      const row = SU.getRow(54 + i);
+      row.getCell(1).value = `FY ${p.year}`;
+      row.getCell(1).font = fontBold;
+      row.getCell(2).value = p.netCashFlow;
+      row.getCell(2).numFmt = DOL;
+      row.getCell(2).font = { ...fontBold, color: { argb: p.netCashFlow >= 0 ? 'FF2E7D32' : 'FFE53935' } };
+      row.getCell(2).alignment = { horizontal: 'right' };
+      const barLen = Math.round((Math.abs(p.netCashFlow) / maxCf) * 30);
+      const bar = (p.netCashFlow >= 0 ? '\u2588' : '\u2591').repeat(barLen);
+      row.getCell(3).value = bar;
+      row.getCell(3).font = { name: 'Calibri', size: 9, color: { argb: p.netCashFlow >= 0 ? 'FF2E7D32' : 'FFE53935' } };
+      SU.mergeCells(54 + i, 3, 54 + i, 4);
+    });
+  }
+
+  // Disclaimer at bottom of Summary
+  addDisclaimer(SU, 60, 4);
+
   printSetup(SU);
 
   // ===================================================================
@@ -1182,6 +1251,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   // ROIC note
   note(PL, 40, 1, 'ROIC measures total net profit relative to total capital invested. A positive ROIC means the project returns more than it costs.');
   PL.mergeCells(40, 1, 40, 7);
+  addDisclaimer(PL, 41, 7);
   printSetup(PL);
 
   // ===================================================================
@@ -2604,8 +2674,9 @@ export async function generateExcelModel(formData, mcResults, results) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const label = (formData.industry || 'Custom').replace(/[^a-zA-Z0-9]/g, '_');
-  a.download = `AI_ROI_Model_${label}.xlsx`;
+  const archLabel = (PROJECT_ARCHETYPES.find(ar => ar.id === activeArchetypeId)?.label || 'Custom').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.download = `Gauntlet_Gallery_ROI_${archLabel}_${dateStr}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
