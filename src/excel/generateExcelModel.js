@@ -11,6 +11,7 @@ import { PROJECT_ARCHETYPES } from '../logic/archetypes';
 
 // --- Styles ---
 const NAVY = '1B2A4A';
+const GOLD = 'C9A227';
 const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
 const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const subFont = { bold: true, color: { argb: `FF${NAVY}` }, size: 10, name: 'Calibri' };
@@ -19,8 +20,10 @@ const inputFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6
 const calcFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
 const resultFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const warnFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } };
-const goldFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC9A227' } };
-const goldFont   = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1B2A4A' } };
+const goldFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${GOLD}` } };
+const goldFont   = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${NAVY}` } };
+const brandFont  = { name: 'Calibri', size: 14, bold: true, color: { argb: `FF${GOLD}` } };
+const brandFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const thinBorder = {
   top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
   bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
@@ -42,10 +45,18 @@ function cols(ws, w) { w.forEach((v, i) => { ws.getColumn(i + 1).width = v; }); 
 
 function hdr(ws, r, text, n) {
   const row = ws.getRow(r);
-  for (let c = 1; c <= n; c++) { row.getCell(c).fill = headerFill; row.getCell(c).font = headerFont; }
-  row.getCell(1).value = text;
-  ws.mergeCells(r, 1, r, n);
-  row.height = 22;
+  row.height = 28;
+  for (let c = 1; c <= n; c++) { row.getCell(c).fill = brandFill; }
+  // Left cell: branding in gold
+  row.getCell(1).value = 'GAUNTLET GALLERY';
+  row.getCell(1).font = brandFont;
+  row.getCell(1).alignment = { vertical: 'middle' };
+  // Right cell: tab title in white
+  row.getCell(n).value = text;
+  row.getCell(n).font = { ...headerFont, size: 10 };
+  row.getCell(n).fill = brandFill;
+  row.getCell(n).alignment = { horizontal: 'right', vertical: 'middle' };
+  if (n > 2) ws.mergeCells(r, 1, r, n - 1);
 }
 
 function sub(ws, r, text, n) {
@@ -55,11 +66,21 @@ function sub(ws, r, text, n) {
   ws.mergeCells(r, 1, r, n);
 }
 
+function brand(ws, numCols) {
+  const row = ws.getRow(1);
+  row.height = 28;
+  for (let c = 1; c <= numCols; c++) { row.getCell(c).fill = brandFill; }
+  row.getCell(1).value = 'GAUNTLET GALLERY';
+  row.getCell(1).font = brandFont;
+  row.getCell(1).alignment = { vertical: 'middle' };
+  ws.mergeCells(1, 1, 1, numCols);
+}
+
 function val(ws, r, c, v, fmt, fill) {
   const cell = ws.getRow(r).getCell(c);
   cell.value = v;
   cell.font = fill === inputFill ? inputFont : font10;
-  if (fmt) cell.numFmt = fmt;
+  if (fmt) { cell.numFmt = fmt; cell.alignment = { horizontal: 'right' }; }
   if (fill) cell.fill = fill;
 }
 
@@ -67,7 +88,7 @@ function fml(ws, r, c, formula, fmt, fill) {
   const cell = ws.getRow(r).getCell(c);
   cell.value = { formula };
   cell.font = fill === resultFill ? outputFont10 : greenFont;
-  if (fmt) cell.numFmt = fmt;
+  if (fmt) { cell.numFmt = fmt; cell.alignment = { horizontal: 'right' }; }
   cell.fill = fill || calcFill;
 }
 
@@ -75,7 +96,7 @@ function fmlBold(ws, r, c, formula, fmt, fill) {
   const cell = ws.getRow(r).getCell(c);
   cell.value = { formula };
   cell.font = (fill || resultFill) === resultFill ? outputFont : greenFontBold;
-  if (fmt) cell.numFmt = fmt;
+  if (fmt) { cell.numFmt = fmt; cell.alignment = { horizontal: 'right' }; }
   cell.fill = fill || resultFill;
 }
 
@@ -113,7 +134,8 @@ function dataRow(ws, r, values, fmts) {
     const cell = ws.getRow(r).getCell(i + 1);
     cell.value = v;
     cell.font = { size: 9, name: 'Calibri' };
-    if (fmts && fmts[i]) cell.numFmt = fmts[i];
+    if (fmts && fmts[i]) { cell.numFmt = fmts[i]; cell.alignment = { horizontal: 'right' }; }
+    else if (typeof v === 'number') cell.alignment = { horizontal: 'right' };
   });
 }
 
@@ -142,7 +164,7 @@ const LOCATIONS = [
 // =====================================================================
 export async function generateExcelModel(formData, mcResults, results) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'AI ROI Calculator';
+  wb.creator = 'Gauntlet Gallery — AI ROI Model';
   wb.created = new Date();
 
   // Determine which tabs to show based on role tier
