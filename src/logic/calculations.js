@@ -73,6 +73,8 @@ import {
   // V5: Consulting-grade additions
   TOKEN_PROFILES,
   MODEL_TIERS,
+  CONTRACT_DISCOUNT,
+  OVERAGE_MULTIPLIER,
   PROMPT_CACHING_RATE,
   CACHED_INPUT_DISCOUNT,
   AGENT_COST_PROFILES,
@@ -288,8 +290,11 @@ export function runCalculations(inputs) {
   const modelPricing = MODEL_TIERS[modelTier] || MODEL_TIERS['standard'];
   const avgInputTokens = assumptions.avgInputTokensPerRequest ?? tokenProfile.avgInput;
   const avgOutputTokens = assumptions.avgOutputTokensPerRequest ?? tokenProfile.avgOutput;
-  const inputCostPer1M = assumptions.inputTokenCostPer1M ?? modelPricing.inputPer1M;
-  const outputCostPer1M = assumptions.outputTokenCostPer1M ?? modelPricing.outputPer1M;
+  // Contract commitment affects token pricing (monthly/annual/multi-year)
+  const contractType = assumptions.contractType || 'annual';
+  const contractDiscount = CONTRACT_DISCOUNT[contractType] || CONTRACT_DISCOUNT['annual'];
+  const inputCostPer1M = (assumptions.inputTokenCostPer1M ?? modelPricing.inputPer1M) * contractDiscount;
+  const outputCostPer1M = (assumptions.outputTokenCostPer1M ?? modelPricing.outputPer1M) * contractDiscount;
 
   // Prompt caching — reduces effective input token cost
   const promptCachingRate = assumptions.promptCachingRate ?? PROMPT_CACHING_RATE;

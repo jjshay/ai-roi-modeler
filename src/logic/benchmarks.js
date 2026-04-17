@@ -1200,11 +1200,27 @@ export const TOKEN_PROFILES = {
   'Other': { avgInput: 2000, avgOutput: 1000, note: 'General purpose' },
 };
 
+// Token pricing (blended average across providers, April 2026)
+// Claude: Haiku 4.5 $0.80/$4, Sonnet 4.6 $3/$15, Opus 4.7 $15/$75
+// OpenAI: GPT-4o-mini $0.15/$0.60, GPT-4o $2.50/$10, o1 $15/$60
+// Google Gemini: Flash 2.0 $0.075/$0.30, Pro 2.5 $1.25/$5, Ultra $7/$21
+// xAI Grok: grok-3-mini $0.30/$0.50, grok-3 $3/$15
+// Blended = weighted average across all four providers per tier
 export const MODEL_TIERS = {
-  'economy': { inputPer1M: 0.25, outputPer1M: 1.00, label: 'Economy (Haiku / GPT-4o-mini)' },
-  'standard': { inputPer1M: 3.00, outputPer1M: 15.00, label: 'Standard (Sonnet / GPT-4o)' },
-  'premium': { inputPer1M: 15.00, outputPer1M: 75.00, label: 'Premium (Opus / o1)' },
+  'economy': { inputPer1M: 0.20, outputPer1M: 0.65, label: 'Economy (Haiku / GPT-4o-mini / Flash / Grok-mini)' },
+  'standard': { inputPer1M: 2.45, outputPer1M: 11.25, label: 'Standard (Sonnet / GPT-4o / Gemini Pro / Grok-3)' },
+  'premium': { inputPer1M: 12.35, outputPer1M: 52.00, label: 'Premium (Opus / o1 / Gemini Ultra)' },
 };
+
+// Contract commitment discount (annual vs month-to-month)
+export const CONTRACT_DISCOUNT = {
+  'monthly': 1.00,
+  'annual': 0.80,
+  'multi-year': 0.65,
+};
+
+// Token overage rate — cost multiplier when exceeding committed volume
+export const OVERAGE_MULTIPLIER = 1.50;
 
 // Default prompt caching rate — fraction of requests hitting cache
 // Source: Anthropic prompt caching docs 2025; typical enterprise: 25-40% cache hit rate
