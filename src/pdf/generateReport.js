@@ -171,7 +171,7 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(...GOLD);
-  doc.text('GAUNTLET GALLERY', MARGIN, y);
+  doc.text('GLOBAL GAUNTLET', MARGIN, y);
   y += 10;
   doc.setFontSize(24);
   doc.setTextColor(...NAVY);
@@ -4347,7 +4347,7 @@ export default function generateReport(formData, results, recommendation, mcResu
   });
 
   doc.setProperties({
-    title: 'Gauntlet Gallery — AI Implementation ROI Analysis',
+    title: 'Global Gauntlet — AI Implementation ROI Analysis',
     subject: 'Risk-Adjusted ROI Assessment',
     author: 'Global Gauntlet AI',
     creator: 'AI ROI Modeler',
@@ -4398,7 +4398,7 @@ export default function generateReport(formData, results, recommendation, mcResu
   a.href = url;
   const archName = (getArchetypeById(formData.projectArchetype)?.label || 'Custom').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
   const dateStr = new Date().toISOString().slice(0, 10);
-  a.download = `Gauntlet_Gallery_ROI_${archName}_${dateStr}.pdf`;
+  a.download = `Global_Gauntlet_ROI_${archName}_${dateStr}.pdf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

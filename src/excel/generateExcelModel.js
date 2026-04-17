@@ -48,7 +48,7 @@ function hdr(ws, r, text, n) {
   row.height = 28;
   for (let c = 1; c <= n; c++) { row.getCell(c).fill = brandFill; }
   // Left cell: branding in gold
-  row.getCell(1).value = 'GAUNTLET GALLERY';
+  row.getCell(1).value = 'GLOBAL GAUNTLET';
   row.getCell(1).font = brandFont;
   row.getCell(1).alignment = { vertical: 'middle' };
   // Right cell: tab title in white
@@ -70,7 +70,7 @@ function brand(ws, numCols) {
   const row = ws.getRow(1);
   row.height = 28;
   for (let c = 1; c <= numCols; c++) { row.getCell(c).fill = brandFill; }
-  row.getCell(1).value = 'GAUNTLET GALLERY';
+  row.getCell(1).value = 'GLOBAL GAUNTLET';
   row.getCell(1).font = brandFont;
   row.getCell(1).alignment = { vertical: 'middle' };
   ws.mergeCells(1, 1, 1, numCols);
@@ -142,11 +142,11 @@ function dataRow(ws, r, values, fmts) {
 function printSetup(ws) {
   ws.pageSetup = { fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
   ws.headerFooter = {
-    oddFooter: '&L&8&I&KA0A0A0DISCLAIMER: Initial directional estimate only. Not financial advice. Review with your own financial, legal, and operational experts.&R&8&KA0A0A0Gauntlet Gallery | &D',
+    oddFooter: '&L&8&I&KA0A0A0DISCLAIMER: Initial directional estimate only. Not financial advice. Review with your own financial, legal, and operational experts.&R&8&KA0A0A0Global Gauntlet | &D',
   };
 }
 
-const DISCLAIMER_TEXT = 'DISCLAIMER: This model provides an initial directional estimate only. All projections are based on industry benchmarks and user-provided inputs. This is not financial advice. Results should be reviewed and validated by your own financial, legal, and operational experts before any investment decision. Gauntlet Gallery assumes no liability for decisions made based on this analysis.';
+const DISCLAIMER_TEXT = 'DISCLAIMER: This model provides an initial directional estimate only. All projections are based on industry benchmarks and user-provided inputs. This is not financial advice. Results should be reviewed and validated by your own financial, legal, and operational experts before any investment decision. Global Gauntlet assumes no liability for decisions made based on this analysis.';
 
 function addDisclaimer(ws, startRow, numCols) {
   const r = startRow + 2;
@@ -180,7 +180,7 @@ const LOCATIONS = [
 // =====================================================================
 export async function generateExcelModel(formData, mcResults, results) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Gauntlet Gallery — AI ROI Model';
+  wb.creator = 'Global Gauntlet — AI ROI Model';
   wb.created = new Date();
 
   // Determine which tabs to show based on role tier
@@ -2676,7 +2676,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   a.href = url;
   const archLabel = (PROJECT_ARCHETYPES.find(ar => ar.id === activeArchetypeId)?.label || 'Custom').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
   const dateStr = new Date().toISOString().slice(0, 10);
-  a.download = `Gauntlet_Gallery_ROI_${archLabel}_${dateStr}.xlsx`;
+  a.download = `Global_Gauntlet_ROI_${archLabel}_${dateStr}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

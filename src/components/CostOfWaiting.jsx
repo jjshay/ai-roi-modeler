@@ -43,7 +43,7 @@ export default function CostOfWaiting({ onStartFull, onBack }) {
         className="max-w-md w-full"
       >
         <p className="text-gold text-xs font-bold tracking-widest text-center mb-4 uppercase">
-          Gauntlet Gallery
+          Global Gauntlet
         </p>
         <h1 className="text-white text-2xl md:text-3xl font-bold text-center mb-2">
           What's Your Cost of Waiting?

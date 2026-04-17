@@ -76,7 +76,7 @@ export default function PortfolioCompare({ baseFormData, onBack }) {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-gold text-xs font-bold tracking-widest uppercase">Gauntlet Gallery</p>
+            <p className="text-gold text-xs font-bold tracking-widest uppercase">Global Gauntlet</p>
             <h1 className="text-navy text-2xl font-bold">Portfolio Comparison</h1>
             <p className="text-gray-500 text-sm">Compare up to 5 AI projects side-by-side</p>
           </div>

@@ -114,7 +114,7 @@ function addTitleSlide(pptx) {
   const slide = pptx.addSlide();
   slide.background = { color: C.navy };
 
-  slide.addText('GAUNTLET GALLERY', {
+  slide.addText('GLOBAL GAUNTLET', {
     x: 0.8, y: 0.8, w: 8.4, h: 0.6,
     fontSize: 18, fontFace: 'Arial', bold: true,
     color: C.gold || 'C9A227', align: 'center',

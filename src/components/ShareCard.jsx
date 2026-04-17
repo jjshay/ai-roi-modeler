@@ -23,7 +23,7 @@ export default function ShareCard({ formData, onBuildOwn }) {
       >
         {/* Brand */}
         <p className="text-gold text-xs font-bold tracking-widest text-center mb-6 uppercase">
-          Gauntlet Gallery
+          Global Gauntlet
         </p>
 
         {/* Main card */}
