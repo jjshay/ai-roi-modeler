@@ -35,15 +35,13 @@ export default function LandingPage({ onStart, hasDraft }) {
           className="max-w-2xl w-full text-center"
         >
           <h1 className="font-heading text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight mb-6">
-            The AI ROI Calculator
+            AI ROI.
             <br />
-            <span className="text-gold">That Doesn't Lie</span>
+            <span className="text-gold">No Bullshit.</span>
           </h1>
 
           <p className="text-lg md:text-xl text-gray-300 mb-8 max-w-xl mx-auto leading-relaxed">
-            Built by an M&A executive who's closed $4B+ in deals.
-            <br className="hidden md:block" />
-            Not by a vendor trying to sell you something.
+            Risk-adjusted 5-year DCF. Board-ready in 2 minutes.
           </p>
 
           {/* Trust signals — above CTA */}

@@ -552,20 +552,39 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </p>
         </motion.div>
 
+        {/* Input Validation Warnings */}
+        {results.inputWarnings && results.inputWarnings.length > 0 && (
+          <div className="mb-6 space-y-2">
+            {results.inputWarnings.map((w, i) => (
+              <div
+                key={i}
+                className={`rounded-lg px-4 py-3 text-sm flex items-start gap-2 ${
+                  w.severity === 'warning'
+                    ? 'bg-amber-50 border border-amber-200 text-amber-800'
+                    : 'bg-blue-50 border border-blue-200 text-blue-800'
+                }`}
+              >
+                <span className="shrink-0 mt-0.5">{w.severity === 'warning' ? '\u26A0' : '\u2139'}</span>
+                <span>{w.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Scenario Toggle */}
         <div className="flex justify-center mb-6">
-          <div className="inline-flex bg-white rounded-xl shadow-md p-1 gap-1">
+          <div className="inline-flex bg-white rounded-xl shadow-md p-1.5 gap-1">
             {[
-              { key: 'conservative', label: 'Conservative', color: 'text-red-500' },
-              { key: 'base', label: 'Base Case', color: 'text-amber-600' },
-              { key: 'optimistic', label: 'Optimistic', color: 'text-emerald-600' },
+              { key: 'conservative', label: 'Conservative', emoji: '\u{1F6E1}' },
+              { key: 'base', label: 'Base Case', emoji: '\u{1F3AF}' },
+              { key: 'optimistic', label: 'Optimistic', emoji: '\u{1F680}' },
             ].map((s) => (
               <button
                 key={s.key}
                 onClick={() => setActiveScenario(s.key)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
                   activeScenario === s.key
-                    ? `bg-navy text-white shadow-sm`
+                    ? `bg-navy text-white shadow-md`
                     : `text-gray-500 hover:text-navy hover:bg-gray-50`
                 }`}
               >

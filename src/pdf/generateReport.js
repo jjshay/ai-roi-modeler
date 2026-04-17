@@ -169,6 +169,10 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
 
   // Title block
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...GOLD);
+  doc.text('GAUNTLET GALLERY', MARGIN, y);
+  y += 10;
   doc.setFontSize(24);
   doc.setTextColor(...NAVY);
   doc.text('AI IMPLEMENTATION', MARGIN, y);
@@ -4343,7 +4347,7 @@ export default function generateReport(formData, results, recommendation, mcResu
   });
 
   doc.setProperties({
-    title: 'AI Implementation ROI Analysis',
+    title: 'Gauntlet Gallery — AI Implementation ROI Analysis',
     subject: 'Risk-Adjusted ROI Assessment',
     author: 'Global Gauntlet AI',
     creator: 'AI ROI Modeler',
