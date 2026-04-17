@@ -5,6 +5,7 @@ import StepWizard from './components/StepWizard';
 import LiveCalculation from './components/results/LiveCalculation';
 import ShareCard from './components/ShareCard';
 import CostOfWaiting from './components/CostOfWaiting';
+import PortfolioCompare from './components/PortfolioCompare';
 
 const DEFAULT_FORM_DATA = {
   // Step 1: Company Context
@@ -322,6 +323,15 @@ export default function App() {
     );
   }
 
+  if (screen === 'portfolio') {
+    return (
+      <PortfolioCompare
+        baseFormData={formData}
+        onBack={() => setScreen('results')}
+      />
+    );
+  }
+
   if (screen === 'costOfWaiting') {
     return (
       <CostOfWaiting
@@ -357,6 +367,7 @@ export default function App() {
       onStartOver={handleStartOver}
       onEditInputs={handleEditInputs}
       onShare={handleShare}
+      onCompare={() => setScreen('portfolio')}
     />
   );
 }

@@ -389,7 +389,7 @@ function EmailGateModal({ onSubmit, onClose, formData }) {
   );
 }
 
-export default function LiveCalculation({ formData, onDownload, onDownloadExcel, onStartOver, onEditInputs, onShare }) {
+export default function LiveCalculation({ formData, onDownload, onDownloadExcel, onStartOver, onEditInputs, onShare, onCompare }) {
   // Custom adoption ramp — editable on results page, defaults to benchmark ramp
   const [customRamp, setCustomRamp] = useState(null);
   const effectiveFormData = useMemo(() => {
@@ -918,7 +918,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             </button>
           </div>
 
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-4 flex-wrap">
+            {onCompare && (
+              <button
+                onClick={onCompare}
+                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
+              >
+                Compare Multiple Projects
+              </button>
+            )}
             {onShare && (
               <button
                 onClick={() => {
