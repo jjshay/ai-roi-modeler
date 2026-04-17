@@ -8,6 +8,7 @@ import { getOutputTier, tierShows, AUTO_EXPAND } from '../../utils/outputTier';
 import QuarterlyCashFlow from './QuarterlyCashFlow';
 import RiskRegister from './RiskRegister';
 import BoardActions from './BoardActions';
+import ActualsTracker from './ActualsTracker';
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
   return (
@@ -1032,6 +1033,13 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {effectiveShow('riskRegister') && (
           <CollapsibleSection title="Risk Register" subtitle="Probability, dollar impact, mitigations, and owners for each risk" defaultOpen={effectiveAutoExpand.includes('riskRegister')}>
             <RiskRegister results={results} formData={formData} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Actuals vs Plan — Post-implementation tracking */}
+        {effectiveShow('actualsTracker') && (
+          <CollapsibleSection title="Actuals vs. Plan" subtitle="Enter real results to reforecast remaining years">
+            <ActualsTracker results={results} />
           </CollapsibleSection>
         )}
 

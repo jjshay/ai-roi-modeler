@@ -58,6 +58,7 @@ export const TIER_SECTIONS = {
     quarterlyCashFlow:    true,
     riskRegister:         true,
     boardActions:         true,
+    actualsTracker:       true,
   },
   financial: {
     heroVerdict:          true,
