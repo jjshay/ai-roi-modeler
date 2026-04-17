@@ -104,11 +104,17 @@ export function runCalculations(inputs) {
   const errorRate = Math.max(0, Math.min(assumptions.errorRate ?? _archetypeOverrides.errorRate ?? inputs.errorRate ?? getErrorRate(industry, processType), 1));
   const archetypeRevenueImpact = Math.max(0, _archetypeOverrides.revenueImpact || 0);
   // Archetype-specific dollar impacts (toggled on by selected use case)
+  // Split into: truly additive (no headcount overlap) vs labor-overlapping (discounted)
+  // Additive: SLA penalties are cash fines, not labor; cycle compression is revenue;
+  //           onboarding savings are for future hires not in current team size
+  // Overlapping: repeat contact cost shares agents with headcount bucket;
+  //              remediation shares compliance staff; close time partially overlaps FP&A team
+  const LABOR_OVERLAP_DISCOUNT = 0.40; // 60% of overlapping value is already in headcount
   const archetypeSlaPenaltyCost = Math.max(0, _archetypeOverrides.slaPenaltyCost || 0);
-  const archetypeRepeatContactCost = Math.max(0, _archetypeOverrides.repeatContactCost || 0);
-  const archetypeCloseTimeSavings = Math.max(0, _archetypeOverrides.closeTimeSavings || 0);
+  const archetypeRepeatContactCost = Math.max(0, _archetypeOverrides.repeatContactCost || 0) * LABOR_OVERLAP_DISCOUNT;
+  const archetypeCloseTimeSavings = Math.max(0, _archetypeOverrides.closeTimeSavings || 0) * LABOR_OVERLAP_DISCOUNT;
   const archetypeCycleCompressionRevenue = Math.max(0, _archetypeOverrides.cycleCompressionRevenue || 0);
-  const archetypeRemediationSavings = Math.max(0, _archetypeOverrides.remediationSavings || 0);
+  const archetypeRemediationSavings = Math.max(0, _archetypeOverrides.remediationSavings || 0) * LABOR_OVERLAP_DISCOUNT;
   const archetypeOnboardingSavings = Math.max(0, _archetypeOverrides.onboardingSavings || 0);
   const archetypeKpiSavings = archetypeSlaPenaltyCost + archetypeRepeatContactCost
     + archetypeCloseTimeSavings + archetypeCycleCompressionRevenue
