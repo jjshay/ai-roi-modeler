@@ -103,6 +103,16 @@ export function runCalculations(inputs) {
   const hoursPerWeek = Math.max(1, Math.min(assumptions.hoursPerWeek ?? _archetypeOverrides.hoursPerWeek ?? inputs.hoursPerWeek ?? 20, 10000));
   const errorRate = Math.max(0, Math.min(assumptions.errorRate ?? _archetypeOverrides.errorRate ?? inputs.errorRate ?? getErrorRate(industry, processType), 1));
   const archetypeRevenueImpact = Math.max(0, _archetypeOverrides.revenueImpact || 0);
+  // Archetype-specific dollar impacts (toggled on by selected use case)
+  const archetypeSlaPenaltyCost = Math.max(0, _archetypeOverrides.slaPenaltyCost || 0);
+  const archetypeRepeatContactCost = Math.max(0, _archetypeOverrides.repeatContactCost || 0);
+  const archetypeCloseTimeSavings = Math.max(0, _archetypeOverrides.closeTimeSavings || 0);
+  const archetypeCycleCompressionRevenue = Math.max(0, _archetypeOverrides.cycleCompressionRevenue || 0);
+  const archetypeRemediationSavings = Math.max(0, _archetypeOverrides.remediationSavings || 0);
+  const archetypeOnboardingSavings = Math.max(0, _archetypeOverrides.onboardingSavings || 0);
+  const archetypeKpiSavings = archetypeSlaPenaltyCost + archetypeRepeatContactCost
+    + archetypeCloseTimeSavings + archetypeCycleCompressionRevenue
+    + archetypeRemediationSavings + archetypeOnboardingSavings;
   const currentToolCosts = Math.max(0, inputs.currentToolCosts || 0);
   // Normalize companySize — handles truncated values from legacy share links
   const VALID_SIZES = ['Startup (1-50)', 'SMB (51-500)', 'Mid-Market (501-5,000)', 'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)'];
@@ -543,14 +553,15 @@ export function runCalculations(inputs) {
   const archetypeRevenueGross = archetypeRevenueImpact;
 
   // Enhancement savings = what you get Year 1 (no headcount reduction yet)
-  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross;
+  // Includes archetype-specific KPI savings (SLA penalties, repeat contacts, etc.)
+  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings;
   const enhancementRiskAdjusted = enhancementGross * riskMultiplier;
 
   // =====================================================================
   // ANNUAL SAVINGS (gross metrics for reference)
   // Uses decomposed value breakdown to avoid applying automation % to tool costs
   // =====================================================================
-  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross;
+  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings;
   // Risk multiplier applies only to enhancement savings, not headcount (reviewer fix P1)
   const riskAdjustedSavings = headcountSavingsGross + enhancementRiskAdjusted;
   const netAnnualSavings = riskAdjustedSavings - baseOngoingCost;
@@ -581,8 +592,20 @@ export function runCalculations(inputs) {
       gross: archetypeRevenueGross,
       riskAdjusted: archetypeRevenueGross * riskMultiplier,
     },
-    totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross,
-    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross) * riskMultiplier,
+    archetypeKpi: {
+      gross: archetypeKpiSavings,
+      riskAdjusted: archetypeKpiSavings * riskMultiplier,
+      detail: {
+        slaPenaltyCost: archetypeSlaPenaltyCost,
+        repeatContactCost: archetypeRepeatContactCost,
+        closeTimeSavings: archetypeCloseTimeSavings,
+        cycleCompressionRevenue: archetypeCycleCompressionRevenue,
+        remediationSavings: archetypeRemediationSavings,
+        onboardingSavings: archetypeOnboardingSavings,
+      },
+    },
+    totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings,
+    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings) * riskMultiplier,
     // Per-employee productivity gain in Year 1 (enhancement phase, before any layoffs)
     perEmployeeGain: teamSize > 0
       ? enhancementRiskAdjusted / teamSize
