@@ -2344,6 +2344,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   }
 
   // Hide tabs not included in the user's tier
+  // Only show the ACTIVE archetype tab; hide the rest
   const allSheets = [
     { ws: I,  name: 'Inputs' },
     { ws: AD, name: 'Archetype Detail' },
@@ -2356,11 +2357,19 @@ export async function generateExcelModel(formData, mcResults, results) {
     { ws: DF, name: 'Assumption Definitions' },
     ...archetypeSheets,
   ];
+  const activeTabName = ARCHETYPE_TAB_NAMES[activeArchetypeId];
   for (const { ws, name } of allSheets) {
-    if (!includedTabs.includes(name)) {
+    // Hide non-active archetype tabs
+    const isArchetypeTab = archetypeSheets.some(s => s.name === name);
+    if (isArchetypeTab && name !== activeTabName) {
+      ws.state = 'hidden';
+      continue;
+    }
+    if (!includedTabs.includes(name) && !isArchetypeTab) {
       ws.state = 'hidden';
     }
   }
+
 
   // ===================================================================
   // DOWNLOAD
