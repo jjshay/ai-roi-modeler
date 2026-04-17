@@ -150,6 +150,9 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       scaleInput('brandRisk', 'Brand risk sensitivity (1-5)', {
         default: 3, note: '1=Low-stakes internal, 5=Premium consumer brand',
       }),
+      pctInput('aiAttributionPct', 'AI attribution share', {
+        default: 0.40, min: 0.10, max: 0.80, note: 'What % of improvement is attributable to AI vs. team quality, product, pricing? Conservative = 25%, moderate = 40%',
+      }),
     ],
     computedMappings: [
       {
@@ -164,15 +167,15 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'revenueImpact',
-        jsMap: (i) => Math.round(i.ticketsPerMonth * 12 * i.revenuePerUser * i.churnRate * i.responseTimeImprovement * 0.10),
-        excelFormula: 'ROUND({ticketsPerMonth} * 12 * {revenuePerUser} * {churnRate} * {responseTimeImprovement} * 0.10, 0)',
-        note: 'Annual churn-reduction revenue from faster resolution',
+        jsMap: (i) => Math.round(i.ticketsPerMonth * 12 * i.revenuePerUser * i.churnRate * i.responseTimeImprovement * 0.10 * i.aiAttributionPct),
+        excelFormula: 'ROUND({ticketsPerMonth} * 12 * {revenuePerUser} * {churnRate} * {responseTimeImprovement} * 0.10 * {aiAttributionPct}, 0)',
+        note: 'Annual churn-reduction revenue (discounted by AI attribution share)',
       },
       {
         mapsTo: 'repeatContactCost',
-        jsMap: (i) => Math.round(i.ticketsPerMonth * 12 * (1 - i.firstCallResolutionRate) * i.costPerContact),
-        excelFormula: 'ROUND({ticketsPerMonth} * 12 * (1 - {firstCallResolutionRate}) * {costPerContact}, 0)',
-        note: 'Annual cost of repeat contacts from low first-call resolution',
+        jsMap: (i) => Math.round(i.ticketsPerMonth * 12 * (1 - i.firstCallResolutionRate) * i.costPerContact * i.aiAttributionPct),
+        excelFormula: 'ROUND({ticketsPerMonth} * 12 * (1 - {firstCallResolutionRate}) * {costPerContact} * {aiAttributionPct}, 0)',
+        note: 'Annual repeat contact savings (discounted by AI attribution share)',
       },
     ],
   },
@@ -214,6 +217,9 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       numInput('reportConsumers', 'Report consumers (people)', {
         default: 25, min: 1, max: 100000, format: '0', note: 'Stakeholders waiting for these reports to make decisions',
       }),
+      numInput('annualDecisionBudget', 'Annual budget influenced by these reports ($)', {
+        default: 5000000, max: 1000000000, format: '$#,##0', note: 'Total annual spend that depends on this data (capex + opex decisions informed by these reports)',
+      }),
     ],
     computedMappings: [
       {
@@ -236,6 +242,12 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
         jsMap: (i) => Math.round(i.daysToCloseBooks * 0.50 * i.reportConsumers * 8 * 75),
         excelFormula: 'ROUND({daysToCloseBooks} * 0.50 * {reportConsumers} * 8 * 75, 0)',
         note: 'Annual value of halving close cycle (days saved × stakeholders × hrs/day × avg hourly rate)',
+      },
+      {
+        mapsTo: 'decisionQualityValue',
+        jsMap: (i) => Math.round(i.annualDecisionBudget * (1 - i.forecastAccuracyPct) * 0.05),
+        excelFormula: 'ROUND({annualDecisionBudget} * (1 - {forecastAccuracyPct}) * 0.05, 0)',
+        note: 'Value of better decisions: 5% of mis-allocated budget recovered through improved forecast accuracy',
       },
     ],
   },
@@ -277,6 +289,9 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       numInput('timeToImpactMonths', 'Time to revenue impact (months)', {
         default: 6, min: 1, max: 36, format: '0', note: 'Months before AI drives measurable revenue',
       }),
+      pctInput('aiAttributionPct', 'AI attribution share', {
+        default: 0.35, min: 0.10, max: 0.80, note: 'What % of revenue improvement is AI vs. rep quality, product, pricing? Be conservative.',
+      }),
     ],
     computedMappings: [
       {
@@ -286,9 +301,9 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'revenueImpact',
-        jsMap: (i) => Math.round(i.pipelineVolume * 12 * i.closeRate * i.closeRateImprovementTarget),
-        excelFormula: 'ROUND({pipelineVolume} * 12 * {closeRate} * {closeRateImprovementTarget}, 0)',
-        note: 'Incremental annual revenue from improved close rate',
+        jsMap: (i) => Math.round(i.pipelineVolume * 12 * i.closeRate * i.closeRateImprovementTarget * i.aiAttributionPct),
+        excelFormula: 'ROUND({pipelineVolume} * 12 * {closeRate} * {closeRateImprovementTarget} * {aiAttributionPct}, 0)',
+        note: 'Incremental annual revenue (discounted by AI attribution share)',
       },
       {
         mapsTo: 'hoursPerWeek',
@@ -298,8 +313,8 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'cycleCompressionRevenue',
-        jsMap: (i) => Math.round(i.pipelineVolume * 12 * i.closeRate * 0.30 * (i.salesCycleDays > 30 ? 0.15 : 0.05)),
-        excelFormula: 'ROUND({pipelineVolume} * 12 * {closeRate} * 0.30 * IF({salesCycleDays} > 30, 0.15, 0.05), 0)',
+        jsMap: (i) => Math.round(i.pipelineVolume * 12 * i.closeRate * 0.30 * (i.salesCycleDays > 30 ? 0.15 : 0.05) * i.aiAttributionPct),
+        excelFormula: 'ROUND({pipelineVolume} * 12 * {closeRate} * 0.30 * IF({salesCycleDays} > 30, 0.15, 0.05) * {aiAttributionPct}, 0)',
         note: 'Revenue from faster deal velocity (30% cycle compression × pipeline)',
       },
     ],
@@ -342,6 +357,9 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       pctInput('monitoringCoverage', 'Current monitoring coverage', {
         default: 0.65, note: 'Fraction of transactions/activities currently monitored',
       }),
+      pctInput('falseNegativeRate', 'Estimated false negative rate', {
+        default: 0.05, min: 0.01, max: 0.30, note: 'Fraction of real violations AI might miss — even 2% × $250K avg fine = significant tail risk',
+      }),
     ],
     computedMappings: [
       {
@@ -371,6 +389,12 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
         jsMap: (i) => Math.round(i.findingsPerYear * i.remediationCostPerFinding * 0.40),
         excelFormula: 'ROUND({findingsPerYear} * {remediationCostPerFinding} * 0.40, 0)',
         note: 'Annual remediation cost savings from 40% fewer findings',
+      },
+      {
+        mapsTo: 'falseNegativeRiskCost',
+        jsMap: (i) => Math.round(i.findingsPerYear * i.falseNegativeRate * i.fineExposure * -1),
+        excelFormula: 'ROUND({findingsPerYear} * {falseNegativeRate} * {fineExposure} * -1, 0)',
+        note: 'Annual expected loss from AI-missed violations (negative = cost offset against savings)',
       },
     ],
   },

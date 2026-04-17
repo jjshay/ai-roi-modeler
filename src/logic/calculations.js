@@ -116,9 +116,13 @@ export function runCalculations(inputs) {
   const archetypeCycleCompressionRevenue = Math.max(0, _archetypeOverrides.cycleCompressionRevenue || 0);
   const archetypeRemediationSavings = Math.max(0, _archetypeOverrides.remediationSavings || 0) * LABOR_OVERLAP_DISCOUNT;
   const archetypeOnboardingSavings = Math.max(0, _archetypeOverrides.onboardingSavings || 0);
+  const archetypeDecisionQualityValue = Math.max(0, _archetypeOverrides.decisionQualityValue || 0);
+  const archetypeFalseNegativeRiskCost = Math.min(0, _archetypeOverrides.falseNegativeRiskCost || 0); // Always negative or zero
   const archetypeKpiSavings = archetypeSlaPenaltyCost + archetypeRepeatContactCost
     + archetypeCloseTimeSavings + archetypeCycleCompressionRevenue
-    + archetypeRemediationSavings + archetypeOnboardingSavings;
+    + archetypeRemediationSavings + archetypeOnboardingSavings
+    + archetypeDecisionQualityValue
+    + archetypeFalseNegativeRiskCost; // Negative value reduces net savings
   const currentToolCosts = Math.max(0, inputs.currentToolCosts || 0);
   // Normalize companySize — handles truncated values from legacy share links
   const VALID_SIZES = ['Startup (1-50)', 'SMB (51-500)', 'Mid-Market (501-5,000)', 'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)'];
@@ -608,6 +612,8 @@ export function runCalculations(inputs) {
         cycleCompressionRevenue: archetypeCycleCompressionRevenue,
         remediationSavings: archetypeRemediationSavings,
         onboardingSavings: archetypeOnboardingSavings,
+        decisionQualityValue: archetypeDecisionQualityValue,
+        falseNegativeRiskCost: archetypeFalseNegativeRiskCost,
       },
     },
     totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings,
