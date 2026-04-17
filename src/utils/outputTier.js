@@ -59,6 +59,7 @@ export const TIER_SECTIONS = {
     riskRegister:         true,
     boardActions:         true,
     actualsTracker:       true,
+    unitEconomics:        true,
   },
   financial: {
     heroVerdict:          true,

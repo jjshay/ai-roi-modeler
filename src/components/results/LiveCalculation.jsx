@@ -9,6 +9,7 @@ import QuarterlyCashFlow from './QuarterlyCashFlow';
 import RiskRegister from './RiskRegister';
 import BoardActions from './BoardActions';
 import ActualsTracker from './ActualsTracker';
+import UnitEconomics from './UnitEconomics';
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
   return (
@@ -1047,6 +1048,13 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {effectiveShow('riskRegister') && (
           <CollapsibleSection title="Risk Register" subtitle="Probability, dollar impact, mitigations, and owners for each risk" defaultOpen={effectiveAutoExpand.includes('riskRegister')}>
             <RiskRegister results={results} formData={formData} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Unit Economics + Cost vs Headcount Sensitivity */}
+        {effectiveShow('unitEconomics') && (
+          <CollapsibleSection title="Unit Economics & Sensitivity Matrix" subtitle="Per-person savings, per-percent efficiency gain, and 2D NPV sensitivity">
+            <UnitEconomics results={results} />
           </CollapsibleSection>
         )}
 

@@ -2057,6 +2057,81 @@ export function runCalculations(inputs) {
   const _volumeSensitivity = inputs._mcMode === 'fast' ? null : calculateVolumeSensitivity();
 
   // =====================================================================
+  // UNIT ECONOMICS — Per-person and per-percent impact
+  // =====================================================================
+  const savingsPerPerson = teamSize > 0
+    ? Math.round(riskAdjustedSavings / teamSize)
+    : 0;
+  const costPerPerson = avgSalary; // fully loaded
+  const netPerPerson = savingsPerPerson - Math.round(baseOngoingCost / Math.max(teamSize, 1));
+  const savingsPerEfficiencyPct = Math.round(riskAdjustedSavings / (automationPotential * 100));
+  const aiCostPerPerson = Math.round(baseOngoingCost / Math.max(teamSize, 1));
+
+  const unitEconomics = {
+    savingsPerPerson,
+    costPerAdditionalPerson: costPerPerson,
+    netValuePerPerson: netPerPerson,
+    aiCostPerPerson,
+    savingsPerEfficiencyPct,
+    breakEvenTeamSize: baseOngoingCost > 0 && savingsPerPerson > 0
+      ? Math.ceil(baseOngoingCost / savingsPerPerson)
+      : null,
+    summary: {
+      positive: `Each person on this process = ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(netPerPerson)}/year net savings`,
+      negative: `Each additional person costs ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(costPerPerson)}/year; AI cost per person = ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(aiCostPerPerson)}/year`,
+      efficiency: `Each 1% efficiency gain = ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(savingsPerEfficiencyPct)}/year incremental savings`,
+    },
+  };
+
+  // =====================================================================
+  // 2D SENSITIVITY MATRIX — AI Cost vs Headcount/Efficiency
+  // Rows: AI cost multiplier (0.5x to 2.0x)
+  // Cols: Team size delta (-10 to +10) or efficiency delta (-20% to +20%)
+  // Cell: 5-year NPV at that combination
+  // =====================================================================
+  const costMultipliers = [0.50, 0.75, 1.00, 1.25, 1.50, 2.00];
+  const teamDeltas = [-10, -5, 0, 5, 10, 15];
+
+  function matrixNPV(costMult, teamDelta) {
+    const adjTeam = Math.max(1, teamSize + teamDelta);
+    const adjLabor = adjTeam * avgSalary;
+    const adjRework = adjLabor * errorRate;
+    const adjCurrentCost = adjLabor + adjRework + currentToolCosts;
+    const adjHeadcountGross = Math.min(adjTeam * MAX_HEADCOUNT_REDUCTION, adjTeam * automationPotential) * avgSalary;
+    const adjEfficiencyGross = Math.max(0, (adjLabor * automationPotential) - adjHeadcountGross);
+    const adjErrorGross = adjRework * automationPotential;
+    const adjEnhancement = (adjEfficiencyGross + adjErrorGross + toolReplacementGross + archetypeRevenueGross + archetypeKpiSavings) * riskMultiplier;
+    const adjOngoing = baseOngoingCost * costMult;
+
+    let npv = -upfrontInvestment;
+    let cumReduction = 0;
+    for (let yr = 0; yr < DCF_YEARS; yr++) {
+      const wg = Math.pow(1 + wageInflationRate, yr);
+      const drift = Math.pow(1 - modelDriftRate, yr);
+      const eSavings = adjEnhancement * adoptionRamp[yr] * wg * drift;
+      cumReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
+      const hSavings = adjHeadcountGross * cumReduction * wg * drift;
+      const sep = separationByYear[yr] * (adjTeam / Math.max(teamSize, 1));
+      const ong = adjOngoing * (1 + (AI_COST_ESCALATION_SCHEDULE[yr] || 0));
+      const net = eSavings + hSavings - sep - ong;
+      npv += net / Math.pow(1 + discountRate, yr + 1);
+    }
+    return Math.round(npv);
+  }
+
+  const costVsHeadcountMatrix = {
+    costMultipliers,
+    teamDeltas,
+    costLabels: costMultipliers.map(m => `${Math.round(m * 100)}% AI Cost`),
+    teamLabels: teamDeltas.map(d => d === 0 ? `${teamSize} (current)` : d > 0 ? `+${d} people` : `${d} people`),
+    grid: costMultipliers.map(cm =>
+      teamDeltas.map(td => matrixNPV(cm, td))
+    ),
+    baseNPV: matrixNPV(1.0, 0),
+    unitEconomicsSummary: unitEconomics.summary,
+  };
+
+  // =====================================================================
   // RETURN
   // =====================================================================
   return {
@@ -2142,6 +2217,9 @@ export function runCalculations(inputs) {
     volumeSensitivity: _volumeSensitivity,
     // V5.3: Adoption ramp (for UI display/editing)
     adoptionRamp,
+    // V6: Unit economics + 2D sensitivity matrix
+    unitEconomics,
+    costVsHeadcountMatrix,
   };
 
 }
