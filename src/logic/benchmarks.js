@@ -1200,16 +1200,82 @@ export const TOKEN_PROFILES = {
   'Other': { avgInput: 2000, avgOutput: 1000, note: 'General purpose' },
 };
 
-// Token pricing (blended average across providers, April 2026)
-// Claude: Haiku 4.5 $0.80/$4, Sonnet 4.6 $3/$15, Opus 4.7 $15/$75
-// OpenAI: GPT-4o-mini $0.15/$0.60, GPT-4o $2.50/$10, o1 $15/$60
-// Google Gemini: Flash 2.0 $0.075/$0.30, Pro 2.5 $1.25/$5, Ultra $7/$21
-// xAI Grok: grok-3-mini $0.30/$0.50, grok-3 $3/$15
-// Blended = weighted average across all four providers per tier
+// =========================================================================
+// AI MODEL PRICING — April 2026 (per 1M tokens, pay-as-you-go)
+// =========================================================================
+// [1] Anthropic Claude (docs.anthropic.com/en/docs/about-claude/pricing)
+//     Haiku 4.5:  $1.00 input / $5.00 output
+//     Sonnet 4.6: $3.00 input / $15.00 output
+//     Opus 4.7:   $5.00 input / $25.00 output
+//
+// [2] OpenAI (openai.com/api/pricing)
+//     GPT-4o-mini: $0.15 input / $0.60 output
+//     GPT-4o:      $2.50 input / $10.00 output
+//     o3:          $10.00 input / $40.00 output
+//
+// [3] Google Gemini (ai.google.dev/gemini-api/docs/pricing)
+//     Flash 2.0:    $0.10 input / $0.40 output (free tier available)
+//     Gemini 2.5 Pro: $0.50 input / $3.00 output
+//     Gemini 3 Pro:   $0.50 input / $3.00 output
+//
+// [4] xAI Grok (docs.x.ai/developers/models)
+//     Grok 4.1 Fast: $0.20 input / $0.50 output
+//     Grok 4:        $3.00 input / $15.00 output
+//     Grok 3:        $3.00 input / $15.00 output
+//
+// Blended averages calculated as simple average across all 4 providers
+// per tier. Notes: Batch processing discounts (50%) and prompt caching
+// (up to 90% on input) can significantly reduce effective costs.
+// =========================================================================
+
+export const PROVIDER_PRICING = {
+  'Anthropic Claude': {
+    economy:  { input: 1.00, output: 5.00, model: 'Haiku 4.5' },
+    standard: { input: 3.00, output: 15.00, model: 'Sonnet 4.6' },
+    premium:  { input: 5.00, output: 25.00, model: 'Opus 4.7' },
+    source: 'docs.anthropic.com/en/docs/about-claude/pricing',
+    notes: 'Up to 90% savings with prompt caching. 50% batch discount. Extended thinking tokens billed at output rate.',
+  },
+  'OpenAI': {
+    economy:  { input: 0.15, output: 0.60, model: 'GPT-4o-mini' },
+    standard: { input: 2.50, output: 10.00, model: 'GPT-4o' },
+    premium:  { input: 10.00, output: 40.00, model: 'o3' },
+    source: 'openai.com/api/pricing',
+    notes: '50% batch discount. Reasoning tokens (o3) billed as output. Cached input tokens at 50% discount.',
+  },
+  'Google Gemini': {
+    economy:  { input: 0.10, output: 0.40, model: 'Flash 2.0' },
+    standard: { input: 0.50, output: 3.00, model: 'Gemini 2.5 Pro' },
+    premium:  { input: 0.50, output: 3.00, model: 'Gemini 3 Pro Preview' },
+    source: 'ai.google.dev/gemini-api/docs/pricing',
+    notes: 'Free tier available. Context caching at $0.05/1M tokens. Image output at $30/1M tokens. Vertex AI pricing differs.',
+  },
+  'xAI Grok': {
+    economy:  { input: 0.20, output: 0.50, model: 'Grok 4.1 Fast' },
+    standard: { input: 3.00, output: 15.00, model: 'Grok 4' },
+    premium:  { input: 3.00, output: 15.00, model: 'Grok 3' },
+    source: 'docs.x.ai/developers/models',
+    notes: 'Reasoning tokens billed as output. Prompt caching available. 2M token context window on Grok 3.',
+  },
+};
+
+// Blended tier pricing (simple average across 4 providers)
 export const MODEL_TIERS = {
-  'economy': { inputPer1M: 0.20, outputPer1M: 0.65, label: 'Economy (Haiku / GPT-4o-mini / Flash / Grok-mini)' },
-  'standard': { inputPer1M: 2.45, outputPer1M: 11.25, label: 'Standard (Sonnet / GPT-4o / Gemini Pro / Grok-3)' },
-  'premium': { inputPer1M: 12.35, outputPer1M: 52.00, label: 'Premium (Opus / o1 / Gemini Ultra)' },
+  'economy': {
+    inputPer1M: 0.36,   // avg(1.00, 0.15, 0.10, 0.20)
+    outputPer1M: 1.63,  // avg(5.00, 0.60, 0.40, 0.50)
+    label: 'Economy (Haiku / GPT-4o-mini / Flash / Grok Fast)',
+  },
+  'standard': {
+    inputPer1M: 2.25,   // avg(3.00, 2.50, 0.50, 3.00)
+    outputPer1M: 10.75, // avg(15.00, 10.00, 3.00, 15.00)
+    label: 'Standard (Sonnet / GPT-4o / Gemini Pro / Grok 4)',
+  },
+  'premium': {
+    inputPer1M: 4.63,   // avg(5.00, 10.00, 0.50, 3.00)
+    outputPer1M: 20.75, // avg(25.00, 40.00, 3.00, 15.00)
+    label: 'Premium (Opus / o3 / Gemini 3 Pro / Grok 3)',
+  },
 };
 
 // Contract commitment discount (annual vs month-to-month)
