@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CurrencyInput from '../inputs/CurrencyInput';
 import SliderInput from '../inputs/SliderInput';
+import SegmentedSelect from '../inputs/SegmentedSelect';
 import { formatCurrency } from '../../utils/formatters';
 import { getArchetypeById } from '../../logic/archetypes';
 import {
@@ -20,7 +21,16 @@ import {
   REQUESTS_PER_PERSON_HOUR,
   CASH_REALIZATION_DEFAULTS,
   CYCLE_TIME_REDUCTION,
+  PROVIDER_PRICING,
+  TOKEN_PROFILES,
 } from '../../logic/benchmarks';
+
+const PROVIDER_OPTIONS = [
+  { label: 'Anthropic', value: 'Anthropic Claude', sublabel: 'Claude' },
+  { label: 'OpenAI', value: 'OpenAI', sublabel: 'ChatGPT / GPT-4o' },
+  { label: 'Google', value: 'Google Gemini', sublabel: 'Gemini' },
+  { label: 'xAI', value: 'xAI Grok', sublabel: 'Grok' },
+];
 
 // Auto-calculate suggested values based on company context
 function computeSuggestedValues(formData) {
@@ -366,7 +376,9 @@ export default function Step5_AIInvestment({ formData, updateField }) {
             exit="exit"
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            <div className="space-y-4">
+            <div className="space-y-5">
+              <ProviderSelection formData={formData} updateField={updateField} />
+
               <CurrencyInput
                 label="Estimated annual cost to maintain the AI solution?"
                 value={formData.ongoingAnnualCost ?? 25000}
@@ -553,6 +565,60 @@ export default function Step5_AIInvestment({ formData, updateField }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function ProviderSelection({ formData, updateField }) {
+  const provider = formData.aiProvider || 'Anthropic Claude';
+  const modelTier = formData.assumptions?.modelTier || 'standard';
+  const tierPricing = PROVIDER_PRICING[provider]?.[modelTier];
+
+  const teamSize = formData.teamSize || 10;
+  const hoursPerWeek = formData.hoursPerWeek || 20;
+  const processType = formData.processType || 'Other';
+  const tokenProfile = TOKEN_PROFILES[processType] || TOKEN_PROFILES['Other'];
+  const requestsPerHour = 12;
+  const monthlyCalls = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
+  const monthlyInputCost = tierPricing
+    ? (monthlyCalls * tokenProfile.avgInput / 1_000_000) * tierPricing.input
+    : 0;
+  const monthlyOutputCost = tierPricing
+    ? (monthlyCalls * tokenProfile.avgOutput / 1_000_000) * tierPricing.output
+    : 0;
+  const monthlyTokenCost = monthlyInputCost + monthlyOutputCost;
+
+  return (
+    <div className="space-y-3">
+      <SegmentedSelect
+        label="Which AI provider are you planning to use?"
+        options={PROVIDER_OPTIONS}
+        value={provider}
+        onChange={(val) => updateField('aiProvider', val)}
+        helperText="Token costs are priced at this provider's published standard-tier rates."
+      />
+
+      {tierPricing && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2 text-sm">
+          <div className="flex justify-between items-baseline">
+            <span className="text-sky-800/70">Model</span>
+            <span className="font-semibold text-sky-900">{tierPricing.model}</span>
+          </div>
+          <div className="flex justify-between items-baseline">
+            <span className="text-sky-800/70">Input / Output per 1M tokens</span>
+            <span className="font-mono font-medium text-sky-900">
+              ${tierPricing.input.toFixed(2)} / ${tierPricing.output.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between items-baseline border-t border-sky-200 pt-2">
+            <span className="text-sky-800 font-medium">Est. monthly token cost</span>
+            <span className="font-mono font-bold text-sky-900">{formatCurrency(monthlyTokenCost)}</span>
+          </div>
+          <p className="text-xs text-sky-700/70">
+            ~{Math.round(monthlyCalls).toLocaleString()} calls/mo · {tokenProfile.avgInput.toLocaleString()} in / {tokenProfile.avgOutput.toLocaleString()} out tokens each. Flows into the financial model.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

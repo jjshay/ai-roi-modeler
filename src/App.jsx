@@ -36,6 +36,7 @@ const DEFAULT_FORM_DATA = {
   implementationBudget: null, // Auto-calculated if null
   expectedTimeline: null, // Auto-calculated if null
   ongoingAnnualCost: null, // Auto-calculated if null
+  aiProvider: 'Anthropic Claude', // 'Anthropic Claude' | 'OpenAI' | 'Google Gemini' | 'xAI Grok' | null (uses blended avg)
   // Step 1 (optional): State for R&D credit
   companyState: 'Other / Not Sure',
   // V3: Advanced Value Modeling (optional)

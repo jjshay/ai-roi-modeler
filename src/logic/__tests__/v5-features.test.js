@@ -9,6 +9,7 @@ import {
   CAPITAL_ALLOCATION,
   TOKEN_PROFILES,
   MODEL_TIERS,
+  PROVIDER_PRICING,
   AGENT_COST_PROFILES,
 } from '../benchmarks';
 
@@ -403,6 +404,51 @@ describe('Token economics benchmarks', () => {
   it('premium costs more than standard, standard more than economy', () => {
     expect(MODEL_TIERS.premium.inputPer1M).toBeGreaterThan(MODEL_TIERS.standard.inputPer1M);
     expect(MODEL_TIERS.standard.inputPer1M).toBeGreaterThan(MODEL_TIERS.economy.inputPer1M);
+  });
+});
+
+describe('Provider-specific pricing: flows from aiProvider into model', () => {
+  it('unselected provider falls back to blended MODEL_TIERS', () => {
+    const result = runCalculations(makeInputs({ aiProvider: null }));
+    expect(result.aiCostModel.tokenCostModel.aiProvider).toBeNull();
+    expect(result.aiCostModel.tokenCostModel.providerModel).toBeNull();
+  });
+
+  it('selecting Anthropic Claude uses Sonnet 4.6 standard-tier pricing', () => {
+    const result = runCalculations(makeInputs({ aiProvider: 'Anthropic Claude' }));
+    expect(result.aiCostModel.tokenCostModel.aiProvider).toBe('Anthropic Claude');
+    expect(result.aiCostModel.tokenCostModel.providerModel).toBe('Sonnet 4.6');
+    // Standard Claude input = $3.00 × 0.80 annual contract discount = $2.40/1M
+    expect(result.aiCostModel.tokenCostModel.inputCostPer1M).toBeCloseTo(3.00 * 0.80, 2);
+    expect(result.aiCostModel.tokenCostModel.outputCostPer1M).toBeCloseTo(15.00 * 0.80, 2);
+  });
+
+  it('selecting OpenAI uses GPT-4o standard-tier pricing', () => {
+    const result = runCalculations(makeInputs({ aiProvider: 'OpenAI' }));
+    expect(result.aiCostModel.tokenCostModel.providerModel).toBe('GPT-4o');
+    expect(result.aiCostModel.tokenCostModel.inputCostPer1M).toBeCloseTo(2.50 * 0.80, 2);
+    expect(result.aiCostModel.tokenCostModel.outputCostPer1M).toBeCloseTo(10.00 * 0.80, 2);
+  });
+
+  it('Google Gemini produces lower monthly token cost than Anthropic on same workload', () => {
+    const claude = runCalculations(makeInputs({ aiProvider: 'Anthropic Claude' }));
+    const gemini = runCalculations(makeInputs({ aiProvider: 'Google Gemini' }));
+    expect(gemini.aiCostModel.tokenCostModel.monthlyTokenCost)
+      .toBeLessThan(claude.aiCostModel.tokenCostModel.monthlyTokenCost);
+  });
+
+  it('provider selection activates the token-based cost model', () => {
+    const result = runCalculations(makeInputs({ aiProvider: 'OpenAI' }));
+    expect(result.aiCostModel.tokenCostModel.useTokenModel).toBe(true);
+  });
+
+  it('all four providers have consistent pricing structure', () => {
+    for (const name of ['Anthropic Claude', 'OpenAI', 'Google Gemini', 'xAI Grok']) {
+      expect(PROVIDER_PRICING[name]).toBeDefined();
+      expect(PROVIDER_PRICING[name].economy.input).toBeGreaterThan(0);
+      expect(PROVIDER_PRICING[name].standard.input).toBeGreaterThan(0);
+      expect(PROVIDER_PRICING[name].premium.input).toBeGreaterThan(0);
+    }
   });
 });
 

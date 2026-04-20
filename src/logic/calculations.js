@@ -73,6 +73,7 @@ import {
   // V5: Consulting-grade additions
   TOKEN_PROFILES,
   MODEL_TIERS,
+  PROVIDER_PRICING,
   CONTRACT_DISCOUNT,
   OVERAGE_MULTIPLIER,
   PROMPT_CACHING_RATE,
@@ -280,21 +281,28 @@ export function runCalculations(inputs) {
   const requestsPerHour = assumptions.requestsPerPersonHour ?? REQUESTS_PER_PERSON_HOUR[processType] ?? 12;
   const monthlyTaskVolume = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
 
-  // Token-based cost model (activates when user provides token-level inputs or model tier)
+  // Token-based cost model (activates when user provides token-level inputs, model tier, or provider)
   const useTokenModel = assumptions.useTokenModel
     || assumptions.modelTier != null
-    || assumptions.avgInputTokensPerRequest != null;
+    || assumptions.avgInputTokensPerRequest != null
+    || inputs.aiProvider != null;
 
   const tokenProfile = TOKEN_PROFILES[processType] || TOKEN_PROFILES['Other'];
   const modelTier = assumptions.modelTier || 'standard';
-  const modelPricing = MODEL_TIERS[modelTier] || MODEL_TIERS['standard'];
+  const blendedTierPricing = MODEL_TIERS[modelTier] || MODEL_TIERS['standard'];
+  // Provider-specific pricing: if user selected a provider, use its tier pricing;
+  // otherwise fall back to the blended average across all providers.
+  const aiProvider = inputs.aiProvider || null;
+  const providerTier = aiProvider ? PROVIDER_PRICING[aiProvider]?.[modelTier] : null;
+  const tierInputPer1M = providerTier ? providerTier.input : blendedTierPricing.inputPer1M;
+  const tierOutputPer1M = providerTier ? providerTier.output : blendedTierPricing.outputPer1M;
   const avgInputTokens = assumptions.avgInputTokensPerRequest ?? tokenProfile.avgInput;
   const avgOutputTokens = assumptions.avgOutputTokensPerRequest ?? tokenProfile.avgOutput;
   // Contract commitment affects token pricing (monthly/annual/multi-year)
   const contractType = assumptions.contractType || 'annual';
   const contractDiscount = CONTRACT_DISCOUNT[contractType] || CONTRACT_DISCOUNT['annual'];
-  const inputCostPer1M = (assumptions.inputTokenCostPer1M ?? modelPricing.inputPer1M) * contractDiscount;
-  const outputCostPer1M = (assumptions.outputTokenCostPer1M ?? modelPricing.outputPer1M) * contractDiscount;
+  const inputCostPer1M = (assumptions.inputTokenCostPer1M ?? tierInputPer1M) * contractDiscount;
+  const outputCostPer1M = (assumptions.outputTokenCostPer1M ?? tierOutputPer1M) * contractDiscount;
 
   // Prompt caching — reduces effective input token cost
   const promptCachingRate = assumptions.promptCachingRate ?? PROMPT_CACHING_RATE;
@@ -425,7 +433,9 @@ export function runCalculations(inputs) {
     tokenCostModel: {
       useTokenModel,
       modelTier,
-      modelTierLabel: modelPricing.label,
+      modelTierLabel: blendedTierPricing.label,
+      aiProvider,
+      providerModel: providerTier?.model ?? null,
       avgInputTokensPerRequest: avgInputTokens,
       avgOutputTokensPerRequest: avgOutputTokens,
       inputCostPer1M,
@@ -2220,6 +2230,8 @@ export function runCalculations(inputs) {
     consultingAssumptions: {
       modelDriftRate,
       modelTier,
+      aiProvider,
+      providerModel: providerTier?.model ?? null,
       useTokenModel,
       isAgenticWorkflow,
       agentComplexity: isAgenticWorkflow ? agentComplexity : null,
