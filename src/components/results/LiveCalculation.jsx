@@ -2,7 +2,7 @@ import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { runCalculations } from '../../logic/calculations';
 import { getRecommendation } from '../../logic/recommendations';
-import { AI_MATURITY_PREMIUM } from '../../logic/benchmarks';
+import { AI_MATURITY_PREMIUM, PROVIDER_PRICING, PROVIDER_PRICING_AS_OF } from '../../logic/benchmarks';
 import { formatCurrency, formatPercent, formatCompact } from '../../utils/formatters';
 import { getOutputTier, tierShows, AUTO_EXPAND } from '../../utils/outputTier';
 import QuarterlyCashFlow from './QuarterlyCashFlow';
@@ -393,11 +393,42 @@ function EmailGateModal({ onSubmit, onClose, formData }) {
 export default function LiveCalculation({ formData, onDownload, onDownloadExcel, onStartOver, onEditInputs, onShare, onCompare }) {
   // Custom adoption ramp — editable on results page, defaults to benchmark ramp
   const [customRamp, setCustomRamp] = useState(null);
+  // Provider override — lets user switch providers directly on the results page
+  const [providerOverride, setProviderOverride] = useState(null);
   const effectiveFormData = useMemo(() => {
-    if (!customRamp) return formData;
-    return { ...formData, customAdoptionRamp: customRamp };
-  }, [formData, customRamp]);
+    let data = formData;
+    if (customRamp) data = { ...data, customAdoptionRamp: customRamp };
+    if (providerOverride) data = { ...data, aiProvider: providerOverride };
+    return data;
+  }, [formData, customRamp, providerOverride]);
   const results = useMemo(() => runCalculations(effectiveFormData), [effectiveFormData]);
+
+  // Provider comparison: precompute all 4 providers for the comparison widget
+  const providerComparison = useMemo(() => {
+    const providerNames = Object.keys(PROVIDER_PRICING);
+    const currentProvider = effectiveFormData.aiProvider || 'Anthropic Claude';
+    return providerNames.map(name => {
+      const altResults = name === currentProvider
+        ? results
+        : runCalculations({ ...effectiveFormData, aiProvider: name });
+      const altScenario = altResults.scenarios.base;
+      const tcm = altResults.aiCostModel.tokenCostModel;
+      return {
+        name,
+        model: tcm.providerModel,
+        annualTokenCost: tcm.annualTokenCost || 0,
+        annualOngoing: altResults.aiCostModel.computedOngoingCost || 0,
+        baseNPV: altScenario.npv,
+        baseROIC: altScenario.roic,
+        isCurrent: name === currentProvider,
+      };
+    });
+  }, [effectiveFormData, results]);
+
+  const providerSpread = useMemo(() => {
+    const costs = providerComparison.map(p => p.annualTokenCost);
+    return Math.max(...costs) - Math.min(...costs);
+  }, [providerComparison]);
 
   // Derive output tier from role
   const tier = useMemo(() => getOutputTier(formData.role), [formData.role]);
@@ -661,6 +692,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             ))}
           </div>
         </motion.div>
+
+        {/* Provider Cost Comparison — only if meaningful spread */}
+        {providerSpread > 5000 && (
+          <ProviderComparison
+            comparison={providerComparison}
+            currentProvider={effectiveFormData.aiProvider || 'Anthropic Claude'}
+            onSwitch={setProviderOverride}
+          />
+        )}
 
         {/* Break-Even & Volume Sensitivity */}
         {results.volumeSensitivity && (
@@ -1718,5 +1758,102 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function ProviderComparison({ comparison, currentProvider, onSwitch }) {
+  const sorted = [...comparison].sort((a, b) => a.annualTokenCost - b.annualTokenCost);
+  const cheapest = sorted[0];
+  const currentEntry = comparison.find(p => p.isCurrent);
+  const savingsVsCurrent = currentEntry
+    ? currentEntry.annualTokenCost - cheapest.annualTokenCost
+    : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.55, duration: 0.5 }}
+      className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+    >
+      <h3 className="text-navy font-bold text-lg mb-1">What If You Chose a Different Provider?</h3>
+      <p className="text-gray-500 text-xs mb-4">
+        Same workload, different pricing.{' '}
+        {savingsVsCurrent > 1000 && !cheapest.isCurrent && (
+          <span className="text-emerald-600 font-semibold">
+            Switching to {cheapest.name} could save ~{formatCompact(savingsVsCurrent * 5)}/5yr in token costs alone.
+          </span>
+        )}
+        <span className="text-gray-400 ml-1">(Rates as of {PROVIDER_PRICING_AS_OF.date})</span>
+      </p>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b-2 border-navy/10 text-left">
+              <th className="py-2 text-gray-500 font-medium">Provider</th>
+              <th className="py-2 text-gray-500 font-medium">Model</th>
+              <th className="py-2 text-gray-500 font-medium text-right">Annual Token Cost</th>
+              <th className="py-2 text-gray-500 font-medium text-right">5-FY NPV</th>
+              <th className="py-2 text-gray-500 font-medium text-right">ROIC</th>
+              <th className="py-2 text-gray-500 font-medium text-center w-20"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((p) => {
+              const npvDelta = currentEntry ? p.baseNPV - currentEntry.baseNPV : 0;
+              return (
+                <tr
+                  key={p.name}
+                  className={`border-b border-gray-100 last:border-0 transition-colors ${
+                    p.isCurrent
+                      ? 'bg-gold/10'
+                      : 'hover:bg-gray-50 cursor-pointer'
+                  }`}
+                  onClick={() => !p.isCurrent && onSwitch(p.name)}
+                >
+                  <td className="py-2.5 pr-3">
+                    <span className="font-semibold text-navy">{p.name}</span>
+                    {p.isCurrent && (
+                      <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-gold bg-gold/10 px-1.5 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3 text-gray-600">{p.model}</td>
+                  <td className="py-2.5 pr-3 text-right font-mono font-medium text-navy">
+                    {formatCurrency(p.annualTokenCost)}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right font-mono font-medium">
+                    <span className={p.baseNPV >= 0 ? 'text-emerald-600' : 'text-red-500'}>
+                      {formatCompact(p.baseNPV)}
+                    </span>
+                    {!p.isCurrent && Math.abs(npvDelta) > 1000 && (
+                      <span className={`ml-1 text-xs ${npvDelta > 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                        ({npvDelta > 0 ? '+' : ''}{formatCompact(npvDelta)})
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right font-mono font-medium text-navy">
+                    {formatPercent(p.baseROIC)}
+                  </td>
+                  <td className="py-2.5 text-center">
+                    {!p.isCurrent && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onSwitch(p.name); }}
+                        className="text-xs font-semibold text-navy/60 hover:text-navy underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded px-2 py-1"
+                      >
+                        Switch
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
   );
 }
