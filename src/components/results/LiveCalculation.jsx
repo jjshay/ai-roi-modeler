@@ -414,10 +414,20 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         : runCalculations({ ...effectiveFormData, aiProvider: name });
       const altScenario = altResults.scenarios.base;
       const tcm = altResults.aiCostModel.tokenCostModel;
+      // Compute MSRP-equivalent annual cost for savings callout (no discounts applied)
+      const msrpRatio = tcm.msrpInputPer1M > 0 && tcm.effectiveInputCostPer1M > 0
+        ? (tcm.msrpInputPer1M + tcm.msrpOutputPer1M) / (tcm.effectiveInputCostPer1M + tcm.outputCostPer1M)
+        : 1;
+      const msrpAnnualCost = (tcm.annualTokenCost || 0) * msrpRatio;
+      const savingsVsMSRPPct = msrpAnnualCost > 0
+        ? 1 - (tcm.annualTokenCost || 0) / msrpAnnualCost
+        : 0;
       return {
         name,
         model: tcm.providerModel,
         annualTokenCost: tcm.annualTokenCost || 0,
+        msrpAnnualCost,
+        savingsVsMSRPPct,
         annualOngoing: altResults.aiCostModel.computedOngoingCost || 0,
         baseNPV: altScenario.npv,
         baseROIC: altScenario.roic,
@@ -1829,6 +1839,11 @@ function ProviderComparison({ comparison, currentProvider, onSwitch }) {
                   <td className="py-2.5 pr-3 text-gray-600">{p.model}</td>
                   <td className="py-2.5 pr-3 text-right font-mono font-medium text-navy">
                     {formatCurrency(p.annualTokenCost)}
+                    {p.savingsVsMSRPPct > 0.01 && (
+                      <div className="text-[10px] font-normal text-emerald-600 mt-0.5">
+                        −{(p.savingsVsMSRPPct * 100).toFixed(0)}% vs MSRP
+                      </div>
+                    )}
                   </td>
                   <td className="py-2.5 pr-3 text-right font-mono font-medium">
                     <span className={p.baseNPV >= 0 ? 'text-emerald-600' : 'text-red-500'}>
@@ -1860,6 +1875,9 @@ function ProviderComparison({ comparison, currentProvider, onSwitch }) {
           </tbody>
         </table>
       </div>
+      <p className="mt-3 text-[10px] leading-snug text-gray-400">
+        MSRP rates retrieved {PROVIDER_PRICING_AS_OF.date}. Effective rates apply enterprise volume discount (by company size), contract commitment discount, and prompt caching. {PROVIDER_PRICING_AS_OF.sourceNote}
+      </p>
     </motion.div>
   );
 }

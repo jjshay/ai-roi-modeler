@@ -612,18 +612,47 @@ function ProviderSelection({ formData, updateField }) {
             <span className="text-sky-800/70">Model</span>
             <span className="font-semibold text-sky-900">{tierPricing.model}</span>
           </div>
-          <div className="flex justify-between items-baseline">
-            <span className="text-sky-800/70">Input / Output per 1M tokens</span>
-            <span className="font-mono font-medium text-sky-900">
-              ${tierPricing.input.toFixed(2)} / ${tierPricing.output.toFixed(2)}
-            </span>
+
+          {/* Discount waterfall */}
+          <div className="border-t border-sky-200 pt-2 space-y-1.5">
+            <div className="flex justify-between items-baseline text-xs">
+              <span className="text-sky-800/60">MSRP (list price)</span>
+              <span className="font-mono text-sky-800/70 line-through">
+                ${tierPricing.input.toFixed(2)} / ${tierPricing.output.toFixed(2)}
+              </span>
+            </div>
+            {entDiscount > 0 && (
+              <div className="flex justify-between items-baseline text-xs">
+                <span className="text-sky-800/60">
+                  − Enterprise discount ({companySize.replace(/ \(.+\)/, '')})
+                </span>
+                <span className="font-mono text-emerald-600">
+                  −{(entDiscount * 100).toFixed(0)}%
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between items-baseline text-xs">
+              <span className="text-sky-800/60">
+                − Contract commitment ({formData.assumptions?.contractType || 'annual'})
+              </span>
+              <span className="font-mono text-emerald-600">
+                −{((1 - contractDiscount) * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline border-t border-sky-200 pt-1.5">
+              <span className="text-sky-800 font-semibold text-sm">Effective rate per 1M</span>
+              <span className="font-mono font-bold text-sky-900 text-sm">
+                ${netInput.toFixed(2)} / ${netOutput.toFixed(2)}
+              </span>
+            </div>
           </div>
+
           <div className="flex justify-between items-baseline border-t border-sky-200 pt-2">
             <span className="text-sky-800 font-medium">Est. monthly token cost</span>
             <span className="font-mono font-bold text-sky-900">{formatCurrency(monthlyTokenCost)}</span>
           </div>
           <p className="text-xs text-sky-700/70">
-            ~{Math.round(monthlyCalls).toLocaleString()} calls/mo · {tokenProfile.avgInput.toLocaleString()} in / {tokenProfile.avgOutput.toLocaleString()} out tokens each. Flows into the financial model.
+            ~{Math.round(monthlyCalls).toLocaleString()} calls/mo · {tokenProfile.avgInput.toLocaleString()} in / {tokenProfile.avgOutput.toLocaleString()} out tokens each. MSRP as of {PROVIDER_PRICING_AS_OF.date}; prompt caching applied separately.
           </p>
         </div>
       )}
