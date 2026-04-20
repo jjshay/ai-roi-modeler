@@ -1208,7 +1208,7 @@ export const TOKEN_PROFILES = {
 export const PROVIDER_PRICING_AS_OF = {
   date: 'April 2026',
   isoDate: '2026-04-01',
-  sourceNote: 'Published pay-as-you-go rates; batch, caching, and committed-use discounts applied separately in the model.',
+  sourceNote: 'Published MSRP pay-as-you-go list rates. Does not include enterprise discounts, volume commitments, promotional credits, or negotiated contracts — which can reduce effective cost 20–60%. Batch processing and prompt-caching discounts are modeled separately.',
 };
 
 // =========================================================================
