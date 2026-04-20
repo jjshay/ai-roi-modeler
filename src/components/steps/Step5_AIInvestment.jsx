@@ -23,14 +23,17 @@ import {
   CYCLE_TIME_REDUCTION,
   PROVIDER_PRICING,
   PROVIDER_PRICING_AS_OF,
+  ENTERPRISE_VOLUME_DISCOUNT,
+  CONTRACT_DISCOUNT,
   TOKEN_PROFILES,
 } from '../../logic/benchmarks';
+import { PROVIDER_LOGOS } from '../providerLogos';
 
 const PROVIDER_OPTIONS = [
-  { label: 'Anthropic', value: 'Anthropic Claude', sublabel: 'Claude' },
-  { label: 'OpenAI', value: 'OpenAI', sublabel: 'ChatGPT / GPT-4o' },
-  { label: 'Google', value: 'Google Gemini', sublabel: 'Gemini' },
-  { label: 'xAI', value: 'xAI Grok', sublabel: 'Grok' },
+  { label: 'Anthropic', value: 'Anthropic Claude', sublabel: 'Claude', iconUrl: PROVIDER_LOGOS['Anthropic Claude'] },
+  { label: 'OpenAI', value: 'OpenAI', sublabel: 'ChatGPT / GPT-4o', iconUrl: PROVIDER_LOGOS['OpenAI'] },
+  { label: 'Google', value: 'Google Gemini', sublabel: 'Gemini', iconUrl: PROVIDER_LOGOS['Google Gemini'] },
+  { label: 'xAI', value: 'xAI Grok', sublabel: 'Grok', iconUrl: PROVIDER_LOGOS['xAI Grok'] },
 ];
 
 // Auto-calculate suggested values based on company context
@@ -575,6 +578,9 @@ function ProviderSelection({ formData, updateField }) {
   const provider = formData.aiProvider || 'Anthropic Claude';
   const modelTier = formData.assumptions?.modelTier || 'standard';
   const tierPricing = PROVIDER_PRICING[provider]?.[modelTier];
+  const companySize = formData.companySize || 'Mid-Market (501-5,000)';
+  const entDiscount = ENTERPRISE_VOLUME_DISCOUNT[companySize] ?? 0;
+  const contractDiscount = CONTRACT_DISCOUNT[formData.assumptions?.contractType || 'annual'] ?? 0.80;
 
   const teamSize = formData.teamSize || 10;
   const hoursPerWeek = formData.hoursPerWeek || 20;
@@ -582,12 +588,12 @@ function ProviderSelection({ formData, updateField }) {
   const tokenProfile = TOKEN_PROFILES[processType] || TOKEN_PROFILES['Other'];
   const requestsPerHour = 12;
   const monthlyCalls = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
-  const monthlyInputCost = tierPricing
-    ? (monthlyCalls * tokenProfile.avgInput / 1_000_000) * tierPricing.input
-    : 0;
-  const monthlyOutputCost = tierPricing
-    ? (monthlyCalls * tokenProfile.avgOutput / 1_000_000) * tierPricing.output
-    : 0;
+
+  // Apply discount waterfall: MSRP → enterprise discount → contract discount
+  const netInput = tierPricing ? tierPricing.input * (1 - entDiscount) * contractDiscount : 0;
+  const netOutput = tierPricing ? tierPricing.output * (1 - entDiscount) * contractDiscount : 0;
+  const monthlyInputCost = (monthlyCalls * tokenProfile.avgInput / 1_000_000) * netInput;
+  const monthlyOutputCost = (monthlyCalls * tokenProfile.avgOutput / 1_000_000) * netOutput;
   const monthlyTokenCost = monthlyInputCost + monthlyOutputCost;
 
   return (
@@ -650,7 +656,14 @@ function ProviderSelection({ formData, updateField }) {
                   const isSelected = name === provider && tier === modelTier;
                   return (
                     <tr key={`${name}-${tier}`} className={`border-b border-gray-100 last:border-0 ${isSelected ? 'bg-gold/10' : ''}`}>
-                      <td className="py-1 pr-3 font-sans text-navy">{name}</td>
+                      <td className="py-1 pr-3 font-sans text-navy">
+                        <span className="inline-flex items-center gap-2">
+                          {PROVIDER_LOGOS[name] && (
+                            <img src={PROVIDER_LOGOS[name]} alt="" aria-hidden="true" className="h-4 w-4" />
+                          )}
+                          {name}
+                        </span>
+                      </td>
                       <td className="py-1 pr-3 font-sans capitalize text-gray-600">{tier}</td>
                       <td className="py-1 pr-3 font-sans text-gray-700">{t.model}</td>
                       <td className="py-1 pr-3 text-right text-navy">${t.input.toFixed(2)}</td>

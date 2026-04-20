@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-label="OpenAI">
+  <g fill="none" stroke="#000" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 10 a 22 22 0 0 1 19 11 a 22 22 0 0 1 0 22 a 22 22 0 0 1 -19 11 a 22 22 0 0 1 -19 -11 a 22 22 0 0 1 0 -22 a 22 22 0 0 1 19 -11 Z"/>
+    <path d="M32 18 L46 26 L46 38 L32 46 L18 38 L18 26 Z"/>
+    <line x1="32" y1="18" x2="32" y2="46"/>
+    <line x1="18" y1="26" x2="46" y2="38"/>
+    <line x1="46" y1="26" x2="18" y2="38"/>
+  </g>
+</svg>

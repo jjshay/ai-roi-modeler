@@ -10,6 +10,7 @@ import {
   TOKEN_PROFILES,
   MODEL_TIERS,
   PROVIDER_PRICING,
+  ENTERPRISE_VOLUME_DISCOUNT,
   AGENT_COST_PROFILES,
 } from '../benchmarks';
 
@@ -408,26 +409,61 @@ describe('Token economics benchmarks', () => {
 });
 
 describe('Provider-specific pricing: flows from aiProvider into model', () => {
+  // makeInputs uses companySize: 'Mid-Market (501-5,000)' → 15% enterprise discount
+  const midMarketDiscount = ENTERPRISE_VOLUME_DISCOUNT['Mid-Market (501-5,000)']; // 0.15
+
   it('unselected provider falls back to blended MODEL_TIERS', () => {
     const result = runCalculations(makeInputs({ aiProvider: null }));
     expect(result.aiCostModel.tokenCostModel.aiProvider).toBeNull();
     expect(result.aiCostModel.tokenCostModel.providerModel).toBeNull();
   });
 
-  it('selecting Anthropic Claude uses Sonnet 4.6 standard-tier pricing', () => {
+  it('exposes MSRP and enterprise discount in the waterfall', () => {
     const result = runCalculations(makeInputs({ aiProvider: 'Anthropic Claude' }));
-    expect(result.aiCostModel.tokenCostModel.aiProvider).toBe('Anthropic Claude');
-    expect(result.aiCostModel.tokenCostModel.providerModel).toBe('Sonnet 4.6');
-    // Standard Claude input = $3.00 × 0.80 annual contract discount = $2.40/1M
-    expect(result.aiCostModel.tokenCostModel.inputCostPer1M).toBeCloseTo(3.00 * 0.80, 2);
-    expect(result.aiCostModel.tokenCostModel.outputCostPer1M).toBeCloseTo(15.00 * 0.80, 2);
+    const tcm = result.aiCostModel.tokenCostModel;
+    expect(tcm.msrpInputPer1M).toBe(3.00);
+    expect(tcm.msrpOutputPer1M).toBe(15.00);
+    expect(tcm.enterpriseDiscount).toBe(midMarketDiscount);
+    expect(tcm.afterEnterpriseInput).toBeCloseTo(3.00 * (1 - midMarketDiscount), 4);
+    expect(tcm.afterEnterpriseOutput).toBeCloseTo(15.00 * (1 - midMarketDiscount), 4);
   });
 
-  it('selecting OpenAI uses GPT-4o standard-tier pricing', () => {
+  it('selecting Anthropic Claude applies MSRP → enterprise → contract discount waterfall', () => {
+    const result = runCalculations(makeInputs({ aiProvider: 'Anthropic Claude' }));
+    const tcm = result.aiCostModel.tokenCostModel;
+    expect(tcm.aiProvider).toBe('Anthropic Claude');
+    expect(tcm.providerModel).toBe('Sonnet 4.6');
+    // $3.00 MSRP × (1 - 0.15 enterprise) × 0.80 annual contract = $2.04
+    expect(tcm.inputCostPer1M).toBeCloseTo(3.00 * 0.85 * 0.80, 2);
+    expect(tcm.outputCostPer1M).toBeCloseTo(15.00 * 0.85 * 0.80, 2);
+  });
+
+  it('selecting OpenAI uses GPT-4o with same discount waterfall', () => {
     const result = runCalculations(makeInputs({ aiProvider: 'OpenAI' }));
-    expect(result.aiCostModel.tokenCostModel.providerModel).toBe('GPT-4o');
-    expect(result.aiCostModel.tokenCostModel.inputCostPer1M).toBeCloseTo(2.50 * 0.80, 2);
-    expect(result.aiCostModel.tokenCostModel.outputCostPer1M).toBeCloseTo(10.00 * 0.80, 2);
+    const tcm = result.aiCostModel.tokenCostModel;
+    expect(tcm.providerModel).toBe('GPT-4o');
+    expect(tcm.inputCostPer1M).toBeCloseTo(2.50 * 0.85 * 0.80, 2);
+    expect(tcm.outputCostPer1M).toBeCloseTo(10.00 * 0.85 * 0.80, 2);
+  });
+
+  it('startups pay full MSRP (0% enterprise discount)', () => {
+    const result = runCalculations(makeInputs({
+      aiProvider: 'Anthropic Claude',
+      companySize: 'Startup (1-50)',
+    }));
+    const tcm = result.aiCostModel.tokenCostModel;
+    expect(tcm.enterpriseDiscount).toBe(0);
+    expect(tcm.inputCostPer1M).toBeCloseTo(3.00 * 0.80, 2); // MSRP × contract only
+  });
+
+  it('large enterprises get deepest discount', () => {
+    const result = runCalculations(makeInputs({
+      aiProvider: 'Anthropic Claude',
+      companySize: 'Large Enterprise (50,000+)',
+    }));
+    const tcm = result.aiCostModel.tokenCostModel;
+    expect(tcm.enterpriseDiscount).toBe(0.35);
+    expect(tcm.inputCostPer1M).toBeCloseTo(3.00 * 0.65 * 0.80, 2);
   });
 
   it('Google Gemini produces lower monthly token cost than Anthropic on same workload', () => {
@@ -449,6 +485,17 @@ describe('Provider-specific pricing: flows from aiProvider into model', () => {
       expect(PROVIDER_PRICING[name].standard.input).toBeGreaterThan(0);
       expect(PROVIDER_PRICING[name].premium.input).toBeGreaterThan(0);
     }
+  });
+
+  it('ENTERPRISE_VOLUME_DISCOUNT defined for all company sizes', () => {
+    for (const size of ['Startup (1-50)', 'SMB (51-500)', 'Mid-Market (501-5,000)',
+                        'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)']) {
+      const d = ENTERPRISE_VOLUME_DISCOUNT[size];
+      expect(d).toBeGreaterThanOrEqual(0);
+      expect(d).toBeLessThan(1);
+    }
+    expect(ENTERPRISE_VOLUME_DISCOUNT['Large Enterprise (50,000+)'])
+      .toBeGreaterThan(ENTERPRISE_VOLUME_DISCOUNT['Startup (1-50)']);
   });
 });
 

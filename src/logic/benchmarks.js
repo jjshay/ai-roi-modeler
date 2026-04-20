@@ -1296,6 +1296,18 @@ export const CONTRACT_DISCOUNT = {
   'multi-year': 0.65,
 };
 
+// Enterprise volume discount — negotiated rate reduction based on company size.
+// Larger companies have more leverage to negotiate below MSRP.
+// Source: Provider enterprise sales guidance, Forrester TCO analyses, and
+// aggregated SaaS procurement data (2024-2026). Conservative mid-range estimates.
+export const ENTERPRISE_VOLUME_DISCOUNT = {
+  'Startup (1-50)': 0.00,           // pay list price
+  'SMB (51-500)': 0.05,             // ~5% discount
+  'Mid-Market (501-5,000)': 0.15,   // ~15% negotiated
+  'Enterprise (5,001-50,000)': 0.25, // ~25% enterprise agreement
+  'Large Enterprise (50,000+)': 0.35, // ~35% strategic pricing
+};
+
 // Token overage rate — cost multiplier when exceeding committed volume
 export const OVERAGE_MULTIPLIER = 1.50;
 

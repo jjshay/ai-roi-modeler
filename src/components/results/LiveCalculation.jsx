@@ -10,6 +10,7 @@ import RiskRegister from './RiskRegister';
 import BoardActions from './BoardActions';
 import ActualsTracker from './ActualsTracker';
 import UnitEconomics from './UnitEconomics';
+import { PROVIDER_LOGOS } from '../providerLogos';
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
   return (
@@ -1813,12 +1814,17 @@ function ProviderComparison({ comparison, currentProvider, onSwitch }) {
                   onClick={() => !p.isCurrent && onSwitch(p.name)}
                 >
                   <td className="py-2.5 pr-3">
-                    <span className="font-semibold text-navy">{p.name}</span>
-                    {p.isCurrent && (
-                      <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-gold bg-gold/10 px-1.5 py-0.5 rounded">
-                        Current
-                      </span>
-                    )}
+                    <span className="inline-flex items-center gap-2">
+                      {PROVIDER_LOGOS[p.name] && (
+                        <img src={PROVIDER_LOGOS[p.name]} alt="" aria-hidden="true" className="h-5 w-5 shrink-0" />
+                      )}
+                      <span className="font-semibold text-navy">{p.name}</span>
+                      {p.isCurrent && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gold bg-gold/10 px-1.5 py-0.5 rounded">
+                          Current
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="py-2.5 pr-3 text-gray-600">{p.model}</td>
                   <td className="py-2.5 pr-3 text-right font-mono font-medium text-navy">

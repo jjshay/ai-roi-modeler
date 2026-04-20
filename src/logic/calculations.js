@@ -75,6 +75,7 @@ import {
   MODEL_TIERS,
   PROVIDER_PRICING,
   CONTRACT_DISCOUNT,
+  ENTERPRISE_VOLUME_DISCOUNT,
   OVERAGE_MULTIPLIER,
   PROMPT_CACHING_RATE,
   CACHED_INPUT_DISCOUNT,
@@ -294,15 +295,19 @@ export function runCalculations(inputs) {
   // otherwise fall back to the blended average across all providers.
   const aiProvider = inputs.aiProvider || null;
   const providerTier = aiProvider ? PROVIDER_PRICING[aiProvider]?.[modelTier] : null;
-  const tierInputPer1M = providerTier ? providerTier.input : blendedTierPricing.inputPer1M;
-  const tierOutputPer1M = providerTier ? providerTier.output : blendedTierPricing.outputPer1M;
+  const msrpInputPer1M = providerTier ? providerTier.input : blendedTierPricing.inputPer1M;
+  const msrpOutputPer1M = providerTier ? providerTier.output : blendedTierPricing.outputPer1M;
   const avgInputTokens = assumptions.avgInputTokensPerRequest ?? tokenProfile.avgInput;
   const avgOutputTokens = assumptions.avgOutputTokensPerRequest ?? tokenProfile.avgOutput;
+  // Enterprise volume discount — based on company size negotiating leverage
+  const enterpriseDiscount = assumptions.enterpriseDiscount ?? ENTERPRISE_VOLUME_DISCOUNT[companySize] ?? 0;
+  const afterEnterpriseInput = msrpInputPer1M * (1 - enterpriseDiscount);
+  const afterEnterpriseOutput = msrpOutputPer1M * (1 - enterpriseDiscount);
   // Contract commitment affects token pricing (monthly/annual/multi-year)
   const contractType = assumptions.contractType || 'annual';
   const contractDiscount = CONTRACT_DISCOUNT[contractType] || CONTRACT_DISCOUNT['annual'];
-  const inputCostPer1M = (assumptions.inputTokenCostPer1M ?? tierInputPer1M) * contractDiscount;
-  const outputCostPer1M = (assumptions.outputTokenCostPer1M ?? tierOutputPer1M) * contractDiscount;
+  const inputCostPer1M = (assumptions.inputTokenCostPer1M ?? afterEnterpriseInput) * contractDiscount;
+  const outputCostPer1M = (assumptions.outputTokenCostPer1M ?? afterEnterpriseOutput) * contractDiscount;
 
   // Prompt caching — reduces effective input token cost
   const promptCachingRate = assumptions.promptCachingRate ?? PROMPT_CACHING_RATE;
@@ -436,6 +441,13 @@ export function runCalculations(inputs) {
       modelTierLabel: blendedTierPricing.label,
       aiProvider,
       providerModel: providerTier?.model ?? null,
+      msrpInputPer1M,
+      msrpOutputPer1M,
+      enterpriseDiscount,
+      afterEnterpriseInput,
+      afterEnterpriseOutput,
+      contractType,
+      contractDiscount,
       avgInputTokensPerRequest: avgInputTokens,
       avgOutputTokensPerRequest: avgOutputTokens,
       inputCostPer1M,
