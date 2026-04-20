@@ -42,6 +42,14 @@ export default function SegmentedSelect({
                 }
               `}
             >
+              {option.iconUrl && (
+                <img
+                  src={option.iconUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="mx-auto mb-1 block h-7 w-7"
+                />
+              )}
               <span className="block text-center">{option.label}</span>
               {option.sublabel && (
                 <span

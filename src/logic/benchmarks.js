@@ -1003,6 +1003,49 @@ export const SCENARIO_CONFIGS = {
 // ---------------------------------------------------------------------------
 export const EFFECTIVE_TAX_RATE = 0.21; // US corporate rate for NOPAT calculation
 
+// =========================================================================
+// INCREMENTAL P&L — function mapping by archetype
+// Used to bucket displaced-headcount savings and ongoing AI costs into
+// the standard CFO P&L categories (COGS, S&M, R&D, G&A) so the incremental
+// P&L shows the right line-item impact per the archetype.
+// =========================================================================
+export const ARCHETYPE_FUNCTION_MAPPING = {
+  'internal-process-automation': {
+    displacedFunction: 'G&A',     // back-office ops displaced
+    aiOngoingFunction: 'R&D',     // platform, retraining
+    inferenceInCOGS: false,
+  },
+  'customer-facing-ai': {
+    displacedFunction: 'COGS',    // customer support reps often in COGS
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: true,        // inference serves customers → COGS
+  },
+  'data-analytics-automation': {
+    displacedFunction: 'G&A',     // finance / ops analysts
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+  'revenue-growth-ai': {
+    displacedFunction: 'S&M',     // sales ops / marketing analysts
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+  'risk-compliance-legal-ai': {
+    displacedFunction: 'G&A',     // legal / compliance / audit
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+  'knowledge-management-ai': {
+    displacedFunction: 'G&A',     // mixed, default G&A (enterprise search)
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+};
+
+// D&A schedule: implementation cost amortized straight-line over 5 years
+// (ASC 350-40 internal-use software capitalization)
+export const IMPLEMENTATION_AMORTIZATION_YEARS = 5;
+
 // ---------------------------------------------------------------------------
 // Productivity Dip Parameters — scaled by company size
 // Larger organizations have longer change absorption cycles
@@ -1200,11 +1243,116 @@ export const TOKEN_PROFILES = {
   'Other': { avgInput: 2000, avgOutput: 1000, note: 'General purpose' },
 };
 
-export const MODEL_TIERS = {
-  'economy': { inputPer1M: 0.25, outputPer1M: 1.00, label: 'Economy (Haiku / GPT-4o-mini)' },
-  'standard': { inputPer1M: 3.00, outputPer1M: 15.00, label: 'Standard (Sonnet / GPT-4o)' },
-  'premium': { inputPer1M: 15.00, outputPer1M: 75.00, label: 'Premium (Opus / o1)' },
+// =========================================================================
+// AI MODEL PRICING — per 1M tokens, pay-as-you-go
+// Source-of-truth table. Rendered into UI provider picker, PDF Appendix C
+// Schedule 2a, and Excel Assumptions sheet — do not duplicate elsewhere.
+// =========================================================================
+export const PROVIDER_PRICING_AS_OF = {
+  date: 'April 2026',
+  isoDate: '2026-04-01',
+  sourceNote: 'Published MSRP pay-as-you-go list rates. Does not include enterprise discounts, volume commitments, promotional credits, or negotiated contracts — which can reduce effective cost 20–60%. Batch processing and prompt-caching discounts are modeled separately.',
 };
+
+// =========================================================================
+// AI MODEL PRICING — April 2026 (per 1M tokens, pay-as-you-go)
+// =========================================================================
+// [1] Anthropic Claude (docs.anthropic.com/en/docs/about-claude/pricing)
+//     Haiku 4.5:  $1.00 input / $5.00 output
+//     Sonnet 4.6: $3.00 input / $15.00 output
+//     Opus 4.7:   $5.00 input / $25.00 output
+//
+// [2] OpenAI (openai.com/api/pricing)
+//     GPT-4o-mini: $0.15 input / $0.60 output
+//     GPT-4o:      $2.50 input / $10.00 output
+//     o3:          $10.00 input / $40.00 output
+//
+// [3] Google Gemini (ai.google.dev/gemini-api/docs/pricing)
+//     Flash 2.0:    $0.10 input / $0.40 output (free tier available)
+//     Gemini 2.5 Pro: $0.50 input / $3.00 output
+//     Gemini 3 Pro:   $0.50 input / $3.00 output
+//
+// [4] xAI Grok (docs.x.ai/developers/models)
+//     Grok 4.1 Fast: $0.20 input / $0.50 output
+//     Grok 4:        $3.00 input / $15.00 output
+//     Grok 3:        $3.00 input / $15.00 output
+//
+// Blended averages calculated as simple average across all 4 providers
+// per tier. Notes: Batch processing discounts (50%) and prompt caching
+// (up to 90% on input) can significantly reduce effective costs.
+// =========================================================================
+
+export const PROVIDER_PRICING = {
+  'Anthropic Claude': {
+    economy:  { input: 1.00, output: 5.00, model: 'Haiku 4.5' },
+    standard: { input: 3.00, output: 15.00, model: 'Sonnet 4.6' },
+    premium:  { input: 5.00, output: 25.00, model: 'Opus 4.7' },
+    source: 'docs.anthropic.com/en/docs/about-claude/pricing',
+    notes: 'Up to 90% savings with prompt caching. 50% batch discount. Extended thinking tokens billed at output rate.',
+  },
+  'OpenAI': {
+    economy:  { input: 0.15, output: 0.60, model: 'GPT-4o-mini' },
+    standard: { input: 2.50, output: 10.00, model: 'GPT-4o' },
+    premium:  { input: 10.00, output: 40.00, model: 'o3' },
+    source: 'openai.com/api/pricing',
+    notes: '50% batch discount. Reasoning tokens (o3) billed as output. Cached input tokens at 50% discount.',
+  },
+  'Google Gemini': {
+    economy:  { input: 0.10, output: 0.40, model: 'Flash 2.0' },
+    standard: { input: 0.50, output: 3.00, model: 'Gemini 2.5 Pro' },
+    premium:  { input: 0.50, output: 3.00, model: 'Gemini 3 Pro Preview' },
+    source: 'ai.google.dev/gemini-api/docs/pricing',
+    notes: 'Free tier available. Context caching at $0.05/1M tokens. Image output at $30/1M tokens. Vertex AI pricing differs.',
+  },
+  'xAI Grok': {
+    economy:  { input: 0.20, output: 0.50, model: 'Grok 4.1 Fast' },
+    standard: { input: 3.00, output: 15.00, model: 'Grok 4' },
+    premium:  { input: 3.00, output: 15.00, model: 'Grok 3' },
+    source: 'docs.x.ai/developers/models',
+    notes: 'Reasoning tokens billed as output. Prompt caching available. 2M token context window on Grok 3.',
+  },
+};
+
+// Blended tier pricing (simple average across 4 providers)
+export const MODEL_TIERS = {
+  'economy': {
+    inputPer1M: 0.36,   // avg(1.00, 0.15, 0.10, 0.20)
+    outputPer1M: 1.63,  // avg(5.00, 0.60, 0.40, 0.50)
+    label: 'Economy (Haiku / GPT-4o-mini / Flash / Grok Fast)',
+  },
+  'standard': {
+    inputPer1M: 2.25,   // avg(3.00, 2.50, 0.50, 3.00)
+    outputPer1M: 10.75, // avg(15.00, 10.00, 3.00, 15.00)
+    label: 'Standard (Sonnet / GPT-4o / Gemini Pro / Grok 4)',
+  },
+  'premium': {
+    inputPer1M: 4.63,   // avg(5.00, 10.00, 0.50, 3.00)
+    outputPer1M: 20.75, // avg(25.00, 40.00, 3.00, 15.00)
+    label: 'Premium (Opus / o3 / Gemini 3 Pro / Grok 3)',
+  },
+};
+
+// Contract commitment discount (annual vs month-to-month)
+export const CONTRACT_DISCOUNT = {
+  'monthly': 1.00,
+  'annual': 0.80,
+  'multi-year': 0.65,
+};
+
+// Enterprise volume discount — negotiated rate reduction based on company size.
+// Larger companies have more leverage to negotiate below MSRP.
+// Source: Provider enterprise sales guidance, Forrester TCO analyses, and
+// aggregated SaaS procurement data (2024-2026). Conservative mid-range estimates.
+export const ENTERPRISE_VOLUME_DISCOUNT = {
+  'Startup (1-50)': 0.00,           // pay list price
+  'SMB (51-500)': 0.05,             // ~5% discount
+  'Mid-Market (501-5,000)': 0.15,   // ~15% negotiated
+  'Enterprise (5,001-50,000)': 0.25, // ~25% enterprise agreement
+  'Large Enterprise (50,000+)': 0.35, // ~35% strategic pricing
+};
+
+// Token overage rate — cost multiplier when exceeding committed volume
+export const OVERAGE_MULTIPLIER = 1.50;
 
 // Default prompt caching rate — fraction of requests hitting cache
 // Source: Anthropic prompt caching docs 2025; typical enterprise: 25-40% cache hit rate
@@ -1272,7 +1420,7 @@ export const BENCHMARK_SOURCES = [
   { id: 8, short: 'Alcor BPO 2025', full: 'Alcor BPO, "AI Engineer Salary by Country," 2025. Eastern Europe: $58-120K; India: $15-30K; Latin America: $40-58K.' },
   { id: 9, short: 'Xenoss 2025', full: 'Xenoss, "Total Cost of Ownership for Enterprise AI," 2025. Hidden costs account for 30-40% of total project cost; integration adds 15-25%.' },
   { id: 10, short: 'PMI', full: 'Project Management Institute (PMI), standard practice. Technology projects carry 10-25% contingency reserve; AI projects warrant higher end due to uncertainty.' },
-  { id: 11, short: 'LLM Pricing 2025', full: 'IntuitionLabs, "LLM API Pricing Comparison," 2025. GPT-4o: $5/$15 per 1M tokens; Claude Opus 4.5: $5/$25; Gemini 2.5 Pro: $1.25/$10.' },
+  { id: 11, short: 'Provider Pricing Apr 2026', full: 'Published provider rates, retrieved April 2026. Anthropic (docs.anthropic.com/en/docs/about-claude/pricing): Haiku 4.5 $1/$5, Sonnet 4.6 $3/$15, Opus 4.7 $5/$25 per 1M tokens. OpenAI (openai.com/api/pricing): GPT-4o-mini $0.15/$0.60, GPT-4o $2.50/$10, o3 $10/$40. Google (ai.google.dev/gemini-api/docs/pricing): Flash 2.0 $0.10/$0.40, Gemini 2.5 Pro $0.50/$3, Gemini 3 Pro Preview $0.50/$3. xAI (docs.x.ai/developers/models): Grok 4.1 Fast $0.20/$0.50, Grok 4 $3/$15, Grok 3 $3/$15.' },
   { id: 12, short: 'LHH 2025', full: 'LHH (Lee Hecht Harrison), "How Much Severance Should Companies Pay," 2025. Exempt employees: 8-9 weeks; managers: 12-13 weeks; directors: 15 weeks.' },
   { id: 13, short: 'Gartner 2025', full: 'Gartner, "Lack of AI-Ready Data Puts AI Projects at Risk," Feb 2025. 60% of AI projects will be abandoned by 2026 due to data readiness issues.' },
   { id: 14, short: 'Worklytics 2025', full: 'Worklytics, "2025 AI Adoption Benchmarks," 2025. 75% of knowledge workers use AI tools regularly; utilization ramps over 12-24 months.' },

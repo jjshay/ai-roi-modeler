@@ -10,6 +10,8 @@ import {
   AI_TEAM_SALARY,
   API_COST_PER_1K_REQUESTS,
   REQUESTS_PER_PERSON_HOUR,
+  PROVIDER_PRICING,
+  PROVIDER_PRICING_AS_OF,
   MAX_IMPL_TEAM,
   PLATFORM_LICENSE_COST,
   SEPARATION_COST_MULTIPLIER,
@@ -95,7 +97,7 @@ function addPageFooter(doc, pageNum) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...MID_GRAY);
-  doc.text('Confidential — For Directional Guidance Only — Not Financial or Investment Advice', MARGIN, footerY);
+  doc.text('DISCLAIMER: Initial directional estimate only. Not financial advice. Review with your own financial, legal, and operational experts.', MARGIN, footerY);
   doc.text(`p.${pageNum}`, PAGE_W - MARGIN, footerY, { align: 'right' });
 }
 
@@ -169,6 +171,10 @@ function page1_ExecutiveSummary(doc, formData, results, recommendation) {
 
   // Title block
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...GOLD);
+  doc.text('GLOBAL GAUNTLET', MARGIN, y);
+  y += 10;
   doc.setFontSize(24);
   doc.setTextColor(...NAVY);
   doc.text('AI IMPLEMENTATION', MARGIN, y);
@@ -2631,6 +2637,147 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
 
   y = doc.lastAutoTable.finalY + 6;
 
+  // Schedule 2a: AI Model Pricing by Provider (full reference table)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...NAVY);
+  checkPageBreak(90);
+  doc.text(`Schedule 2a: AI Model Pricing by Provider — as of ${PROVIDER_PRICING_AS_OF.date} [11]`, MARGIN, y);
+  y += 5;
+
+  const selectedProvider = formData.aiProvider || null;
+  const providerRows = [];
+  for (const [providerName, tiers] of Object.entries(PROVIDER_PRICING)) {
+    for (const tierName of ['economy', 'standard', 'premium']) {
+      const t = tiers[tierName];
+      if (!t) continue;
+      const isSelected = providerName === selectedProvider && tierName === 'standard';
+      providerRows.push([
+        providerName,
+        tierName.charAt(0).toUpperCase() + tierName.slice(1),
+        t.model,
+        `$${t.input.toFixed(2)}`,
+        `$${t.output.toFixed(2)}`,
+        isSelected ? 'Selected' : '',
+      ]);
+    }
+  }
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Provider', 'Tier', 'Model', 'Input / 1M', 'Output / 1M', '']],
+    body: providerRows,
+    ...autoTableTheme(),
+    styles: { ...autoTableTheme().styles, fontSize: 7, cellPadding: 1.8 },
+    headStyles: { ...autoTableTheme().headStyles, fontSize: 7, cellPadding: 1.8 },
+    columnStyles: {
+      0: { cellWidth: CONTENT_W * 0.19 },
+      1: { cellWidth: CONTENT_W * 0.11 },
+      2: { cellWidth: CONTENT_W * 0.27 },
+      3: { cellWidth: CONTENT_W * 0.13, halign: 'right' },
+      4: { cellWidth: CONTENT_W * 0.13, halign: 'right' },
+      5: { cellWidth: CONTENT_W * 0.17, fontStyle: 'italic', textColor: GOLD },
+    },
+  });
+
+  y = doc.lastAutoTable.finalY + 2;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  doc.setTextColor(120, 120, 130);
+  const sourceFootnote = `Sources retrieved ${PROVIDER_PRICING_AS_OF.date}: Anthropic (docs.anthropic.com/en/docs/about-claude/pricing), OpenAI (openai.com/api/pricing), Google (ai.google.dev/gemini-api/docs/pricing), xAI (docs.x.ai/developers/models). ${PROVIDER_PRICING_AS_OF.sourceNote}`;
+  const sourceLines = doc.splitTextToSize(sourceFootnote, CONTENT_W);
+  doc.text(sourceLines, MARGIN, y);
+  y += sourceLines.length * 3 + 4;
+
+  // Schedule 2b: Token Cost Discount Waterfall (step-by-step math)
+  const tcm = results?.aiCostModel?.tokenCostModel;
+  if (tcm && tcm.msrpInputPer1M != null) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...NAVY);
+    checkPageBreak(60);
+    const providerLabel = tcm.aiProvider || 'Blended';
+    const tierLabel = results?.consultingAssumptions?.modelTier || 'standard';
+    doc.text(`Schedule 2b: Token Cost Discount Waterfall — ${providerLabel} / ${tierLabel}`, MARGIN, y);
+    y += 5;
+
+    const inputSavingsPct = tcm.msrpInputPer1M > 0
+      ? (1 - tcm.effectiveInputCostPer1M / tcm.msrpInputPer1M)
+      : 0;
+    const outputSavingsPct = tcm.msrpOutputPer1M > 0
+      ? (1 - tcm.outputCostPer1M / tcm.msrpOutputPer1M)
+      : 0;
+
+    const waterfallRows = [
+      [
+        '1. MSRP (published list price)',
+        'Published provider rate',
+        `$${tcm.msrpInputPer1M.toFixed(4)}`,
+        `$${tcm.msrpOutputPer1M.toFixed(4)}`,
+      ],
+      [
+        '2. Enterprise volume discount',
+        `× (1 − ${(tcm.enterpriseDiscount * 100).toFixed(0)}%) — by company size`,
+        `$${tcm.afterEnterpriseInput.toFixed(4)}`,
+        `$${tcm.afterEnterpriseOutput.toFixed(4)}`,
+      ],
+      [
+        '3. Contract commitment discount',
+        `× ${tcm.contractDiscount.toFixed(2)} (${tcm.contractType})`,
+        `$${tcm.inputCostPer1M.toFixed(4)}`,
+        `$${tcm.outputCostPer1M.toFixed(4)}`,
+      ],
+      [
+        '4. Prompt caching (input only)',
+        `× (1 − ${(tcm.promptCachingRate * 100).toFixed(0)}% × 90%)`,
+        `$${tcm.effectiveInputCostPer1M.toFixed(4)}`,
+        `$${tcm.outputCostPer1M.toFixed(4)}`,
+      ],
+      [
+        'Total effective discount vs MSRP',
+        'Combined stack',
+        `${(inputSavingsPct * 100).toFixed(1)}%`,
+        `${(outputSavingsPct * 100).toFixed(1)}%`,
+      ],
+    ];
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Step', 'Formula', 'Input $/1M', 'Output $/1M']],
+      body: waterfallRows,
+      ...autoTableTheme(),
+      styles: { ...autoTableTheme().styles, fontSize: 7.5, cellPadding: 2 },
+      headStyles: { ...autoTableTheme().headStyles, fontSize: 7.5, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.32, fontStyle: 'bold' },
+        1: { cellWidth: CONTENT_W * 0.34, fontStyle: 'italic', textColor: [120, 120, 130] },
+        2: { cellWidth: CONTENT_W * 0.17, halign: 'right' },
+        3: { cellWidth: CONTENT_W * 0.17, halign: 'right' },
+      },
+      didParseCell: (data) => {
+        // Highlight the effective rate row (index 3) and the summary row (index 4)
+        if (data.section === 'body' && data.row.index === 3) {
+          data.cell.styles.fillColor = [232, 245, 233];
+          data.cell.styles.textColor = NAVY;
+        }
+        if (data.section === 'body' && data.row.index === 4) {
+          data.cell.styles.fillColor = [248, 244, 220];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.textColor = NAVY;
+        }
+      },
+    });
+
+    y = doc.lastAutoTable.finalY + 2;
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(6.5);
+    doc.setTextColor(120, 120, 130);
+    const waterfallNote = 'Waterfall: MSRP × (1 − enterprise discount by company size) × contract commitment discount = base rate; then input-only: × (1 − caching rate × 90%) = effective rate. Input rates reflect prompt-caching; output rates do not (caching applies only to input tokens).';
+    const noteLines = doc.splitTextToSize(waterfallNote, CONTENT_W);
+    doc.text(noteLines, MARGIN, y);
+    y += noteLines.length * 3 + 4;
+  }
+
   // Schedule 3: Platform Costs
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
@@ -4343,7 +4490,7 @@ export default function generateReport(formData, results, recommendation, mcResu
   });
 
   doc.setProperties({
-    title: 'AI Implementation ROI Analysis',
+    title: 'Global Gauntlet — AI Implementation ROI Analysis',
     subject: 'Risk-Adjusted ROI Assessment',
     author: 'Global Gauntlet AI',
     creator: 'AI ROI Modeler',
@@ -4392,7 +4539,9 @@ export default function generateReport(formData, results, recommendation, mcResu
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'AI-ROI-Analysis.pdf';
+  const archName = (getArchetypeById(formData.projectArchetype)?.label || 'Custom').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.download = `Global_Gauntlet_ROI_${archName}_${dateStr}.pdf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

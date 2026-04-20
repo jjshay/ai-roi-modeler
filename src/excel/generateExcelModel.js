@@ -8,9 +8,11 @@ import ExcelJS from 'exceljs';
 import { getOutputTier, EXCEL_TABS } from '../utils/outputTier';
 import { ARCHETYPE_INPUT_SCHEMAS, ARCHETYPE_INPUT_MAP, CLASSIFICATION_PROFILES, CLASSIFICATION_QUESTIONS, getArchetypeInputDefaults } from '../logic/archetypeInputs';
 import { PROJECT_ARCHETYPES } from '../logic/archetypes';
+import { PROVIDER_PRICING, PROVIDER_PRICING_AS_OF } from '../logic/benchmarks';
 
 // --- Styles ---
 const NAVY = '1B2A4A';
+const GOLD = 'C9A227';
 const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
 const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const subFont = { bold: true, color: { argb: `FF${NAVY}` }, size: 10, name: 'Calibri' };
@@ -19,8 +21,10 @@ const inputFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6
 const calcFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
 const resultFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const warnFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } };
-const goldFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC9A227' } };
-const goldFont   = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1B2A4A' } };
+const goldFill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${GOLD}` } };
+const goldFont   = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${NAVY}` } };
+const brandFont  = { name: 'Calibri', size: 14, bold: true, color: { argb: `FF${GOLD}` } };
+const brandFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${NAVY}` } };
 const thinBorder = {
   top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
   bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
@@ -42,10 +46,18 @@ function cols(ws, w) { w.forEach((v, i) => { ws.getColumn(i + 1).width = v; }); 
 
 function hdr(ws, r, text, n) {
   const row = ws.getRow(r);
-  for (let c = 1; c <= n; c++) { row.getCell(c).fill = headerFill; row.getCell(c).font = headerFont; }
-  row.getCell(1).value = text;
-  ws.mergeCells(r, 1, r, n);
-  row.height = 22;
+  row.height = 28;
+  for (let c = 1; c <= n; c++) { row.getCell(c).fill = brandFill; }
+  // Left cell: branding in gold
+  row.getCell(1).value = 'GLOBAL GAUNTLET';
+  row.getCell(1).font = brandFont;
+  row.getCell(1).alignment = { vertical: 'middle' };
+  // Right cell: tab title in white
+  row.getCell(n).value = text;
+  row.getCell(n).font = { ...headerFont, size: 10 };
+  row.getCell(n).fill = brandFill;
+  row.getCell(n).alignment = { horizontal: 'right', vertical: 'middle' };
+  if (n > 2) ws.mergeCells(r, 1, r, n - 1);
 }
 
 function sub(ws, r, text, n) {
@@ -55,11 +67,21 @@ function sub(ws, r, text, n) {
   ws.mergeCells(r, 1, r, n);
 }
 
+function brand(ws, numCols) {
+  const row = ws.getRow(1);
+  row.height = 28;
+  for (let c = 1; c <= numCols; c++) { row.getCell(c).fill = brandFill; }
+  row.getCell(1).value = 'GLOBAL GAUNTLET';
+  row.getCell(1).font = brandFont;
+  row.getCell(1).alignment = { vertical: 'middle' };
+  ws.mergeCells(1, 1, 1, numCols);
+}
+
 function val(ws, r, c, v, fmt, fill) {
   const cell = ws.getRow(r).getCell(c);
   cell.value = v;
   cell.font = fill === inputFill ? inputFont : font10;
-  if (fmt) cell.numFmt = fmt;
+  if (fmt) { cell.numFmt = fmt; cell.alignment = { horizontal: 'right' }; }
   if (fill) cell.fill = fill;
 }
 
@@ -67,7 +89,7 @@ function fml(ws, r, c, formula, fmt, fill) {
   const cell = ws.getRow(r).getCell(c);
   cell.value = { formula };
   cell.font = fill === resultFill ? outputFont10 : greenFont;
-  if (fmt) cell.numFmt = fmt;
+  if (fmt) { cell.numFmt = fmt; cell.alignment = { horizontal: 'right' }; }
   cell.fill = fill || calcFill;
 }
 
@@ -75,7 +97,7 @@ function fmlBold(ws, r, c, formula, fmt, fill) {
   const cell = ws.getRow(r).getCell(c);
   cell.value = { formula };
   cell.font = (fill || resultFill) === resultFill ? outputFont : greenFontBold;
-  if (fmt) cell.numFmt = fmt;
+  if (fmt) { cell.numFmt = fmt; cell.alignment = { horizontal: 'right' }; }
   cell.fill = fill || resultFill;
 }
 
@@ -113,12 +135,29 @@ function dataRow(ws, r, values, fmts) {
     const cell = ws.getRow(r).getCell(i + 1);
     cell.value = v;
     cell.font = { size: 9, name: 'Calibri' };
-    if (fmts && fmts[i]) cell.numFmt = fmts[i];
+    if (fmts && fmts[i]) { cell.numFmt = fmts[i]; cell.alignment = { horizontal: 'right' }; }
+    else if (typeof v === 'number') cell.alignment = { horizontal: 'right' };
   });
 }
 
 function printSetup(ws) {
   ws.pageSetup = { fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  ws.headerFooter = {
+    oddFooter: '&L&8&I&KA0A0A0DISCLAIMER: Initial directional estimate only. Not financial advice. Review with your own financial, legal, and operational experts.&R&8&KA0A0A0Global Gauntlet | &D',
+  };
+}
+
+const DISCLAIMER_TEXT = 'DISCLAIMER: This model provides an initial directional estimate only. All projections are based on industry benchmarks and user-provided inputs. This is not financial advice. Results should be reviewed and validated by your own financial, legal, and operational experts before any investment decision. Global Gauntlet assumes no liability for decisions made based on this analysis.';
+
+function addDisclaimer(ws, startRow, numCols) {
+  const r = startRow + 2;
+  const row = ws.getRow(r);
+  ws.mergeCells(r, 1, r, numCols);
+  row.getCell(1).value = DISCLAIMER_TEXT;
+  row.getCell(1).font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF999999' } };
+  row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+  row.height = 36;
+  return r;
 }
 
 // --- Data ---
@@ -142,7 +181,7 @@ const LOCATIONS = [
 // =====================================================================
 export async function generateExcelModel(formData, mcResults, results) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'AI ROI Calculator';
+  wb.creator = 'Global Gauntlet — AI ROI Model';
   wb.created = new Date();
 
   // Determine which tabs to show based on role tier
@@ -925,98 +964,175 @@ export async function generateExcelModel(formData, mcResults, results) {
   hdr(SU, 1, 'EXECUTIVE SUMMARY', 4);
   colorLegend(SU, 2);
 
-  // --- Key Metrics (rows 3-8) ---
-  sub(SU, 3, 'Key Metrics (Base Case)', 4);
-  val(SU, 4, 1, 'Net Present Value (NPV)');
-  fmlBold(SU, 4, 2, "'P&L & Cash Flow'!B27", DOL);
-  val(SU, 5, 1, 'Internal Rate of Return');
-  fml(SU, 5, 2, "'P&L & Cash Flow'!B28", PCT);
-  val(SU, 6, 1, 'ROIC (net profit / capital)');
-  fml(SU, 6, 2, "'P&L & Cash Flow'!B30", PCT);
-  val(SU, 7, 1, 'Payback Period (months)');
-  fml(SU, 7, 2, "'P&L & Cash Flow'!B29", '0');
-  val(SU, 8, 1, '5-Year Net Savings');
-  fml(SU, 8, 2, "'P&L & Cash Flow'!G24", DOL);
-  note(SU, 8, 3, 'Cumulative undiscounted');
+  // --- VERDICT (McKinsey-style: answer first) ---
+  {
+    const verdict = results?.scenarios?.conservative?.npv > 0 ? 'INVEST' :
+                    results?.scenarios?.base?.npv > 0 ? 'PROCEED WITH CAUTION' :
+                    results?.scenarios?.optimistic?.npv > 0 ? 'PILOT ONLY' : 'DO NOT INVEST';
+    const verdictColor = verdict === 'INVEST' ? 'FF2E7D32' : verdict === 'DO NOT INVEST' ? 'FFE53935' : `FF${GOLD}`;
+    const row3 = SU.getRow(3);
+    row3.height = 32;
+    for (let c = 1; c <= 4; c++) row3.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B2A4A' } };
+    row3.getCell(1).value = 'RECOMMENDATION:';
+    row3.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+    row3.getCell(1).alignment = { vertical: 'middle' };
+    row3.getCell(2).value = verdict;
+    row3.getCell(2).font = { name: 'Calibri', size: 14, bold: true, color: { argb: verdictColor } };
+    row3.getCell(2).alignment = { vertical: 'middle' };
+    SU.mergeCells(3, 2, 3, 4);
+  }
 
-  // --- Investment Required (rows 10-14) ---
-  sub(SU, 10, 'Investment Required', 4);
-  val(SU, 11, 1, 'Upfront Investment');
-  fml(SU, 11, 2, "'Key Formulas'!B64", DOL);
-  val(SU, 12, 1, 'Phased Separation Cost');
-  fml(SU, 12, 2, "'Key Formulas'!B67", DOL);
-  val(SU, 13, 1, 'Total Capital Deployed');
-  fmlBold(SU, 13, 2, "'Key Formulas'!B68", DOL);
-  val(SU, 14, 1, 'Annual Ongoing (Yr 1)');
-  fml(SU, 14, 2, "'Key Formulas'!B51", DOL);
+  // --- TOP 3 LEVERS (the only variables that matter) ---
+  sub(SU, 5, 'TOP 3 VALUE DRIVERS — Focus Here', 4);
+  {
+    const topLevers = results?.executiveSummary?.topLevers || [];
+    for (let i = 0; i < Math.min(3, topLevers.length); i++) {
+      const lever = topLevers[i];
+      val(SU, 6 + i, 1, `${i + 1}. ${lever.label}`);
+      SU.getRow(6 + i).getCell(1).font = { ...fontBold, size: 11 };
+      val(SU, 6 + i, 2, lever.npvSwing, DOL, goldFill);
+      SU.getRow(6 + i).getCell(2).font = goldFont;
+      note(SU, 6 + i, 3, `NPV swings ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(lever.npvLow)} to ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(lever.npvHigh)}`);
+    }
+    note(SU, 9, 1, 'These 3 inputs drive 80%+ of your ROI. Everything else is a tuning knob.');
+    SU.getRow(9).getCell(1).font = { ...font10, italic: true, bold: true, color: { argb: `FF${NAVY}` } };
+  }
 
-  // --- Scenario Comparison (rows 16-22) ---
-  sub(SU, 16, 'Scenario Comparison', 4);
-  tableHeaders(SU, 17, ['', 'Conservative', 'Base Case', 'Optimistic']);
-  val(SU, 18, 1, 'NPV');
-  fml(SU, 18, 2, 'Sensitivity!B14', DOL, warnFill);
-  fml(SU, 18, 3, 'Sensitivity!C14', DOL, calcFill);
-  fml(SU, 18, 4, 'Sensitivity!D14', DOL, resultFill);
-  val(SU, 19, 1, 'ROIC');
-  fml(SU, 19, 2, 'Sensitivity!B16', PCT, warnFill);
-  fml(SU, 19, 3, 'Sensitivity!C16', PCT, calcFill);
-  fml(SU, 19, 4, 'Sensitivity!D16', PCT, resultFill);
-  val(SU, 20, 1, 'Payback (months)');
-  fml(SU, 20, 2, 'Sensitivity!B17', '0', warnFill);
-  fml(SU, 20, 3, 'Sensitivity!C17', '0', calcFill);
-  fml(SU, 20, 4, 'Sensitivity!D17', '0', resultFill);
-  val(SU, 21, 1, '5-Yr Net');
-  fml(SU, 21, 2, 'Sensitivity!B18', DOL, warnFill);
-  fml(SU, 21, 3, 'Sensitivity!C18', DOL, calcFill);
-  fml(SU, 21, 4, 'Sensitivity!D18', DOL, resultFill);
-  val(SU, 22, 1, 'Expected NPV (25/50/25)');
-  fmlBold(SU, 22, 2, 'Sensitivity!B19', DOL);
+  // --- Key Metrics ---
+  sub(SU, 11, 'Key Metrics (Base Case)', 4);
+  val(SU, 12, 1, 'Net Present Value (NPV)');
+  fmlBold(SU, 12, 2, "'P&L & Cash Flow'!B27", DOL);
+  val(SU, 13, 1, 'Internal Rate of Return');
+  fml(SU, 13, 2, "'P&L & Cash Flow'!B28", PCT);
+  val(SU, 14, 1, 'ROIC (net profit / capital)');
+  fml(SU, 14, 2, "'P&L & Cash Flow'!B30", PCT);
+  val(SU, 15, 1, 'Payback Period (months)');
+  fml(SU, 15, 2, "'P&L & Cash Flow'!B29", '0');
+  val(SU, 16, 1, '5-Year Net Savings');
+  fml(SU, 16, 2, "'P&L & Cash Flow'!G24", DOL);
+  note(SU, 16, 3, 'Cumulative undiscounted');
 
-  // --- Key Assumptions (rows 24-30) ---
-  sub(SU, 24, 'Key Assumptions', 4);
-  val(SU, 25, 1, 'Automation Potential');
-  fml(SU, 25, 2, "'Key Formulas'!B4", PCT);
-  val(SU, 26, 1, 'Risk Multiplier');
-  fml(SU, 26, 2, "'Key Formulas'!B9", PCT);
-  val(SU, 27, 1, 'Discount Rate');
-  fml(SU, 27, 2, "'Key Formulas'!B69", PCT);
-  val(SU, 28, 1, 'Displaced FTEs');
-  fml(SU, 28, 2, "'Key Formulas'!B20", '0');
-  val(SU, 29, 1, 'Retained FTEs');
-  fml(SU, 29, 2, "'Key Formulas'!B21", '0');
-  val(SU, 30, 1, 'Confidence Level');
-  fml(SU, 30, 2, 'IF(AND((Inputs!B18+Inputs!B19)/2>=4,Inputs!B20="Yes"),"High",IF((Inputs!B18+Inputs!B19)/2>=3,"Moderate","Conservative"))');
+  // --- Investment Required ---
+  sub(SU, 18, 'Investment Required', 4);
+  val(SU, 19, 1, 'Upfront Investment');
+  fml(SU, 19, 2, "'Key Formulas'!B64", DOL);
+  val(SU, 20, 1, 'Phased Separation Cost');
+  fml(SU, 20, 2, "'Key Formulas'!B67", DOL);
+  val(SU, 21, 1, 'Total Capital Deployed');
+  fmlBold(SU, 21, 2, "'Key Formulas'!B68", DOL);
+  val(SU, 22, 1, 'Annual Ongoing (Yr 1)');
+  fml(SU, 22, 2, "'Key Formulas'!B51", DOL);
 
-  // --- Capital Allocation Comparison (rows 32-37) ---
-  sub(SU, 32, 'Capital Allocation Comparison', 4);
-  val(SU, 33, 1, 'AI Project IRR');
-  fml(SU, 33, 2, "'P&L & Cash Flow'!B28", PCT);
-  val(SU, 34, 1, 'vs Stock Buyback (8%)');
-  fml(SU, 34, 2, "'P&L & Cash Flow'!B28-0.08", PCT);
-  note(SU, 34, 3, 'Typical equity return benchmark');
-  val(SU, 35, 1, 'vs M&A Hurdle (15%)');
-  fml(SU, 35, 2, "'P&L & Cash Flow'!B28-0.15", PCT);
-  note(SU, 35, 3, 'Standard M&A return threshold');
-  val(SU, 36, 1, 'vs Treasury Bond (4.5%)');
-  fml(SU, 36, 2, "'P&L & Cash Flow'!B28-0.045", PCT);
-  note(SU, 36, 3, 'Risk-free rate benchmark');
+  // --- Scenario Comparison ---
+  sub(SU, 24, 'Scenario Comparison', 4);
+  tableHeaders(SU, 25, ['', 'Conservative', 'Base Case', 'Optimistic']);
+  val(SU, 26, 1, 'NPV');
+  fml(SU, 26, 2, 'Sensitivity!B14', DOL, warnFill);
+  fml(SU, 26, 3, 'Sensitivity!C14', DOL, calcFill);
+  fml(SU, 26, 4, 'Sensitivity!D14', DOL, resultFill);
+  val(SU, 27, 1, 'ROIC');
+  fml(SU, 27, 2, 'Sensitivity!B16', PCT, warnFill);
+  fml(SU, 27, 3, 'Sensitivity!C16', PCT, calcFill);
+  fml(SU, 27, 4, 'Sensitivity!D16', PCT, resultFill);
+  val(SU, 28, 1, 'Payback (months)');
+  fml(SU, 28, 2, 'Sensitivity!B17', '0', warnFill);
+  fml(SU, 28, 3, 'Sensitivity!C17', '0', calcFill);
+  fml(SU, 28, 4, 'Sensitivity!D17', '0', resultFill);
+  val(SU, 29, 1, '5-Yr Net');
+  fml(SU, 29, 2, 'Sensitivity!B18', DOL, warnFill);
+  fml(SU, 29, 3, 'Sensitivity!C18', DOL, calcFill);
+  fml(SU, 29, 4, 'Sensitivity!D18', DOL, resultFill);
+  val(SU, 30, 1, 'Expected NPV (25/50/25)');
+  fmlBold(SU, 30, 2, 'Sensitivity!B19', DOL);
 
-  // --- Cost of Inaction (rows 38-41) ---
-  sub(SU, 38, 'Cost of Inaction (Do-Nothing Scenario)', 4);
-  val(SU, 39, 1, '5-Year Do-Nothing Cost');
-  fml(SU, 39, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+Lookups!B86)^0+(1+Lookups!B86)^1+(1+Lookups!B86)^2+(1+Lookups!B86)^3+(1+Lookups!B86)^4)", DOL);
-  note(SU, 39, 3, 'Competitive penalty + compliance risk over 5 years');
-  val(SU, 40, 1, 'Net Advantage of AI Project');
-  fml(SU, 40, 2, "B39+'P&L & Cash Flow'!B27", DOL);
-  note(SU, 40, 3, 'Do-Nothing cost + AI project NPV');
+  // --- Key Assumptions ---
+  sub(SU, 32, 'Key Assumptions', 4);
+  val(SU, 33, 1, 'Automation Potential');
+  fml(SU, 33, 2, "'Key Formulas'!B4", PCT);
+  val(SU, 34, 1, 'Risk Multiplier');
+  fml(SU, 34, 2, "'Key Formulas'!B9", PCT);
+  val(SU, 35, 1, 'Discount Rate');
+  fml(SU, 35, 2, "'Key Formulas'!B69", PCT);
+
+  // --- Capital Allocation ---
+  sub(SU, 37, 'Capital Allocation Comparison', 4);
+  val(SU, 38, 1, 'AI Project IRR');
+  fml(SU, 38, 2, "'P&L & Cash Flow'!B28", PCT);
+  val(SU, 39, 1, 'vs Stock Buyback (8%)');
+  fml(SU, 39, 2, "'P&L & Cash Flow'!B28-0.08", PCT);
+  note(SU, 39, 3, 'Typical equity return benchmark');
+  val(SU, 40, 1, 'vs M&A Hurdle (15%)');
+  fml(SU, 40, 2, "'P&L & Cash Flow'!B28-0.15", PCT);
+  note(SU, 40, 3, 'Standard M&A return threshold');
+
+  // --- Cost of Inaction ---
+  sub(SU, 42, 'Cost of Inaction', 4);
+  val(SU, 43, 1, '5-Year Do-Nothing Cost');
+  fml(SU, 43, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+Lookups!B86)^0+(1+Lookups!B86)^1+(1+Lookups!B86)^2+(1+Lookups!B86)^3+(1+Lookups!B86)^4)", DOL);
+  note(SU, 43, 3, 'See Cost of Inaction tab for full breakdown');
+  val(SU, 44, 1, 'Net Advantage of AI');
+  fml(SU, 44, 2, "B43+'P&L & Cash Flow'!B27", DOL);
 
   // Conditional formatting on NPV
   SU.addConditionalFormatting({
-    ref: 'B4', rules: [
+    ref: 'B12', rules: [
       { type: 'cellIs', operator: 'greaterThan', formulae: ['0'], style: { font: { color: { argb: 'FF66BB6A' }, bold: true } } },
       { type: 'cellIs', operator: 'lessThan', formulae: ['0'], style: { font: { color: { argb: 'FFEF5350' }, bold: true } } },
     ]
   });
+
+  // --- Visual Dashboard: Value Breakdown Bars ---
+  sub(SU, 46, 'VALUE BREAKDOWN (Visual)', 4);
+  {
+    const cats = [
+      { label: 'Efficiency Savings', value: results?.valueBreakdown?.efficiency?.gross || 0 },
+      { label: 'Headcount Savings', value: results?.valueBreakdown?.headcount?.gross || 0 },
+      { label: 'Error Reduction', value: results?.valueBreakdown?.errorReduction?.gross || 0 },
+      { label: 'Tool Replacement', value: results?.valueBreakdown?.toolReplacement?.gross || 0 },
+      { label: 'Revenue / KPI Impact', value: (results?.valueBreakdown?.archetypeRevenue?.gross || 0) + (results?.valueBreakdown?.archetypeKpi?.gross || 0) },
+    ];
+    const maxVal = Math.max(...cats.map(c => c.value), 1);
+    cats.forEach((cat, i) => {
+      const row = SU.getRow(47 + i);
+      row.getCell(1).value = cat.label;
+      row.getCell(1).font = font10;
+      row.getCell(2).value = cat.value;
+      row.getCell(2).numFmt = DOL;
+      row.getCell(2).font = fontBold;
+      row.getCell(2).alignment = { horizontal: 'right' };
+      // Text-based bar
+      const barLen = Math.round((cat.value / maxVal) * 30);
+      const bar = '\u2588'.repeat(Math.max(0, barLen)) + '\u2591'.repeat(Math.max(0, 30 - barLen));
+      row.getCell(3).value = bar;
+      row.getCell(3).font = { name: 'Calibri', size: 9, color: { argb: cat.value > 0 ? 'FF2E7D32' : 'FFE53935' } };
+      SU.mergeCells(47 + i, 3, 47 + i, 4);
+    });
+  }
+
+  // --- 5-Year Cash Flow Visual ---
+  sub(SU, 53, '5-YEAR CASH FLOW (Visual)', 4);
+  {
+    const projections = results?.scenarios?.base?.projections || [];
+    const maxCf = Math.max(...projections.map(p => Math.abs(p.netCashFlow)), 1);
+    projections.forEach((p, i) => {
+      const row = SU.getRow(54 + i);
+      row.getCell(1).value = `FY ${p.year}`;
+      row.getCell(1).font = fontBold;
+      row.getCell(2).value = p.netCashFlow;
+      row.getCell(2).numFmt = DOL;
+      row.getCell(2).font = { ...fontBold, color: { argb: p.netCashFlow >= 0 ? 'FF2E7D32' : 'FFE53935' } };
+      row.getCell(2).alignment = { horizontal: 'right' };
+      const barLen = Math.round((Math.abs(p.netCashFlow) / maxCf) * 30);
+      const bar = (p.netCashFlow >= 0 ? '\u2588' : '\u2591').repeat(barLen);
+      row.getCell(3).value = bar;
+      row.getCell(3).font = { name: 'Calibri', size: 9, color: { argb: p.netCashFlow >= 0 ? 'FF2E7D32' : 'FFE53935' } };
+      SU.mergeCells(54 + i, 3, 54 + i, 4);
+    });
+  }
+
+  // Disclaimer at bottom of Summary
+  addDisclaimer(SU, 60, 4);
+
   printSetup(SU);
 
   // ===================================================================
@@ -1136,6 +1252,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   // ROIC note
   note(PL, 40, 1, 'ROIC measures total net profit relative to total capital invested. A positive ROIC means the project returns more than it costs.');
   PL.mergeCells(40, 1, 40, 7);
+  addDisclaimer(PL, 41, 7);
   printSetup(PL);
 
   // ===================================================================
@@ -1497,6 +1614,8 @@ export async function generateExcelModel(formData, mcResults, results) {
   beRow += 1;
 
   const ca = results?.consultingAssumptions || {};
+  val(V5, beRow, 1, 'AI Provider'); val(V5, beRow, 2, ca.aiProvider || '(blended avg)'); beRow++;
+  val(V5, beRow, 1, 'Provider Model'); val(V5, beRow, 2, ca.providerModel || '(n/a)'); beRow++;
   val(V5, beRow, 1, 'Model Tier'); val(V5, beRow, 2, ca.modelTier || 'standard'); beRow++;
   val(V5, beRow, 1, 'Token-Based Costing'); val(V5, beRow, 2, ca.useTokenModel ? 'Enabled' : 'Disabled'); beRow++;
   val(V5, beRow, 1, 'LLM Calls Per Task'); val(V5, beRow, 2, ca.llmCallsPerTask || 3, NUM); beRow++;
@@ -1506,6 +1625,95 @@ export async function generateExcelModel(formData, mcResults, results) {
   if (ca.isAgenticWorkflow) {
     val(V5, beRow, 1, 'Agent Complexity'); val(V5, beRow, 2, ca.agentComplexity || 'standard'); beRow++;
   }
+
+  // --- Token Cost Discount Waterfall (step-by-step math) ---
+  const tcm = results?.aiCostModel?.tokenCostModel;
+  if (tcm && tcm.msrpInputPer1M != null) {
+    beRow += 2;
+    sub(V5, beRow, `TOKEN COST DISCOUNT WATERFALL (per 1M tokens) — ${ca.aiProvider || 'Blended'} / ${ca.modelTier || 'standard'}`, 6);
+    beRow += 1;
+    tableHeaders(V5, beRow, ['Step', 'Formula', 'Input $/1M', 'Output $/1M', 'Notes', '']);
+    beRow += 1;
+
+    // Step 1: MSRP
+    val(V5, beRow, 1, '1. MSRP (list price)');
+    val(V5, beRow, 2, 'Published provider rate');
+    val(V5, beRow, 3, tcm.msrpInputPer1M, '$#,##0.0000');
+    val(V5, beRow, 4, tcm.msrpOutputPer1M, '$#,##0.0000');
+    val(V5, beRow, 5, `Source: provider docs as of ${PROVIDER_PRICING_AS_OF.date}`);
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    // Step 2: Enterprise volume discount
+    val(V5, beRow, 1, '2. Enterprise volume discount');
+    val(V5, beRow, 2, `× (1 − ${(tcm.enterpriseDiscount * 100).toFixed(0)}%)`);
+    val(V5, beRow, 3, tcm.afterEnterpriseInput, '$#,##0.0000');
+    val(V5, beRow, 4, tcm.afterEnterpriseOutput, '$#,##0.0000');
+    val(V5, beRow, 5, `Based on company size: ${ca.companySize || formData.companySize || '—'}`);
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    // Step 3: Contract commitment discount
+    val(V5, beRow, 1, '3. Contract commitment discount');
+    val(V5, beRow, 2, `× ${tcm.contractDiscount.toFixed(2)}`);
+    val(V5, beRow, 3, tcm.inputCostPer1M, '$#,##0.0000');
+    val(V5, beRow, 4, tcm.outputCostPer1M, '$#,##0.0000');
+    val(V5, beRow, 5, `${tcm.contractType} commitment → base rate`);
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    // Step 4: Prompt caching (input only)
+    val(V5, beRow, 1, '4. Prompt caching (input only)');
+    val(V5, beRow, 2, `× (1 − ${(tcm.promptCachingRate * 100).toFixed(0)}% × 90%)`);
+    val(V5, beRow, 3, tcm.effectiveInputCostPer1M, '$#,##0.0000', resultFill);
+    val(V5, beRow, 4, tcm.outputCostPer1M, '$#,##0.0000', resultFill);
+    val(V5, beRow, 5, 'Cache hit rate × 90% discount on hits');
+    val(V5, beRow, 6, 'EFFECTIVE');
+    beRow++;
+
+    // Net effective rate savings summary
+    const inputSavingsPct = tcm.msrpInputPer1M > 0
+      ? (1 - tcm.effectiveInputCostPer1M / tcm.msrpInputPer1M)
+      : 0;
+    const outputSavingsPct = tcm.msrpOutputPer1M > 0
+      ? (1 - tcm.outputCostPer1M / tcm.msrpOutputPer1M)
+      : 0;
+    beRow++;
+    val(V5, beRow, 1, 'Total effective discount vs MSRP');
+    val(V5, beRow, 2, '');
+    val(V5, beRow, 3, inputSavingsPct, PCT);
+    val(V5, beRow, 4, outputSavingsPct, PCT);
+    val(V5, beRow, 5, 'Combined discount stack');
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    note(V5, beRow, 1, 'Waterfall: MSRP × (1 − enterprise discount) × contract discount = base rate; then input-only: × (1 − caching rate × caching discount) = effective rate.');
+    beRow += 1;
+  }
+
+  // --- Provider Pricing Reference Table (full table, dynamically rendered) ---
+  beRow += 2;
+  sub(V5, beRow, `AI MODEL PRICING BY PROVIDER — as of ${PROVIDER_PRICING_AS_OF.date}`, 6);
+  beRow += 1;
+  tableHeaders(V5, beRow, ['Provider', 'Tier', 'Model', 'Input $/1M', 'Output $/1M', 'Selected']);
+  beRow += 1;
+  const selectedProvider = ca.aiProvider || null;
+  for (const [providerName, tiers] of Object.entries(PROVIDER_PRICING)) {
+    for (const tierName of ['economy', 'standard', 'premium']) {
+      const t = tiers[tierName];
+      if (!t) continue;
+      const isSelected = providerName === selectedProvider && tierName === (ca.modelTier || 'standard');
+      val(V5, beRow, 1, providerName);
+      val(V5, beRow, 2, tierName.charAt(0).toUpperCase() + tierName.slice(1));
+      val(V5, beRow, 3, t.model);
+      val(V5, beRow, 4, t.input, '$#,##0.00');
+      val(V5, beRow, 5, t.output, '$#,##0.00');
+      val(V5, beRow, 6, isSelected ? 'Yes' : '');
+      beRow++;
+    }
+  }
+  note(V5, beRow, 1, `Sources retrieved ${PROVIDER_PRICING_AS_OF.date}: Anthropic (docs.anthropic.com/en/docs/about-claude/pricing), OpenAI (openai.com/api/pricing), Google (ai.google.dev/gemini-api/docs/pricing), xAI (docs.x.ai/developers/models). ${PROVIDER_PRICING_AS_OF.sourceNote}`);
+  beRow += 1;
 
   // Drift schedule
   beRow += 1;
@@ -2008,92 +2216,306 @@ export async function generateExcelModel(formData, mcResults, results) {
   printSetup(AU);
 
   // ===================================================================
-  // TAB: ASSUMPTION DEFINITIONS — Archetype cases with key drivers
+  // TAB: ASSUMPTION DEFINITIONS — CEO-friendly glossary
+  // Every term, what it means in plain English, an example, and where
+  // to find it in the model.
   // ===================================================================
-  cols(DF, [30, 45, 55, 40]);
-  hdr(DF, 1, 'ASSUMPTION DEFINITIONS BY USE CASE', 4);
+  cols(DF, [28, 50, 45, 25]);
+  hdr(DF, 1, 'GLOSSARY & DEFINITIONS', 4);
 
-  // Column headers
   const defHdrRow = DF.getRow(3);
-  ['Use Case', 'Key Drivers', 'Definition', 'Why It Matters'].forEach((h, ci) => {
+  ['Term', 'What It Means (Plain English)', 'Example', 'Where in Model'].forEach((h, ci) => {
     const cell = defHdrRow.getCell(ci + 1);
     cell.value = h;
     cell.font = headerFont;
     cell.fill = headerFill;
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
-  defHdrRow.height = 22;
+  defHdrRow.height = 24;
 
-  const ARCHETYPE_DEFINITIONS = [
-    {
-      label: 'Internal Process Automation',
-      drivers: 'Process volume, handling time, error rate, automation %',
-      definition: 'Automate repetitive internal workflows, document handling, and back-office operations using AI to reduce manual effort and errors.',
-      importance: 'Typically the fastest ROI path — high volume processes with measurable time savings and error reduction compound quickly.',
-    },
-    {
-      label: 'Customer-Facing AI',
-      drivers: 'Ticket volume, resolution time, CSAT, churn rate',
-      definition: 'Deploy AI-powered customer interactions including chatbots, intelligent routing, and personalized support experiences.',
-      importance: 'Directly impacts revenue retention and customer satisfaction — a 1-point CSAT improvement can increase retention by 5-10%.',
-    },
-    {
-      label: 'Data, Analytics & FP&A',
-      drivers: 'Reports/month, analyst hours, data sources, close cycle, reconciliation volume',
-      definition: 'Automate reporting, forecasting, financial close, reconciliation, and data-driven decision making to reduce analyst burden and improve insight speed.',
-      importance: 'Frees expensive analyst and finance team time for strategic work. Days-to-close reduction and faster forecasting compound across the organization.',
-    },
-    {
-      label: 'Revenue & Growth AI',
-      drivers: 'Pipeline value, conversion rate, deal cycle, lead volume',
-      definition: 'Drive revenue through AI-enhanced sales intelligence, marketing optimization, and market opportunity identification.',
-      importance: 'Revenue-eligible archetype — models both cost savings and top-line revenue impact from improved conversion.',
-    },
-    {
-      label: 'Risk, Compliance & Legal AI',
-      drivers: 'Audit volume, compliance checks, violation cost, contracts/month, review hours',
-      definition: 'Reduce compliance risk, automate contract review, improve audit quality, and streamline regulatory and legal processes with AI-driven monitoring.',
-      importance: 'Penalty avoidance, audit efficiency, and contract acceleration — a single compliance failure can cost 10-100x the annual AI investment.',
-    },
-    {
-      label: 'Knowledge Management AI',
-      drivers: 'Search queries/day, onboarding time, document count, resolution rate',
-      definition: 'Capture institutional knowledge, power enterprise search, and automate documentation with AI-driven knowledge systems.',
-      importance: 'Reduces knowledge loss from turnover and cuts onboarding time — critical for scaling organizations.',
-    },
+  const GLOSSARY = [
+    // --- Financial Metrics ---
+    { section: 'FINANCIAL METRICS' },
+    { term: 'NPV (Net Present Value)', desc: 'The total value of this investment in today\'s dollars, after accounting for the time value of money. A positive NPV means the project creates more value than it costs.', example: 'If NPV = $1.1M, the project generates $1.1M more than you\'d earn by putting the same money in the bank.', ref: 'Summary → B4' },
+    { term: 'IRR (Internal Rate of Return)', desc: 'The annualized percentage return this project generates. Compare it to your company\'s cost of capital — if IRR > cost of capital, the project creates value.', example: 'An IRR of 28% means each dollar invested grows at 28%/year over 5 years.', ref: 'Summary → B5' },
+    { term: 'ROIC (Return on Invested Capital)', desc: 'Total net profit divided by total capital invested. Shows how efficiently the project converts dollars invested into dollars returned.', example: 'ROIC of 72% means for every $1 invested, you get $1.72 back over 5 years.', ref: 'Summary → B6' },
+    { term: 'Payback Period', desc: 'How many months until cumulative savings exceed cumulative costs. After this point, the project is "in the money."', example: '39 months means the investment pays for itself in ~3.3 years.', ref: 'Summary → B7' },
+    { term: 'DCF (Discounted Cash Flow)', desc: 'The method used to calculate NPV. Future cash flows are "discounted" to today\'s dollars because $1 today is worth more than $1 in 5 years.', example: '$100K in Year 3 at a 10% discount rate is worth $75K today.', ref: 'P&L & Cash Flow tab' },
+    { term: 'Discount Rate', desc: 'The annual rate used to convert future dollars to today\'s value. Higher = more conservative (future savings are worth less). Based on company size and risk.', example: 'Mid-market companies use 10%; startups use 15%.', ref: 'Summary → B27' },
+    // --- Investment Terms ---
+    { section: 'INVESTMENT & COSTS' },
+    { term: 'Upfront Investment', desc: 'The one-time cost to build and deploy the AI solution. Includes engineering, project management, legal review, security audit, and contingency.', example: '$1.7M for a 25-person team automation project.', ref: 'Summary → B11' },
+    { term: 'Ongoing Annual Cost', desc: 'Annual recurring costs after launch — API fees, hosting, model retraining, compliance audits, cyber insurance, tech debt.', example: '$250K/year for platform licenses + monitoring + maintenance.', ref: 'Summary → B14' },
+    { term: 'Total Capital Deployed', desc: 'Upfront investment + separation costs. The total check the company writes before seeing returns.', example: 'Upfront $1.7M + separation $200K = $1.9M total.', ref: 'Summary → B13' },
+    { term: 'Hidden Costs', desc: 'Costs that most vendors don\'t include: change management, cultural resistance, data cleanup, productivity dip during transition, integration testing.', example: 'Change management alone is typically 12-15% of implementation cost.', ref: 'Key Formulas → row 60+' },
+    { term: 'Separation Cost', desc: 'Cost of transitioning displaced employees — severance, benefits continuation, outplacement, retraining. Phased over Years 2-5, not immediate.', example: '1.3x annual salary per displaced employee, spread over 4 years.', ref: 'Key Formulas → B67' },
+    // --- Savings & Value ---
+    { section: 'SAVINGS & VALUE CREATION' },
+    { term: 'Gross Annual Savings', desc: 'Total annual savings before subtracting ongoing AI costs. Includes labor efficiency, headcount displacement, error reduction, and tool replacement.', example: 'A 25-person team with 47% automation potential saves ~$2.1M/year gross.', ref: 'P&L & Cash Flow → row 11' },
+    { term: 'Net Cash Flow', desc: 'Gross savings minus ongoing costs minus separation costs. The actual cash the company keeps each year.', example: 'Year 3: $500K gross savings - $150K ongoing = $350K net.', ref: 'P&L & Cash Flow → row 24' },
+    { term: 'Automation Potential', desc: 'The percentage of the current process that AI can realistically automate, based on industry benchmarks. Capped at 85% (humans always needed for edge cases).', example: '47% means AI handles roughly half the work; people handle the rest.', ref: 'Key Formulas → B4' },
+    { term: 'Risk Multiplier', desc: 'A blended factor that reduces projected savings to account for organizational readiness and industry success rates. Lower readiness = bigger discount.', example: 'A risk multiplier of 0.65 means projected savings are reduced by 35%.', ref: 'Key Formulas → B9' },
+    { term: 'Adoption Rate', desc: 'The percentage of the team that actively uses the AI tool. Driven by change readiness, training quality, and executive support.', example: 'Change readiness of 3/5 → ~70% adoption rate.', ref: 'Key Formulas → B5' },
+    // --- Scenario Analysis ---
+    { section: 'SCENARIOS & RISK' },
+    { term: 'Conservative Scenario', desc: 'Worst-case assumptions: 25% lower automation, no error reduction, longer timeline. If NPV is positive here, the investment is very safe.', example: 'Conservative NPV of $168K = still positive even in worst case.', ref: 'Sensitivity → B14' },
+    { term: 'Base Case', desc: 'Most likely outcome using central estimates from industry benchmarks. This is the "expected" result.', example: 'Base NPV of $1.1M = our best estimate of the return.', ref: 'Sensitivity → C14' },
+    { term: 'Optimistic Scenario', desc: 'Best-case assumptions: 25% higher automation, full error reduction, faster timeline. The upside potential.', example: 'Optimistic NPV of $2.1M = what\'s possible if everything goes well.', ref: 'Sensitivity → D14' },
+    { term: 'Expected Value', desc: 'Probability-weighted average: 25% conservative + 50% base + 25% optimistic. A single "blended" number that accounts for uncertainty.', example: 'Expected NPV = 0.25 × $168K + 0.50 × $1.1M + 0.25 × $2.1M.', ref: 'Summary → B22' },
+    { term: 'Monte Carlo Simulation', desc: '500 random simulations that vary all inputs simultaneously. Shows the range of possible outcomes and the probability of hitting your target.', example: '"85% probability of positive NPV" means 425 of 500 simulations were profitable.', ref: 'Web app → Monte Carlo section' },
+    { term: 'Sensitivity Analysis', desc: 'Shows which inputs have the biggest impact on NPV. Change one variable at a time and measure the effect. The "tornado chart."', example: 'Team size has a $400K NPV swing — it\'s the biggest lever.', ref: 'Sensitivity tab → Tornado' },
+    // --- Organizational ---
+    { section: 'ORGANIZATIONAL INPUTS' },
+    { term: 'Change Readiness (1-5)', desc: 'How open is your team to new tools? 1 = highly resistant, 5 = eagerly adopting. This is the #1 predictor of AI project success.', example: '3 = neutral; team will adopt with proper support and training.', ref: 'Inputs → B18' },
+    { term: 'Data Readiness (1-5)', desc: 'How clean and accessible is your data? 1 = messy/siloed, 5 = governed/API-ready. Poor data adds 25-40% to timeline and costs.', example: '2 = significant cleanup needed before AI can work effectively.', ref: 'Inputs → B19' },
+    { term: 'Executive Sponsor', desc: 'Does a C-level or VP actively champion this project? Projects without sponsors fail 2x more often (Gartner 2024).', example: 'Yes = 15% higher success rate built into the model.', ref: 'Inputs → B20' },
+    { term: 'Team Size', desc: 'Number of people currently working on this process. The #1 driver of absolute ROI — larger teams = bigger savings.', example: '25 people at $130K avg = $3.25M annual labor cost to optimize.', ref: 'Inputs → B11' },
+    // --- Use Cases ---
+    { section: 'AI PROJECT ARCHETYPES' },
+    { term: 'Internal Process Automation', desc: 'Back-office workflow automation (AP, HR, document processing). Fastest ROI path with measurable time/error savings.', example: 'JPMorgan COiN: loan document processing from 360K hours to seconds.', ref: 'Archetype Detail tab' },
+    { term: 'Customer-Facing AI', desc: 'AI chatbots, support automation, personalized experiences. Revenue-eligible via churn reduction.', example: 'Klarna AI handles 2/3 of customer chats in 2 min vs 11 min.', ref: 'Archetype Detail tab' },
+    { term: 'Data, Analytics & FP&A', desc: 'Automated reporting, forecasting, financial close. Frees expensive analyst time for strategic work.', example: 'Siemens AI: financial close from 10 days to 3 days.', ref: 'Archetype Detail tab' },
+    { term: 'Revenue & Growth AI', desc: 'AI-enhanced sales, marketing, lead scoring. Models both cost savings and revenue uplift.', example: 'Salesforce Einstein: 30% increase in lead conversion rates.', ref: 'Archetype Detail tab' },
+    { term: 'Risk, Compliance & Legal AI', desc: 'Compliance monitoring, contract review, audit automation. ROI includes penalty avoidance.', example: 'HSBC AI monitoring: 20% reduction in false positive alerts.', ref: 'Archetype Detail tab' },
+    { term: 'Knowledge Management AI', desc: 'Enterprise search, documentation, onboarding acceleration. Reduces knowledge loss from turnover.', example: 'Novo Nordisk: 40% reduction in new hire onboarding time.', ref: 'Archetype Detail tab' },
   ];
 
-  ARCHETYPE_DEFINITIONS.forEach((arch, i) => {
-    const r = DF.getRow(4 + i);
-    r.getCell(1).value = arch.label;
+  let dfRow = 4;
+  GLOSSARY.forEach((entry, i) => {
+    if (entry.section) {
+      sub(DF, dfRow, entry.section, 4);
+      dfRow++;
+      return;
+    }
+    const r = DF.getRow(dfRow);
+    r.getCell(1).value = entry.term;
     r.getCell(1).font = fontBold;
-    r.getCell(2).value = arch.drivers;
+    r.getCell(2).value = entry.desc;
     r.getCell(2).font = font10;
-    r.getCell(3).value = arch.definition;
-    r.getCell(3).font = font10;
-    r.getCell(4).value = arch.importance;
-    r.getCell(4).font = font10;
+    r.getCell(3).value = entry.example;
+    r.getCell(3).font = { ...font10, italic: true, color: { argb: 'FF555555' } };
+    r.getCell(4).value = entry.ref;
+    r.getCell(4).font = { ...font10, color: { argb: 'FF0000FF' } };
     [1, 2, 3, 4].forEach(c => {
       r.getCell(c).alignment = { vertical: 'top', wrapText: true };
       r.getCell(c).border = thinBorder;
     });
-    r.height = 45;
-    if (i % 2 === 1) {
+    r.height = 50;
+    if (i % 2 === 0) {
       [1, 2, 3, 4].forEach(c => {
-        r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+        r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F9FA' } };
       });
     }
+    dfRow++;
   });
 
-  // Add selected archetype highlight note
-  const noteRow = DF.getRow(4 + ARCHETYPE_DEFINITIONS.length + 1);
-  noteRow.getCell(1).value = 'Selected Use Case:';
-  noteRow.getCell(1).font = fontBold;
-  noteRow.getCell(2).value = { formula: 'Inputs!B10' };
-  noteRow.getCell(2).font = { ...fontBold, color: { argb: 'FF0000FF' } };
+  // Selected archetype note
+  dfRow += 1;
+  const noteRowDf = DF.getRow(dfRow);
+  noteRowDf.getCell(1).value = 'Your Selected Use Case:';
+  noteRowDf.getCell(1).font = fontBold;
+  noteRowDf.getCell(2).value = { formula: 'Inputs!B10' };
+  noteRowDf.getCell(2).font = { ...fontBold, color: { argb: 'FF0000FF' } };
 
   printSetup(DF);
   DF.protect('', { selectLockedCells: true, selectUnlockedCells: true });
+
+  // ===================================================================
+  // TAB: COST OF INACTION — What happens if you do nothing
+  // ===================================================================
+  const CI = wb.addWorksheet('Cost of Inaction', { tabColor: { argb: 'FFE53935' } });
+  cols(CI, [35, 18, 18, 18, 18, 18, 22]);
+  hdr(CI, 1, 'COST OF INACTION — 5-YEAR DO-NOTHING ANALYSIS', 7);
+  colorLegend(CI, 2);
+
+  sub(CI, 3, 'THE PRICE OF WAITING', 7);
+  {
+    const inaction = results?.opportunityCost;
+    const breakdown = results?.doNothingProjection;
+    const yearlyData = inaction?.yearlyBreakdown || [];
+
+    // Year headers
+    tableHeaders(CI, 4, ['Cost Category', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', '5-Year Total']);
+
+    // Data rows with formulas referencing the calculation
+    const categories = [
+      { label: 'Wage Inflation', key: 'wageInflation', desc: 'Your labor costs grow every year — these are dollars you cannot avoid' },
+      { label: 'Legacy System Creep', key: 'legacyCreep', desc: 'Maintenance costs on aging tools increase 5-8% annually' },
+      { label: 'Forgone AI Savings', key: 'forgoneSavings', desc: 'Savings you would have realized if you had started this year' },
+      { label: 'Competitive Loss', key: 'competitiveLoss', desc: 'Revenue erosion as competitors adopt AI and compress your margins' },
+      { label: 'Compliance Risk', key: 'complianceRisk', desc: 'Regulatory costs escalate 4-6% annually (industry benchmark)' },
+    ];
+
+    let ciRow = 5;
+    categories.forEach(cat => {
+      val(CI, ciRow, 1, cat.label);
+      CI.getRow(ciRow).getCell(1).font = fontBold;
+      for (let y = 0; y < 5; y++) {
+        const v = yearlyData[y]?.[cat.key] || 0;
+        val(CI, ciRow, y + 2, v, DOL);
+      }
+      const total = yearlyData.reduce((s, yr) => s + (yr[cat.key] || 0), 0);
+      val(CI, ciRow, 7, total, DOL, warnFill);
+      CI.getRow(ciRow).getCell(7).font = { ...fontBold, color: { argb: 'FFE53935' } };
+      ciRow++;
+    });
+
+    // Total row
+    ciRow++;
+    sub(CI, ciRow, '', 7);
+    val(CI, ciRow, 1, 'TOTAL COST OF INACTION');
+    CI.getRow(ciRow).getCell(1).font = { ...fontBold, size: 11 };
+    for (let y = 0; y < 5; y++) {
+      const v = yearlyData[y]?.total || 0;
+      val(CI, ciRow, y + 2, v, DOL, resultFill);
+      CI.getRow(ciRow).getCell(y + 2).font = outputFont;
+    }
+    const grandTotal = yearlyData.reduce((s, yr) => s + (yr.total || 0), 0);
+    val(CI, ciRow, 7, grandTotal, DOL, goldFill);
+    CI.getRow(ciRow).getCell(7).font = { ...goldFont, size: 12 };
+
+    // Comparison section
+    ciRow += 2;
+    sub(CI, ciRow, 'DECISION COMPARISON', 7);
+    ciRow++;
+    val(CI, ciRow, 1, 'Cost of Doing Nothing (5 years)');
+    val(CI, ciRow, 2, grandTotal, DOL, warnFill);
+    CI.getRow(ciRow).getCell(2).font = { ...fontBold, color: { argb: 'FFE53935' } };
+    ciRow++;
+    val(CI, ciRow, 1, 'AI Investment (NPV)');
+    fml(CI, ciRow, 2, "'P&L & Cash Flow'!B27", DOL, calcFill);
+    ciRow++;
+    val(CI, ciRow, 1, 'NET ADVANTAGE OF AI');
+    CI.getRow(ciRow).getCell(1).font = { ...fontBold, size: 11 };
+    val(CI, ciRow, 2, grandTotal + (results?.scenarios?.base?.npv || 0), DOL, goldFill);
+    CI.getRow(ciRow).getCell(2).font = { ...goldFont, size: 12 };
+    note(CI, ciRow, 3, 'Do-Nothing cost + AI project NPV = total value of acting now');
+
+    // Plain English summary
+    ciRow += 2;
+    sub(CI, ciRow, 'WHAT THIS MEANS', 7);
+    ciRow++;
+    const summaryText = grandTotal > 0
+      ? `Waiting 5 years costs your organization approximately ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(grandTotal)} in wage inflation, competitive erosion, and forgone savings. Every month of delay costs roughly ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Math.round(grandTotal / 60))}.`
+      : 'Cost of inaction data not available — ensure all inputs are provided.';
+    const sumRow = CI.getRow(ciRow);
+    sumRow.getCell(1).value = summaryText;
+    sumRow.getCell(1).font = { ...font10, italic: true };
+    sumRow.getCell(1).alignment = { wrapText: true };
+    CI.mergeCells(ciRow, 1, ciRow, 7);
+    sumRow.height = 40;
+  }
+  printSetup(CI);
+
+  // ===================================================================
+  // TAB: STRANDED COSTS — Vendor exit / switching cost phasing
+  // ===================================================================
+  const SC = wb.addWorksheet('Stranded Costs', { tabColor: { argb: 'FFFF9800' } });
+  cols(SC, [35, 18, 18, 18, 18, 18, 22]);
+  hdr(SC, 1, 'STRANDED & SWITCHING COSTS', 7);
+  colorLegend(SC, 2);
+
+  {
+    const vendorLockIn = results?.vendorLockIn || {};
+    const oneTime = results?.oneTimeCosts || {};
+    const vendorsReplaced = oneTime.vendorsReplaced || 0;
+    const termCost = oneTime.vendorTerminationCost || 0;
+    const switchCost = oneTime.vendorSwitchingCost || 0;
+
+    // Section 1: Current vendor exit costs
+    sub(SC, 3, 'CURRENT VENDOR EXIT COSTS', 7);
+    tableHeaders(SC, 4, ['Cost Item', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
+
+    let scRow = 5;
+    // Early termination fees — phased 60/40 over 2 years
+    val(SC, scRow, 1, 'Early Termination Fees');
+    note(SC, scRow, 1, '');
+    SC.getRow(scRow).getCell(1).font = fontBold;
+    val(SC, scRow, 2, Math.round(termCost * 0.60), DOL, warnFill);
+    val(SC, scRow, 3, Math.round(termCost * 0.40), DOL, warnFill);
+    val(SC, scRow, 4, 0, DOL);
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, termCost, DOL, warnFill);
+    scRow++;
+
+    // Migration costs — spread over 3 years
+    const migrationCost = Math.round(termCost * 0.30); // 30% of term cost for data migration
+    val(SC, scRow, 1, 'Data Migration');
+    SC.getRow(scRow).getCell(1).font = fontBold;
+    val(SC, scRow, 2, Math.round(migrationCost * 0.50), DOL);
+    val(SC, scRow, 3, Math.round(migrationCost * 0.35), DOL);
+    val(SC, scRow, 4, Math.round(migrationCost * 0.15), DOL);
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, migrationCost, DOL);
+    scRow++;
+
+    // Contract minimums
+    const contractMin = Math.round(termCost * 0.20);
+    val(SC, scRow, 1, 'Contract Minimum Commitments');
+    SC.getRow(scRow).getCell(1).font = fontBold;
+    val(SC, scRow, 2, Math.round(contractMin * 0.50), DOL, warnFill);
+    val(SC, scRow, 3, Math.round(contractMin * 0.50), DOL, warnFill);
+    val(SC, scRow, 4, 0, DOL);
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, contractMin, DOL, warnFill);
+    scRow++;
+
+    // Total stranded
+    scRow++;
+    val(SC, scRow, 1, 'TOTAL STRANDED COSTS');
+    SC.getRow(scRow).getCell(1).font = { ...fontBold, size: 11 };
+    const totalStranded = termCost + migrationCost + contractMin;
+    const yr1 = Math.round(termCost * 0.60) + Math.round(migrationCost * 0.50) + Math.round(contractMin * 0.50);
+    const yr2 = Math.round(termCost * 0.40) + Math.round(migrationCost * 0.35) + Math.round(contractMin * 0.50);
+    const yr3 = Math.round(migrationCost * 0.15);
+    val(SC, scRow, 2, yr1, DOL, goldFill); SC.getRow(scRow).getCell(2).font = goldFont;
+    val(SC, scRow, 3, yr2, DOL, goldFill); SC.getRow(scRow).getCell(3).font = goldFont;
+    val(SC, scRow, 4, yr3, DOL, goldFill); SC.getRow(scRow).getCell(4).font = goldFont;
+    val(SC, scRow, 5, 0, DOL);
+    val(SC, scRow, 6, 0, DOL);
+    val(SC, scRow, 7, totalStranded, DOL, goldFill); SC.getRow(scRow).getCell(7).font = { ...goldFont, size: 12 };
+
+    // Section 2: Future AI vendor lock-in risk
+    scRow += 2;
+    sub(SC, scRow, 'FUTURE AI VENDOR LOCK-IN RISK', 7);
+    scRow++;
+    val(SC, scRow, 1, 'Lock-In Level'); val(SC, scRow, 2, vendorLockIn.level || 'Medium'); SC.getRow(scRow).getCell(2).font = fontBold;
+    scRow++;
+    val(SC, scRow, 1, 'Estimated Switching Cost'); val(SC, scRow, 2, switchCost, DOL, warnFill);
+    note(SC, scRow, 3, `${Math.round((oneTime.vendorSwitchingRate || 0.35) * 100)}% of implementation cost`);
+    scRow++;
+    val(SC, scRow, 1, 'Year 5 Ongoing Cost'); val(SC, scRow, 2, vendorLockIn.year5OngoingCost || 0, DOL);
+    scRow++;
+    val(SC, scRow, 1, 'Total 5-Year Ongoing'); val(SC, scRow, 2, vendorLockIn.totalOngoing5Year || 0, DOL, warnFill);
+    scRow++;
+    val(SC, scRow, 1, 'Cost Escalation Schedule');
+    const sched = vendorLockIn.escalationSchedule || [];
+    for (let y = 0; y < Math.min(sched.length, 5); y++) {
+      val(SC, scRow, y + 2, sched[y], PCT);
+    }
+
+    // Recommendations
+    scRow += 2;
+    sub(SC, scRow, 'MITIGATION RECOMMENDATIONS', 7);
+    scRow++;
+    const mitigations = [
+      'Negotiate multi-year pricing caps with annual escalation limits (< 5%)',
+      'Require contractual exit provisions with maximum 90-day termination notice',
+      'Maintain API abstraction layer for model portability between vendors',
+      'Budget vendor switching reserve = 10% of implementation cost annually',
+      'Conduct annual vendor market review to maintain negotiating leverage',
+    ];
+    mitigations.forEach(m => {
+      val(SC, scRow, 1, m);
+      SC.getRow(scRow).getCell(1).alignment = { wrapText: true };
+      SC.mergeCells(scRow, 1, scRow, 7);
+      scRow++;
+    });
+  }
+  printSetup(SC);
 
   // ===================================================================
   // TABS: PER-ARCHETYPE ASSUMPTION SHEETS
@@ -2101,12 +2523,12 @@ export async function generateExcelModel(formData, mcResults, results) {
   // formulas, and real-world benchmarks.
   // ===================================================================
   const ARCHETYPE_TAB_NAMES = {
-    'internal-process-automation': 'Assumptions: Process',
-    'customer-facing-ai':         'Assumptions: Customer',
-    'data-analytics-automation':  'Assumptions: Analytics',
-    'revenue-growth-ai':          'Assumptions: Revenue',
-    'risk-compliance-legal-ai':   'Assumptions: Compliance',
-    'knowledge-management-ai':    'Assumptions: Knowledge',
+    'internal-process-automation': 'Assumptions - Process',
+    'customer-facing-ai':         'Assumptions - Customer',
+    'data-analytics-automation':  'Assumptions - Analytics',
+    'revenue-growth-ai':          'Assumptions - Revenue',
+    'risk-compliance-legal-ai':   'Assumptions - Compliance',
+    'knowledge-management-ai':    'Assumptions - Knowledge',
   };
 
   const ARCHETYPE_BENCHMARKS = {
@@ -2305,6 +2727,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   }
 
   // Hide tabs not included in the user's tier
+  // Only show the ACTIVE archetype tab; hide the rest
   const allSheets = [
     { ws: I,  name: 'Inputs' },
     { ws: AD, name: 'Archetype Detail' },
@@ -2315,28 +2738,43 @@ export async function generateExcelModel(formData, mcResults, results) {
     { ws: V5, name: 'V5 Analysis' },
     { ws: AU, name: 'Model Audit' },
     { ws: DF, name: 'Assumption Definitions' },
+    { ws: CI, name: 'Cost of Inaction' },
+    { ws: SC, name: 'Stranded Costs' },
     ...archetypeSheets,
   ];
+  const activeTabName = ARCHETYPE_TAB_NAMES[activeArchetypeId];
   for (const { ws, name } of allSheets) {
-    if (!includedTabs.includes(name)) {
+    // Hide non-active archetype tabs
+    const isArchetypeTab = archetypeSheets.some(s => s.name === name);
+    if (isArchetypeTab && name !== activeTabName) {
+      ws.state = 'hidden';
+      continue;
+    }
+    if (!includedTabs.includes(name) && !isArchetypeTab) {
       ws.state = 'hidden';
     }
   }
 
+
   // ===================================================================
-  // DOWNLOAD
+  // DOWNLOAD (browser) or return buffer (Node/tests)
   // ===================================================================
   const buffer = await wb.xlsx.writeBuffer();
+  if (typeof document === 'undefined') {
+    return buffer;
+  }
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const label = (formData.industry || 'Custom').replace(/[^a-zA-Z0-9]/g, '_');
-  a.download = `AI_ROI_Model_${label}.xlsx`;
+  const archLabel = (PROJECT_ARCHETYPES.find(ar => ar.id === activeArchetypeId)?.label || 'Custom').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.download = `Global_Gauntlet_ROI_${archLabel}_${dateStr}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  return buffer;
 }

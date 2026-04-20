@@ -33,6 +33,7 @@ function getStepForNumber(min, max) {
 export default function Step3_ProcessDetails({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const advanceTimer = useRef(null);
 
   const autoAdvance = useCallback(
@@ -41,7 +42,7 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
       if (nextSubStep <= 6) {
         advanceTimer.current = setTimeout(() => {
           setSubStep(nextSubStep);
-        }, 300);
+        }, 600);
       }
     },
     [],
@@ -60,6 +61,7 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
       updateField('processType', archetype.sourceProcessTypes[0]);
     }
     updateField('archetypeInputs', getArchetypeInputDefaults(id));
+    setShowAdvanced(false);
     autoAdvance(1);
   };
 
@@ -118,6 +120,73 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
   const annualLaborCost = teamSize * avgSalary;
   const reworkCost = annualLaborCost * errorRate;
   const totalCost = annualLaborCost + reworkCost;
+
+  // Split archetype inputs into primary (3-5 key questions) and advanced (rest)
+  const primaryKeys = archetypeSchema?.primaryKeys || [];
+  const primaryInputs = archetypeSchema
+    ? archetypeSchema.inputs.filter(i => primaryKeys.includes(i.key))
+    : [];
+  const advancedInputs = archetypeSchema
+    ? archetypeSchema.inputs.filter(i => !primaryKeys.includes(i.key))
+    : [];
+
+  // Shared renderer for archetype input sliders
+  const renderArchetypeInput = (input) => {
+    const rawValue = archetypeInputValues[input.key] ?? input.default;
+
+    if (input.type === 'percent') {
+      const displayValue = Math.round(rawValue * 100);
+      const displayMin = Math.round(input.min * 100);
+      const displayMax = Math.round(input.max * 100);
+      return (
+        <div key={input.key} className="space-y-1">
+          <SliderInput
+            label={input.label}
+            value={displayValue}
+            onChange={(v) => handleArchetypeInput(input.key, v / 100)}
+            min={displayMin}
+            max={displayMax}
+            step={1}
+            suffix="%"
+            helperText={input.note}
+          />
+        </div>
+      );
+    }
+
+    if (input.type === 'scale') {
+      return (
+        <div key={input.key} className="space-y-1">
+          <SliderInput
+            label={input.label}
+            value={rawValue}
+            onChange={(v) => handleArchetypeInput(input.key, v)}
+            min={1}
+            max={5}
+            step={1}
+            suffix=""
+            helperText={input.note}
+          />
+        </div>
+      );
+    }
+
+    const step = getStepForNumber(input.min, input.max);
+    return (
+      <div key={input.key} className="space-y-1">
+        <SliderInput
+          label={input.label}
+          value={rawValue}
+          onChange={(v) => handleArchetypeInput(input.key, v)}
+          min={input.min}
+          max={input.max}
+          step={step}
+          suffix=""
+          helperText={input.note}
+        />
+      </div>
+    );
+  };
 
   // Determine section title
   const isCostSection = subStep >= 3;
@@ -198,11 +267,17 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
                 </span>
                 <div>
                   <p className="text-sm font-semibold text-emerald-800">{archetypeInfo?.label}</p>
-                  <p className="text-xs text-gray-500">Customize the inputs below to match your process</p>
+                  <p className="text-xs text-gray-500">Answer these questions to build an accurate financial model</p>
                 </div>
               </div>
 
-              {/* Editable Summary Card */}
+              {/* Primary inputs — the 3-5 key questions for this archetype */}
+              <div className="space-y-5">
+                <p className="text-xs font-medium text-navy/70">These inputs drive the core of your ROI calculation:</p>
+                {primaryInputs.map((input) => renderArchetypeInput(input))}
+              </div>
+
+              {/* Live computed summary card */}
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="mb-2 text-[10px] font-medium text-emerald-600">Computed from your inputs — click any value to override</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -254,68 +329,53 @@ export default function Step3_ProcessDetails({ formData, updateField }) {
                       <p className="mt-1 text-lg font-bold text-navy">{formatCurrency(computed.revenueImpact)}</p>
                     </div>
                   )}
+                  {computed.riskReduction != null && computed.riskReduction > 0 && (
+                    <div className="rounded-lg bg-white/70 px-3 py-2">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Risk Reduction</p>
+                      <p className="mt-1 text-lg font-bold text-navy">{formatCurrency(computed.riskReduction)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Scrollable compact input list */}
-              <div className="max-h-[40vh] space-y-5 overflow-y-auto pr-1">
-                {archetypeSchema.inputs.map((input) => {
-                  const rawValue = archetypeInputValues[input.key] ?? input.default;
+              {/* Advanced inputs — remaining archetype-specific inputs */}
+              {advancedInputs.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="flex w-full items-center gap-2 rounded-lg border-2 border-dashed border-navy/20 px-4 py-2.5 text-sm font-medium text-navy/60 transition-all duration-150 hover:border-navy/40 hover:text-navy hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className={`h-4 w-4 transition-transform duration-200 ${showAdvanced ? 'rotate-90' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    Advanced inputs ({advancedInputs.length} more)
+                  </button>
 
-                  if (input.type === 'percent') {
-                    const displayValue = Math.round(rawValue * 100);
-                    const displayMin = Math.round(input.min * 100);
-                    const displayMax = Math.round(input.max * 100);
-                    return (
-                      <div key={input.key} className="space-y-1">
-                        <SliderInput
-                          label={input.label}
-                          value={displayValue}
-                          onChange={(v) => handleArchetypeInput(input.key, v / 100)}
-                          min={displayMin}
-                          max={displayMax}
-                          step={1}
-                          suffix="%"
-                          helperText={input.note}
-                        />
-                      </div>
-                    );
-                  }
-
-                  if (input.type === 'scale') {
-                    return (
-                      <div key={input.key} className="space-y-1">
-                        <SliderInput
-                          label={input.label}
-                          value={rawValue}
-                          onChange={(v) => handleArchetypeInput(input.key, v)}
-                          min={1}
-                          max={5}
-                          step={1}
-                          suffix=""
-                          helperText={input.note}
-                        />
-                      </div>
-                    );
-                  }
-
-                  const step = getStepForNumber(input.min, input.max);
-                  return (
-                    <div key={input.key} className="space-y-1">
-                      <SliderInput
-                        label={input.label}
-                        value={rawValue}
-                        onChange={(v) => handleArchetypeInput(input.key, v)}
-                        min={input.min}
-                        max={input.max}
-                        step={step}
-                        suffix=""
-                        helperText={input.note}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+                  <AnimatePresence>
+                    {showAdvanced && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="space-y-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                          {advancedInputs.map((input) => renderArchetypeInput(input))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              )}
 
               {/* Collapsible Fine-tune Assumptions */}
               <button

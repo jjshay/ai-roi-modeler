@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import LandingPage from './components/LandingPage';
 import StepWizard from './components/StepWizard';
 import LiveCalculation from './components/results/LiveCalculation';
+import ShareCard from './components/ShareCard';
+import CostOfWaiting from './components/CostOfWaiting';
+import PortfolioCompare from './components/PortfolioCompare';
 
 const DEFAULT_FORM_DATA = {
   // Step 1: Company Context
@@ -33,6 +36,7 @@ const DEFAULT_FORM_DATA = {
   implementationBudget: null, // Auto-calculated if null
   expectedTimeline: null, // Auto-calculated if null
   ongoingAnnualCost: null, // Auto-calculated if null
+  aiProvider: 'Anthropic Claude', // 'Anthropic Claude' | 'OpenAI' | 'Google Gemini' | 'xAI Grok' | null (uses blended avg)
   // Step 1 (optional): State for R&D credit
   companyState: 'Other / Not Sure',
   // V3: Advanced Value Modeling (optional)
@@ -216,10 +220,27 @@ async function saveModelToAPI(formData) {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results
-  const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
+  const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results | shareView
+  const [formData, setFormData] = useState(() => {
+    // Restore draft from localStorage if available
+    try {
+      const draft = localStorage.getItem('roi_draft');
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed && parsed.industry) return { ...DEFAULT_FORM_DATA, ...parsed };
+      }
+    } catch { /* ignore corrupt data */ }
+    return DEFAULT_FORM_DATA;
+  });
   const [modelId, setModelId] = useState(null);
   const initialLoadDone = useRef(false);
+
+  // Auto-save draft to localStorage on form changes
+  useEffect(() => {
+    if (formData && formData !== DEFAULT_FORM_DATA && formData.industry) {
+      try { localStorage.setItem('roi_draft', JSON.stringify(formData)); } catch { /* quota exceeded */ }
+    }
+  }, [formData]);
 
   // Restore from share token (/share/:token) or URL hash on initial load
   useEffect(() => {
@@ -233,7 +254,7 @@ export default function App() {
       loadSharedModel(shareMatch[1]).then((loaded) => {
         if (loaded && loaded.industry) {
           setFormData({ ...DEFAULT_FORM_DATA, ...loaded });
-          setScreen('results');
+          setScreen('shareView');
         }
       });
       return;
@@ -250,6 +271,7 @@ export default function App() {
     }
   }, []);
 
+  const hasDraft = formData && formData.industry && formData !== DEFAULT_FORM_DATA;
   const handleStart = useCallback(() => setScreen('wizard'), []);
   const handleWizardComplete = useCallback(() => setScreen('analyzing'), []);
   const handleAnalysisComplete = useCallback(() => setScreen('results'), []);
@@ -286,10 +308,42 @@ export default function App() {
     setFormData(DEFAULT_FORM_DATA);
     setModelId(null);
     setScreen('landing');
+    try { localStorage.removeItem('roi_draft'); } catch { /* ignore */ }
   }, []);
 
+  if (screen === 'shareView') {
+    return (
+      <ShareCard
+        formData={formData}
+        onBuildOwn={() => {
+          setFormData(DEFAULT_FORM_DATA);
+          window.history.replaceState(null, '', '/');
+          setScreen('landing');
+        }}
+      />
+    );
+  }
+
+  if (screen === 'portfolio') {
+    return (
+      <PortfolioCompare
+        baseFormData={formData}
+        onBack={() => setScreen('results')}
+      />
+    );
+  }
+
+  if (screen === 'costOfWaiting') {
+    return (
+      <CostOfWaiting
+        onStartFull={() => setScreen('wizard')}
+        onBack={() => setScreen('landing')}
+      />
+    );
+  }
+
   if (screen === 'landing') {
-    return <LandingPage onStart={handleStart} />;
+    return <LandingPage onStart={handleStart} hasDraft={hasDraft} onCostOfWaiting={() => setScreen('costOfWaiting')} />;
   }
 
   if (screen === 'wizard') {
@@ -314,6 +368,7 @@ export default function App() {
       onStartOver={handleStartOver}
       onEditInputs={handleEditInputs}
       onShare={handleShare}
+      onCompare={() => setScreen('portfolio')}
     />
   );
 }

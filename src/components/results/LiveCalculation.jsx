@@ -2,9 +2,16 @@ import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { runCalculations } from '../../logic/calculations';
 import { getRecommendation } from '../../logic/recommendations';
-import { AI_MATURITY_PREMIUM } from '../../logic/benchmarks';
+import { AI_MATURITY_PREMIUM, PROVIDER_PRICING, PROVIDER_PRICING_AS_OF } from '../../logic/benchmarks';
 import { formatCurrency, formatPercent, formatCompact } from '../../utils/formatters';
 import { getOutputTier, tierShows, AUTO_EXPAND } from '../../utils/outputTier';
+import QuarterlyCashFlow from './QuarterlyCashFlow';
+import RiskRegister from './RiskRegister';
+import BoardActions from './BoardActions';
+import ActualsTracker from './ActualsTracker';
+import UnitEconomics from './UnitEconomics';
+import IncrementalPL from './IncrementalPL';
+import { PROVIDER_LOGOS } from '../providerLogos';
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
   return (
@@ -385,14 +392,55 @@ function EmailGateModal({ onSubmit, onClose, formData }) {
   );
 }
 
-export default function LiveCalculation({ formData, onDownload, onDownloadExcel, onStartOver, onEditInputs, onShare }) {
+export default function LiveCalculation({ formData, onDownload, onDownloadExcel, onStartOver, onEditInputs, onShare, onCompare }) {
   // Custom adoption ramp — editable on results page, defaults to benchmark ramp
   const [customRamp, setCustomRamp] = useState(null);
+  // Provider override — lets user switch providers directly on the results page
+  const [providerOverride, setProviderOverride] = useState(null);
   const effectiveFormData = useMemo(() => {
-    if (!customRamp) return formData;
-    return { ...formData, customAdoptionRamp: customRamp };
-  }, [formData, customRamp]);
+    let data = formData;
+    if (customRamp) data = { ...data, customAdoptionRamp: customRamp };
+    if (providerOverride) data = { ...data, aiProvider: providerOverride };
+    return data;
+  }, [formData, customRamp, providerOverride]);
   const results = useMemo(() => runCalculations(effectiveFormData), [effectiveFormData]);
+
+  // Provider comparison: precompute all 4 providers for the comparison widget
+  const providerComparison = useMemo(() => {
+    const providerNames = Object.keys(PROVIDER_PRICING);
+    const currentProvider = effectiveFormData.aiProvider || 'Anthropic Claude';
+    return providerNames.map(name => {
+      const altResults = name === currentProvider
+        ? results
+        : runCalculations({ ...effectiveFormData, aiProvider: name });
+      const altScenario = altResults.scenarios.base;
+      const tcm = altResults.aiCostModel.tokenCostModel;
+      // Compute MSRP-equivalent annual cost for savings callout (no discounts applied)
+      const msrpRatio = tcm.msrpInputPer1M > 0 && tcm.effectiveInputCostPer1M > 0
+        ? (tcm.msrpInputPer1M + tcm.msrpOutputPer1M) / (tcm.effectiveInputCostPer1M + tcm.outputCostPer1M)
+        : 1;
+      const msrpAnnualCost = (tcm.annualTokenCost || 0) * msrpRatio;
+      const savingsVsMSRPPct = msrpAnnualCost > 0
+        ? 1 - (tcm.annualTokenCost || 0) / msrpAnnualCost
+        : 0;
+      return {
+        name,
+        model: tcm.providerModel,
+        annualTokenCost: tcm.annualTokenCost || 0,
+        msrpAnnualCost,
+        savingsVsMSRPPct,
+        annualOngoing: altResults.aiCostModel.computedOngoingCost || 0,
+        baseNPV: altScenario.npv,
+        baseROIC: altScenario.roic,
+        isCurrent: name === currentProvider,
+      };
+    });
+  }, [effectiveFormData, results]);
+
+  const providerSpread = useMemo(() => {
+    const costs = providerComparison.map(p => p.annualTokenCost);
+    return Math.max(...costs) - Math.min(...costs);
+  }, [providerComparison]);
 
   // Derive output tier from role
   const tier = useMemo(() => getOutputTier(formData.role), [formData.role]);
@@ -407,11 +455,14 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
   // Monte Carlo simulation (async dynamic import to avoid blocking initial render)
   const [mcResults, setMcResults] = useState(null);
+  const [mcLoading, setMcLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
+    setMcLoading(true);
     import('../../logic/monteCarlo').then(({ runMonteCarlo }) => {
       if (!cancelled) {
         setMcResults(runMonteCarlo(effectiveFormData, 500));
+        setMcLoading(false);
       }
     });
     return () => { cancelled = true; };
@@ -462,6 +513,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
   const [excelLoading, setExcelLoading] = useState(false);
   const [emailGateAction, setEmailGateAction] = useState(null); // null | 'pdf' | 'excel'
   const [shareCopied, setShareCopied] = useState(false);
+  const [showFullAnalysis, setShowFullAnalysis] = useState(false);
 
   const hasEmail = () => !!localStorage.getItem('roi_lead_email');
 
@@ -546,20 +598,54 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </p>
         </motion.div>
 
+        {/* Jump-to-section nav — makes the long scroll navigable */}
+        <nav className="mb-6 sticky top-2 z-10 bg-white/95 backdrop-blur rounded-xl shadow-md border border-gray-100 px-3 py-2">
+          <div className="flex flex-wrap gap-1 text-xs font-medium justify-center">
+            <a href="#summary" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Summary</a>
+            <a href="#dcf-5yr" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">5-FY DCF</a>
+            <a href="#incremental-pl" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">P&L</a>
+            <a href="#roi-formula" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">ROI Formula</a>
+            <a href="#assumptions" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Assumptions</a>
+            <a href="#sensitivity" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Sensitivity</a>
+            <a href="#financial-detail" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Financial Detail</a>
+          </div>
+        </nav>
+
+        <div id="summary" className="scroll-mt-16" />
+
+        {/* Input Validation Warnings */}
+        {results.inputWarnings && results.inputWarnings.length > 0 && (
+          <div className="mb-6 space-y-2">
+            {results.inputWarnings.map((w, i) => (
+              <div
+                key={i}
+                className={`rounded-lg px-4 py-3 text-sm flex items-start gap-2 ${
+                  w.severity === 'warning'
+                    ? 'bg-amber-50 border border-amber-200 text-amber-800'
+                    : 'bg-blue-50 border border-blue-200 text-blue-800'
+                }`}
+              >
+                <span className="shrink-0 mt-0.5">{w.severity === 'warning' ? '\u26A0' : '\u2139'}</span>
+                <span>{w.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Scenario Toggle */}
         <div className="flex justify-center mb-6">
-          <div className="inline-flex bg-white rounded-xl shadow-md p-1 gap-1">
+          <div className="inline-flex bg-white rounded-xl shadow-md p-1.5 gap-1">
             {[
-              { key: 'conservative', label: 'Conservative', color: 'text-red-500' },
-              { key: 'base', label: 'Base Case', color: 'text-amber-600' },
-              { key: 'optimistic', label: 'Optimistic', color: 'text-emerald-600' },
+              { key: 'conservative', label: 'Conservative', emoji: '\u{1F6E1}' },
+              { key: 'base', label: 'Base Case', emoji: '\u{1F3AF}' },
+              { key: 'optimistic', label: 'Optimistic', emoji: '\u{1F680}' },
             ].map((s) => (
               <button
                 key={s.key}
                 onClick={() => setActiveScenario(s.key)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
                   activeScenario === s.key
-                    ? `bg-navy text-white shadow-sm`
+                    ? `bg-navy text-white shadow-md`
                     : `text-gray-500 hover:text-navy hover:bg-gray-50`
                 }`}
               >
@@ -634,6 +720,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </div>
         </motion.div>
 
+        {/* Provider Cost Comparison — only if meaningful spread */}
+        {providerSpread > 5000 && (
+          <ProviderComparison
+            comparison={providerComparison}
+            currentProvider={effectiveFormData.aiProvider || 'Anthropic Claude'}
+            onSwitch={setProviderOverride}
+          />
+        )}
+
         {/* Break-Even & Volume Sensitivity */}
         {results.volumeSensitivity && (
           <motion.div
@@ -704,10 +799,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {/* Year-by-Year Table */}
         {effectiveShow('yearByYear') && (
           <motion.div
+            id="dcf-5yr"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            className="bg-white rounded-3xl shadow-xl p-6 mb-8 scroll-mt-20"
           >
             <h3 className="text-navy font-bold text-lg mb-4">
               {effectiveShow('yearByYear') === 'totals-only' ? '5-FY Summary' : 'FY-by-FY Breakdown'}
@@ -762,13 +858,24 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </motion.div>
         )}
 
+        {/* Incremental P&L (CFO view) */}
+        {results.incrementalPL && (
+          <IncrementalPL
+            pl={results.incrementalPL}
+            scenarioROI={scenarioROI}
+            scenarioNPV={scenario.npv}
+            upfrontInvestment={upfrontInvestment}
+          />
+        )}
+
         {/* Key Assumptions — 2x2 + timeline */}
         {effectiveShow('keyAssumptions') && (
           <motion.div
+            id="assumptions"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            className="bg-white rounded-3xl shadow-xl p-6 mb-8 scroll-mt-20"
           >
             <h3 className="text-navy font-bold text-lg mb-4">Key Assumptions</h3>
             <div className="grid grid-cols-2 gap-3">
@@ -892,7 +999,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             </button>
           </div>
 
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-4 flex-wrap">
+            {onCompare && (
+              <button
+                onClick={onCompare}
+                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
+              >
+                Compare Multiple Projects
+              </button>
+            )}
             {onShare && (
               <button
                 onClick={() => {
@@ -924,8 +1039,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </div>
         </motion.div>
 
-        {/* "View Full Analysis" toggle for executive tier */}
-        {tier === 'executive' && (
+        {/* "View Full Analysis" toggle */}
+        {(
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -986,12 +1101,57 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
 
         {/* ============================================ */}
-        {/* ZONE B — Detail Sections (below the fold)   */}
+        {/* ZONE B+ — Full Analysis (hidden by default) */}
+        {/* ============================================ */}
+        {showFullAnalysis && (<>
+
+        {/* ============================================ */}
+        {/* ZONE B — Decision Framework (C-suite first) */}
+        {/* ============================================ */}
+
+        {/* V6: Board Actions — Governance-ready decision framework */}
+        {effectiveShow('boardActions') && recommendation && (
+          <CollapsibleSection title="Board Decision Package" subtitle="Approval motion, success metrics, escalation triggers, and exit costs" defaultOpen={effectiveAutoExpand.includes('boardActions')}>
+            <BoardActions results={results} formData={formData} recommendation={recommendation} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Quarterly Cash Flow — CFO budgeting view */}
+        {effectiveShow('quarterlyCashFlow') && (
+          <CollapsibleSection title="Quarterly Cash Flow" subtitle="Quarter-by-quarter cash position for budget planning" defaultOpen={effectiveAutoExpand.includes('quarterlyCashFlow')}>
+            <QuarterlyCashFlow results={results} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Risk Register — Probability x Impact matrix */}
+        {effectiveShow('riskRegister') && (
+          <CollapsibleSection title="Risk Register" subtitle="Probability, dollar impact, mitigations, and owners for each risk" defaultOpen={effectiveAutoExpand.includes('riskRegister')}>
+            <RiskRegister results={results} formData={formData} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Unit Economics + Cost vs Headcount Sensitivity */}
+        {effectiveShow('unitEconomics') && (
+          <CollapsibleSection title="Unit Economics & Sensitivity Matrix" subtitle="Per-person savings, per-percent efficiency gain, and 2D NPV sensitivity">
+            <UnitEconomics results={results} />
+          </CollapsibleSection>
+        )}
+
+        {/* V6: Actuals vs Plan — Post-implementation tracking */}
+        {effectiveShow('actualsTracker') && (
+          <CollapsibleSection title="Actuals vs. Plan" subtitle="Enter real results to reforecast remaining years">
+            <ActualsTracker results={results} />
+          </CollapsibleSection>
+        )}
+
+        {/* ============================================ */}
+        {/* ZONE C — Financial Detail                    */}
         {/* ============================================ */}
 
         {/* Financial Detail (old 3-card grid, now collapsible) */}
         {effectiveShow('financialDetail') && (
-          <CollapsibleSection title="Financial Detail" subtitle="NPV, IRR, and ROIC metrics" defaultOpen={effectiveAutoExpand.includes('financialDetail')}>
+          <div id="financial-detail" className="scroll-mt-20">
+          <CollapsibleSection title="Financial Detail" subtitle="NPV, IRR, and ROIC metrics" defaultOpen={true}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-gray-50 rounded-xl p-4 text-center">
                 <p className="text-gray-500 text-xs mb-1">5-FY NPV</p>
@@ -1013,6 +1173,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               </div>
             </div>
           </CollapsibleSection>
+          </div>
         )}
 
         {/* Investment Overview (ring + bar) */}
@@ -1060,9 +1221,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
         {/* Sensitivity Tornado Chart */}
         {effectiveShow('sensitivityAnalysis') && (
-          <CollapsibleSection title="Sensitivity Analysis" subtitle="How each variable affects 5-fiscal-year NPV" defaultOpen={effectiveAutoExpand.includes('sensitivityAnalysis')}>
-            <TornadoChart extendedSensitivity={results.extendedSensitivity} baseNPV={results.scenarios.base.npv} />
-          </CollapsibleSection>
+          <div id="sensitivity" className="scroll-mt-20">
+            <CollapsibleSection title="Sensitivity Analysis" subtitle="How each variable affects 5-fiscal-year NPV" defaultOpen={true}>
+              <TornadoChart extendedSensitivity={results.extendedSensitivity} baseNPV={results.scenarios.base.npv} />
+            </CollapsibleSection>
+          </div>
         )}
 
         {/* Break-Even Unit Economics */}
@@ -1216,6 +1379,14 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
 
         {/* Monte Carlo Analysis */}
+        {effectiveShow('monteCarloAnalysis') && mcLoading && (
+          <CollapsibleSection title="Monte Carlo Analysis" subtitle="Running 500 simulations...">
+            <div className="flex items-center justify-center py-8 gap-3">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-gold border-t-transparent" />
+              <span className="text-sm text-gray-500">Running probabilistic simulation...</span>
+            </div>
+          </CollapsibleSection>
+        )}
         {effectiveShow('monteCarloAnalysis') && mcResults && (
           <CollapsibleSection title="Monte Carlo Analysis" subtitle={`Probabilistic analysis based on ${mcResults.sampleSize} simulated scenarios`}>
             {/* Hero: Probability of Positive NPV */}
@@ -1608,6 +1779,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </CollapsibleSection>
         )}
 
+        </>)}
+        {/* End showFullAnalysis conditional */}
+
+        {/* Disclaimer footer */}
+        <p className="text-[9px] text-gray-400 text-center mt-8 px-4 leading-relaxed">
+          DISCLAIMER: This is an initial directional estimate only. All projections are based on industry benchmarks and
+          user-provided inputs. This is not financial advice. Results should be reviewed and validated by your own financial,
+          legal, and operational experts before any investment decision.
+        </p>
       </div>
 
       {/* Email Gate Modal */}
@@ -1621,5 +1801,115 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function ProviderComparison({ comparison, currentProvider, onSwitch }) {
+  const sorted = [...comparison].sort((a, b) => a.annualTokenCost - b.annualTokenCost);
+  const cheapest = sorted[0];
+  const currentEntry = comparison.find(p => p.isCurrent);
+  const savingsVsCurrent = currentEntry
+    ? currentEntry.annualTokenCost - cheapest.annualTokenCost
+    : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.55, duration: 0.5 }}
+      className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+    >
+      <h3 className="text-navy font-bold text-lg mb-1">What If You Chose a Different Provider?</h3>
+      <p className="text-gray-500 text-xs mb-4">
+        Same workload, different pricing.{' '}
+        {savingsVsCurrent > 1000 && !cheapest.isCurrent && (
+          <span className="text-emerald-600 font-semibold">
+            Switching to {cheapest.name} could save ~{formatCompact(savingsVsCurrent * 5)}/5yr in token costs alone.
+          </span>
+        )}
+        <span className="text-gray-400 ml-1">(Rates as of {PROVIDER_PRICING_AS_OF.date})</span>
+      </p>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b-2 border-navy/10 text-left">
+              <th className="py-2 text-gray-500 font-medium">Provider</th>
+              <th className="py-2 text-gray-500 font-medium">Model</th>
+              <th className="py-2 text-gray-500 font-medium text-right">Annual Token Cost</th>
+              <th className="py-2 text-gray-500 font-medium text-right">5-FY NPV</th>
+              <th className="py-2 text-gray-500 font-medium text-right">ROIC</th>
+              <th className="py-2 text-gray-500 font-medium text-center w-20"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((p) => {
+              const npvDelta = currentEntry ? p.baseNPV - currentEntry.baseNPV : 0;
+              return (
+                <tr
+                  key={p.name}
+                  className={`border-b border-gray-100 last:border-0 transition-colors ${
+                    p.isCurrent
+                      ? 'bg-gold/10'
+                      : 'hover:bg-gray-50 cursor-pointer'
+                  }`}
+                  onClick={() => !p.isCurrent && onSwitch(p.name)}
+                >
+                  <td className="py-2.5 pr-3">
+                    <span className="inline-flex items-center gap-2">
+                      {PROVIDER_LOGOS[p.name] && (
+                        <img src={PROVIDER_LOGOS[p.name]} alt="" aria-hidden="true" className="h-5 w-5 shrink-0" />
+                      )}
+                      <span className="font-semibold text-navy">{p.name}</span>
+                      {p.isCurrent && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gold bg-gold/10 px-1.5 py-0.5 rounded">
+                          Current
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="py-2.5 pr-3 text-gray-600">{p.model}</td>
+                  <td className="py-2.5 pr-3 text-right font-mono font-medium text-navy">
+                    {formatCurrency(p.annualTokenCost)}
+                    {p.savingsVsMSRPPct > 0.01 && (
+                      <div className="text-[10px] font-normal text-emerald-600 mt-0.5">
+                        −{(p.savingsVsMSRPPct * 100).toFixed(0)}% vs MSRP
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right font-mono font-medium">
+                    <span className={p.baseNPV >= 0 ? 'text-emerald-600' : 'text-red-500'}>
+                      {formatCompact(p.baseNPV)}
+                    </span>
+                    {!p.isCurrent && Math.abs(npvDelta) > 1000 && (
+                      <span className={`ml-1 text-xs ${npvDelta > 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                        ({npvDelta > 0 ? '+' : ''}{formatCompact(npvDelta)})
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right font-mono font-medium text-navy">
+                    {formatPercent(p.baseROIC)}
+                  </td>
+                  <td className="py-2.5 text-center">
+                    {!p.isCurrent && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onSwitch(p.name); }}
+                        className="text-xs font-semibold text-navy/60 hover:text-navy underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded px-2 py-1"
+                      >
+                        Switch
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[10px] leading-snug text-gray-400">
+        MSRP rates retrieved {PROVIDER_PRICING_AS_OF.date}. Effective rates apply enterprise volume discount (by company size), contract commitment discount, and prompt caching. {PROVIDER_PRICING_AS_OF.sourceNote}
+      </p>
+    </motion.div>
   );
 }

@@ -26,9 +26,10 @@ describe('ARCHETYPE_INPUT_SCHEMAS', () => {
     }
   });
 
-  it('every schema has 8 inputs', () => {
+  it('every schema has 8-12 inputs', () => {
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
-      expect(schema.inputs).toHaveLength(8);
+      expect(schema.inputs.length).toBeGreaterThanOrEqual(8);
+      expect(schema.inputs.length).toBeLessThanOrEqual(12);
     }
   });
 
@@ -99,10 +100,10 @@ describe('getArchetypeInputDefaults', () => {
     expect(getArchetypeInputDefaults('unknown')).toEqual({});
   });
 
-  it('returns 8 keys per archetype', () => {
+  it('returns correct number of keys per archetype (matches schema inputs)', () => {
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       const d = getArchetypeInputDefaults(schema.id);
-      expect(Object.keys(d)).toHaveLength(8);
+      expect(Object.keys(d)).toHaveLength(schema.inputs.length);
     }
   });
 });

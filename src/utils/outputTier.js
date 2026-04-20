@@ -54,6 +54,12 @@ export const TIER_SECTIONS = {
     workforceAlternatives: false,
     breakEvenUnits:       false,
     consultingAssumptions: false,
+    // V6: C-suite decision tools
+    quarterlyCashFlow:    true,
+    riskRegister:         true,
+    boardActions:         true,
+    actualsTracker:       true,
+    unitEconomics:        true,
   },
   financial: {
     heroVerdict:          true,
@@ -77,6 +83,10 @@ export const TIER_SECTIONS = {
     workforceAlternatives: true,
     breakEvenUnits:       false,
     consultingAssumptions: false,
+    // V6: C-suite decision tools
+    quarterlyCashFlow:    true,
+    riskRegister:         true,
+    boardActions:         true,
   },
   detailed: {
     heroVerdict:          true,
@@ -100,6 +110,10 @@ export const TIER_SECTIONS = {
     workforceAlternatives: true,
     breakEvenUnits:       true,
     consultingAssumptions: true,
+    // V6: C-suite decision tools
+    quarterlyCashFlow:    true,
+    riskRegister:         true,
+    boardActions:         true,
   },
 };
 
@@ -127,29 +141,21 @@ export const AUTO_EXPAND = {
  * PDF page inclusion by tier.
  */
 export const PDF_PAGES = {
+  // Executive deck: 5-7 pages, BCG-quality, answer-first
   executive: [
-    'executiveSummary',
-    'tableOfContents',
-    'recommendations',
+    'executiveSummary',          // P1: Verdict + ROIC + NPV + Top 3 Levers
+    'scenarioProjections',       // P2: 3 scenarios + 5-year cash flow table
+    'recommendations',           // P3: Next steps + risk mitigations
   ],
+  // Financial deck: 5-7 pages, CFO-ready
   financial: [
-    'executiveSummary',
-    'tableOfContents',
-    'currentState',
-    'investmentAnalysis',
-    'scenarioProjections',
-    'riskAssessment',
-    'sensitivityAnalysis',
-    'valueBreakdown',
-    'capitalEfficiencyGates',
-    'opportunityCost',
-    'peerComparison',
-    'workforceAlternatives',
-    'recommendations',
-    'inputAssumptions',
-    'appendixMethodology',
-    'appendixBenchmarks',
-    'appendixCostAssumptions',
+    'executiveSummary',          // P1: Verdict + ROIC + key metrics
+    'investmentAnalysis',        // P2: What it costs + hidden costs
+    'scenarioProjections',       // P3: 3 scenarios + cash flows
+    'sensitivityAnalysis',       // P4: What moves the needle
+    'recommendations',           // P5: Next steps
+    'opportunityCost',           // P6: Cost of inaction
+    'inputAssumptions',          // P7: Assumptions + sources
   ],
   detailed: [
     'executiveSummary',
@@ -185,12 +191,12 @@ export const PDF_PAGES = {
  */
 // Per-archetype assumption tab names (must match generateExcelModel.js)
 const ASSUMPTION_TABS = [
-  'Assumptions: Process', 'Assumptions: Customer', 'Assumptions: Analytics',
-  'Assumptions: Revenue', 'Assumptions: Compliance', 'Assumptions: Knowledge',
+  'Assumptions - Process', 'Assumptions - Customer', 'Assumptions - Analytics',
+  'Assumptions - Revenue', 'Assumptions - Compliance', 'Assumptions - Knowledge',
 ];
 
 export const EXCEL_TABS = {
-  executive: ['Summary', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
-  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
-  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Key Formulas', 'Lookups', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  executive: ['Summary', 'P&L & Cash Flow', 'Cost of Inaction', 'Stranded Costs', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'Cost of Inaction', 'Stranded Costs', 'V5 Analysis', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'Cost of Inaction', 'Stranded Costs', 'V5 Analysis', 'Key Formulas', 'Lookups', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
 };

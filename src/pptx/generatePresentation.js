@@ -19,6 +19,7 @@ const APP_URL = typeof window !== 'undefined' && window.location?.origin
 // ---------------------------------------------------------------------------
 const C = {
   navy:      '1B2A4A',
+  gold:      'C9A227',
   blue:      '2563EB',
   lightBlue: 'DBEAFE',
   teal:      '0D9488',
@@ -113,14 +114,20 @@ function addTitleSlide(pptx) {
   const slide = pptx.addSlide();
   slide.background = { color: C.navy };
 
+  slide.addText('GLOBAL GAUNTLET', {
+    x: 0.8, y: 0.8, w: 8.4, h: 0.6,
+    fontSize: 18, fontFace: 'Arial', bold: true,
+    color: C.gold || 'C9A227', align: 'center',
+  });
+
   slide.addText('AI ROI Modeler', {
-    x: 0.8, y: 1.2, w: 8.4, h: 1.2,
+    x: 0.8, y: 1.5, w: 8.4, h: 1.2,
     fontSize: 42, fontFace: 'Arial', bold: true,
     color: C.white, align: 'center',
   });
 
   slide.addText('Architecture & Sample ROI Scenarios', {
-    x: 0.8, y: 2.4, w: 8.4, h: 0.7,
+    x: 0.8, y: 2.7, w: 8.4, h: 0.7,
     fontSize: 22, fontFace: 'Arial',
     color: C.lightBlue, align: 'center',
   });
