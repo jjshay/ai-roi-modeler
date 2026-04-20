@@ -1201,6 +1201,17 @@ export const TOKEN_PROFILES = {
 };
 
 // =========================================================================
+// AI MODEL PRICING — per 1M tokens, pay-as-you-go
+// Source-of-truth table. Rendered into UI provider picker, PDF Appendix C
+// Schedule 2a, and Excel Assumptions sheet — do not duplicate elsewhere.
+// =========================================================================
+export const PROVIDER_PRICING_AS_OF = {
+  date: 'April 2026',
+  isoDate: '2026-04-01',
+  sourceNote: 'Published pay-as-you-go rates; batch, caching, and committed-use discounts applied separately in the model.',
+};
+
+// =========================================================================
 // AI MODEL PRICING — April 2026 (per 1M tokens, pay-as-you-go)
 // =========================================================================
 // [1] Anthropic Claude (docs.anthropic.com/en/docs/about-claude/pricing)
@@ -1354,7 +1365,7 @@ export const BENCHMARK_SOURCES = [
   { id: 8, short: 'Alcor BPO 2025', full: 'Alcor BPO, "AI Engineer Salary by Country," 2025. Eastern Europe: $58-120K; India: $15-30K; Latin America: $40-58K.' },
   { id: 9, short: 'Xenoss 2025', full: 'Xenoss, "Total Cost of Ownership for Enterprise AI," 2025. Hidden costs account for 30-40% of total project cost; integration adds 15-25%.' },
   { id: 10, short: 'PMI', full: 'Project Management Institute (PMI), standard practice. Technology projects carry 10-25% contingency reserve; AI projects warrant higher end due to uncertainty.' },
-  { id: 11, short: 'LLM Pricing 2025', full: 'IntuitionLabs, "LLM API Pricing Comparison," 2025. GPT-4o: $5/$15 per 1M tokens; Claude Opus 4.5: $5/$25; Gemini 2.5 Pro: $1.25/$10.' },
+  { id: 11, short: 'Provider Pricing Apr 2026', full: 'Published provider rates, retrieved April 2026. Anthropic (docs.anthropic.com/en/docs/about-claude/pricing): Haiku 4.5 $1/$5, Sonnet 4.6 $3/$15, Opus 4.7 $5/$25 per 1M tokens. OpenAI (openai.com/api/pricing): GPT-4o-mini $0.15/$0.60, GPT-4o $2.50/$10, o3 $10/$40. Google (ai.google.dev/gemini-api/docs/pricing): Flash 2.0 $0.10/$0.40, Gemini 2.5 Pro $0.50/$3, Gemini 3 Pro Preview $0.50/$3. xAI (docs.x.ai/developers/models): Grok 4.1 Fast $0.20/$0.50, Grok 4 $3/$15, Grok 3 $3/$15.' },
   { id: 12, short: 'LHH 2025', full: 'LHH (Lee Hecht Harrison), "How Much Severance Should Companies Pay," 2025. Exempt employees: 8-9 weeks; managers: 12-13 weeks; directors: 15 weeks.' },
   { id: 13, short: 'Gartner 2025', full: 'Gartner, "Lack of AI-Ready Data Puts AI Projects at Risk," Feb 2025. 60% of AI projects will be abandoned by 2026 due to data readiness issues.' },
   { id: 14, short: 'Worklytics 2025', full: 'Worklytics, "2025 AI Adoption Benchmarks," 2025. 75% of knowledge workers use AI tools regularly; utilization ramps over 12-24 months.' },

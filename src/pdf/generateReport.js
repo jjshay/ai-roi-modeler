@@ -10,6 +10,8 @@ import {
   AI_TEAM_SALARY,
   API_COST_PER_1K_REQUESTS,
   REQUESTS_PER_PERSON_HOUR,
+  PROVIDER_PRICING,
+  PROVIDER_PRICING_AS_OF,
   MAX_IMPL_TEAM,
   PLATFORM_LICENSE_COST,
   SEPARATION_COST_MULTIPLIER,
@@ -2634,6 +2636,58 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   });
 
   y = doc.lastAutoTable.finalY + 6;
+
+  // Schedule 2a: AI Model Pricing by Provider (full reference table)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...NAVY);
+  checkPageBreak(90);
+  doc.text(`Schedule 2a: AI Model Pricing by Provider — as of ${PROVIDER_PRICING_AS_OF.date} [11]`, MARGIN, y);
+  y += 5;
+
+  const selectedProvider = formData.aiProvider || null;
+  const providerRows = [];
+  for (const [providerName, tiers] of Object.entries(PROVIDER_PRICING)) {
+    for (const tierName of ['economy', 'standard', 'premium']) {
+      const t = tiers[tierName];
+      if (!t) continue;
+      const isSelected = providerName === selectedProvider && tierName === 'standard';
+      providerRows.push([
+        providerName,
+        tierName.charAt(0).toUpperCase() + tierName.slice(1),
+        t.model,
+        `$${t.input.toFixed(2)}`,
+        `$${t.output.toFixed(2)}`,
+        isSelected ? 'Selected' : '',
+      ]);
+    }
+  }
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Provider', 'Tier', 'Model', 'Input / 1M', 'Output / 1M', '']],
+    body: providerRows,
+    ...autoTableTheme(),
+    styles: { ...autoTableTheme().styles, fontSize: 7, cellPadding: 1.8 },
+    headStyles: { ...autoTableTheme().headStyles, fontSize: 7, cellPadding: 1.8 },
+    columnStyles: {
+      0: { cellWidth: CONTENT_W * 0.19 },
+      1: { cellWidth: CONTENT_W * 0.11 },
+      2: { cellWidth: CONTENT_W * 0.27 },
+      3: { cellWidth: CONTENT_W * 0.13, halign: 'right' },
+      4: { cellWidth: CONTENT_W * 0.13, halign: 'right' },
+      5: { cellWidth: CONTENT_W * 0.17, fontStyle: 'italic', textColor: GOLD },
+    },
+  });
+
+  y = doc.lastAutoTable.finalY + 2;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  doc.setTextColor(120, 120, 130);
+  const sourceFootnote = `Sources retrieved ${PROVIDER_PRICING_AS_OF.date}: Anthropic (docs.anthropic.com/en/docs/about-claude/pricing), OpenAI (openai.com/api/pricing), Google (ai.google.dev/gemini-api/docs/pricing), xAI (docs.x.ai/developers/models). ${PROVIDER_PRICING_AS_OF.sourceNote}`;
+  const sourceLines = doc.splitTextToSize(sourceFootnote, CONTENT_W);
+  doc.text(sourceLines, MARGIN, y);
+  y += sourceLines.length * 3 + 4;
 
   // Schedule 3: Platform Costs
   doc.setFont('helvetica', 'bold');

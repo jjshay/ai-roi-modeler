@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs';
 import { getOutputTier, EXCEL_TABS } from '../utils/outputTier';
 import { ARCHETYPE_INPUT_SCHEMAS, ARCHETYPE_INPUT_MAP, CLASSIFICATION_PROFILES, CLASSIFICATION_QUESTIONS, getArchetypeInputDefaults } from '../logic/archetypeInputs';
 import { PROJECT_ARCHETYPES } from '../logic/archetypes';
+import { PROVIDER_PRICING, PROVIDER_PRICING_AS_OF } from '../logic/benchmarks';
 
 // --- Styles ---
 const NAVY = '1B2A4A';
@@ -1613,6 +1614,8 @@ export async function generateExcelModel(formData, mcResults, results) {
   beRow += 1;
 
   const ca = results?.consultingAssumptions || {};
+  val(V5, beRow, 1, 'AI Provider'); val(V5, beRow, 2, ca.aiProvider || '(blended avg)'); beRow++;
+  val(V5, beRow, 1, 'Provider Model'); val(V5, beRow, 2, ca.providerModel || '(n/a)'); beRow++;
   val(V5, beRow, 1, 'Model Tier'); val(V5, beRow, 2, ca.modelTier || 'standard'); beRow++;
   val(V5, beRow, 1, 'Token-Based Costing'); val(V5, beRow, 2, ca.useTokenModel ? 'Enabled' : 'Disabled'); beRow++;
   val(V5, beRow, 1, 'LLM Calls Per Task'); val(V5, beRow, 2, ca.llmCallsPerTask || 3, NUM); beRow++;
@@ -1622,6 +1625,30 @@ export async function generateExcelModel(formData, mcResults, results) {
   if (ca.isAgenticWorkflow) {
     val(V5, beRow, 1, 'Agent Complexity'); val(V5, beRow, 2, ca.agentComplexity || 'standard'); beRow++;
   }
+
+  // --- Provider Pricing Reference Table (full table, dynamically rendered) ---
+  beRow += 2;
+  sub(V5, beRow, `AI MODEL PRICING BY PROVIDER — as of ${PROVIDER_PRICING_AS_OF.date}`, 6);
+  beRow += 1;
+  tableHeaders(V5, beRow, ['Provider', 'Tier', 'Model', 'Input $/1M', 'Output $/1M', 'Selected']);
+  beRow += 1;
+  const selectedProvider = ca.aiProvider || null;
+  for (const [providerName, tiers] of Object.entries(PROVIDER_PRICING)) {
+    for (const tierName of ['economy', 'standard', 'premium']) {
+      const t = tiers[tierName];
+      if (!t) continue;
+      const isSelected = providerName === selectedProvider && tierName === (ca.modelTier || 'standard');
+      val(V5, beRow, 1, providerName);
+      val(V5, beRow, 2, tierName.charAt(0).toUpperCase() + tierName.slice(1));
+      val(V5, beRow, 3, t.model);
+      val(V5, beRow, 4, t.input, '$#,##0.00');
+      val(V5, beRow, 5, t.output, '$#,##0.00');
+      val(V5, beRow, 6, isSelected ? 'Yes' : '');
+      beRow++;
+    }
+  }
+  note(V5, beRow, 1, `Sources retrieved ${PROVIDER_PRICING_AS_OF.date}: Anthropic (docs.anthropic.com/en/docs/about-claude/pricing), OpenAI (openai.com/api/pricing), Google (ai.google.dev/gemini-api/docs/pricing), xAI (docs.x.ai/developers/models). ${PROVIDER_PRICING_AS_OF.sourceNote}`);
+  beRow += 1;
 
   // Drift schedule
   beRow += 1;
