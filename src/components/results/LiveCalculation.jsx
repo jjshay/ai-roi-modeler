@@ -597,6 +597,19 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </p>
         </motion.div>
 
+        {/* Jump-to-section nav — makes the long scroll navigable */}
+        <nav className="mb-6 sticky top-2 z-10 bg-white/95 backdrop-blur rounded-xl shadow-md border border-gray-100 px-3 py-2">
+          <div className="flex flex-wrap gap-1 text-xs font-medium justify-center">
+            <a href="#summary" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Summary</a>
+            <a href="#dcf-5yr" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">5-FY DCF</a>
+            <a href="#assumptions" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Assumptions</a>
+            <a href="#sensitivity" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Sensitivity</a>
+            <a href="#financial-detail" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Financial Detail</a>
+          </div>
+        </nav>
+
+        <div id="summary" className="scroll-mt-16" />
+
         {/* Input Validation Warnings */}
         {results.inputWarnings && results.inputWarnings.length > 0 && (
           <div className="mb-6 space-y-2">
@@ -783,10 +796,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {/* Year-by-Year Table */}
         {effectiveShow('yearByYear') && (
           <motion.div
+            id="dcf-5yr"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            className="bg-white rounded-3xl shadow-xl p-6 mb-8 scroll-mt-20"
           >
             <h3 className="text-navy font-bold text-lg mb-4">
               {effectiveShow('yearByYear') === 'totals-only' ? '5-FY Summary' : 'FY-by-FY Breakdown'}
@@ -844,10 +858,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {/* Key Assumptions — 2x2 + timeline */}
         {effectiveShow('keyAssumptions') && (
           <motion.div
+            id="assumptions"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            className="bg-white rounded-3xl shadow-xl p-6 mb-8 scroll-mt-20"
           >
             <h3 className="text-navy font-bold text-lg mb-4">Key Assumptions</h3>
             <div className="grid grid-cols-2 gap-3">
@@ -1122,7 +1137,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
         {/* Financial Detail (old 3-card grid, now collapsible) */}
         {effectiveShow('financialDetail') && (
-          <CollapsibleSection title="Financial Detail" subtitle="NPV, IRR, and ROIC metrics" defaultOpen={effectiveAutoExpand.includes('financialDetail')}>
+          <div id="financial-detail" className="scroll-mt-20">
+          <CollapsibleSection title="Financial Detail" subtitle="NPV, IRR, and ROIC metrics" defaultOpen={true}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-gray-50 rounded-xl p-4 text-center">
                 <p className="text-gray-500 text-xs mb-1">5-FY NPV</p>
@@ -1144,6 +1160,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               </div>
             </div>
           </CollapsibleSection>
+          </div>
         )}
 
         {/* Investment Overview (ring + bar) */}
@@ -1191,9 +1208,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
         {/* Sensitivity Tornado Chart */}
         {effectiveShow('sensitivityAnalysis') && (
-          <CollapsibleSection title="Sensitivity Analysis" subtitle="How each variable affects 5-fiscal-year NPV" defaultOpen={effectiveAutoExpand.includes('sensitivityAnalysis')}>
-            <TornadoChart extendedSensitivity={results.extendedSensitivity} baseNPV={results.scenarios.base.npv} />
-          </CollapsibleSection>
+          <div id="sensitivity" className="scroll-mt-20">
+            <CollapsibleSection title="Sensitivity Analysis" subtitle="How each variable affects 5-fiscal-year NPV" defaultOpen={true}>
+              <TornadoChart extendedSensitivity={results.extendedSensitivity} baseNPV={results.scenarios.base.npv} />
+            </CollapsibleSection>
+          </div>
         )}
 
         {/* Break-Even Unit Economics */}
