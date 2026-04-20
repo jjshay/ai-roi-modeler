@@ -191,8 +191,8 @@ export const PDF_PAGES = {
  */
 // Per-archetype assumption tab names (must match generateExcelModel.js)
 const ASSUMPTION_TABS = [
-  'Assumptions: Process', 'Assumptions: Customer', 'Assumptions: Analytics',
-  'Assumptions: Revenue', 'Assumptions: Compliance', 'Assumptions: Knowledge',
+  'Assumptions - Process', 'Assumptions - Customer', 'Assumptions - Analytics',
+  'Assumptions - Revenue', 'Assumptions - Compliance', 'Assumptions - Knowledge',
 ];
 
 export const EXCEL_TABS = {

@@ -2511,7 +2511,7 @@ export async function generateExcelModel(formData, mcResults, results) {
     mitigations.forEach(m => {
       val(SC, scRow, 1, m);
       SC.getRow(scRow).getCell(1).alignment = { wrapText: true };
-      CI.mergeCells?.(scRow, 1, scRow, 7);
+      SC.mergeCells(scRow, 1, scRow, 7);
       scRow++;
     });
   }
@@ -2523,12 +2523,12 @@ export async function generateExcelModel(formData, mcResults, results) {
   // formulas, and real-world benchmarks.
   // ===================================================================
   const ARCHETYPE_TAB_NAMES = {
-    'internal-process-automation': 'Assumptions: Process',
-    'customer-facing-ai':         'Assumptions: Customer',
-    'data-analytics-automation':  'Assumptions: Analytics',
-    'revenue-growth-ai':          'Assumptions: Revenue',
-    'risk-compliance-legal-ai':   'Assumptions: Compliance',
-    'knowledge-management-ai':    'Assumptions: Knowledge',
+    'internal-process-automation': 'Assumptions - Process',
+    'customer-facing-ai':         'Assumptions - Customer',
+    'data-analytics-automation':  'Assumptions - Analytics',
+    'revenue-growth-ai':          'Assumptions - Revenue',
+    'risk-compliance-legal-ai':   'Assumptions - Compliance',
+    'knowledge-management-ai':    'Assumptions - Knowledge',
   };
 
   const ARCHETYPE_BENCHMARKS = {
@@ -2757,9 +2757,12 @@ export async function generateExcelModel(formData, mcResults, results) {
 
 
   // ===================================================================
-  // DOWNLOAD
+  // DOWNLOAD (browser) or return buffer (Node/tests)
   // ===================================================================
   const buffer = await wb.xlsx.writeBuffer();
+  if (typeof document === 'undefined') {
+    return buffer;
+  }
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
@@ -2773,4 +2776,5 @@ export async function generateExcelModel(formData, mcResults, results) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  return buffer;
 }
