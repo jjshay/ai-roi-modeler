@@ -10,6 +10,7 @@ import RiskRegister from './RiskRegister';
 import BoardActions from './BoardActions';
 import ActualsTracker from './ActualsTracker';
 import UnitEconomics from './UnitEconomics';
+import IncrementalPL from './IncrementalPL';
 import { PROVIDER_LOGOS } from '../providerLogos';
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
@@ -602,6 +603,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           <div className="flex flex-wrap gap-1 text-xs font-medium justify-center">
             <a href="#summary" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Summary</a>
             <a href="#dcf-5yr" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">5-FY DCF</a>
+            <a href="#incremental-pl" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">P&L</a>
+            <a href="#roi-formula" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">ROI Formula</a>
             <a href="#assumptions" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Assumptions</a>
             <a href="#sensitivity" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Sensitivity</a>
             <a href="#financial-detail" className="px-2.5 py-1 rounded-md text-navy/70 hover:bg-gold/10 hover:text-navy transition">Financial Detail</a>
@@ -853,6 +856,16 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               </div>
             )}
           </motion.div>
+        )}
+
+        {/* Incremental P&L (CFO view) */}
+        {results.incrementalPL && (
+          <IncrementalPL
+            pl={results.incrementalPL}
+            scenarioROI={scenarioROI}
+            scenarioNPV={scenario.npv}
+            upfrontInvestment={upfrontInvestment}
+          />
         )}
 
         {/* Key Assumptions — 2x2 + timeline */}

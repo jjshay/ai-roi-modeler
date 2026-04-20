@@ -58,6 +58,8 @@ import {
   CYCLE_TIME_REDUCTION,
 
   EFFECTIVE_TAX_RATE,
+  ARCHETYPE_FUNCTION_MAPPING,
+  IMPLEMENTATION_AMORTIZATION_YEARS,
   GATE_STRUCTURE,
   // V4: Reviewer feedback additions
   PRODUCTIVITY_DIP_PARAMS,
@@ -844,6 +846,258 @@ export function runCalculations(inputs) {
     return { scenarios: scenarioResults, upfrontInvestment, totalInvestment, discountRate };
   }
 
+  // =====================================================================
+  // INCREMENTAL P&L (CFO VIEW — FY0 through FY5)
+  // Decomposes base-case savings and costs into standard GAAP line items:
+  //   Revenue → COGS → Gross Profit → S&M / R&D / G&A → EBITDA → EBIT
+  //   → Tax → Net Income → Free Cash Flow
+  // The displaced-FTE function and inference-cost bucket are determined
+  // by ARCHETYPE_FUNCTION_MAPPING (benchmarks.js).
+  // =====================================================================
+  function buildIncrementalPL() {
+    const archetypeKey = inputs.projectArchetype || 'internal-process-automation';
+    const mapping = ARCHETYPE_FUNCTION_MAPPING[archetypeKey]
+      || ARCHETYPE_FUNCTION_MAPPING['internal-process-automation'];
+    const displacedFn = mapping.displacedFunction;
+    const aiFn = mapping.aiOngoingFunction;
+    const inferenceInCOGS = mapping.inferenceInCOGS;
+
+    // Decompose into labor-indexed vs non-labor categories (mirrors buildYearCashFlows)
+    const efficiencyRA = efficiencySavingsGross * riskMultiplier;
+    const errorReductionRA = errorReductionGross * riskMultiplier;
+    const toolReplacementRA = toolReplacementGross * riskMultiplier;
+    const archetypeRevenueRA = archetypeRevenueGross * riskMultiplier;
+    const archetypeKpiRA = archetypeKpiSavings * riskMultiplier;
+    const headcountRA = valueBreakdown.headcount.riskAdjusted;
+
+    // Annual D&A from capitalized implementation cost (straight-line)
+    const annualDA = upfrontInvestment / IMPLEMENTATION_AMORTIZATION_YEARS;
+
+    // Split ongoing AI cost into components (best-effort mapping to AI function)
+    // License + adjacent cross-sell + compliance + retraining + tech debt + insurance
+    // Already fully rolled up in ongoingCostsByYear.
+    const annualRevenue = Number(inputs.annualRevenue) || 0;
+
+    const rows = [];
+    let cumulativeFCF = 0;
+    let cumulativeDiscountedFCF = -upfrontInvestment;
+
+    // ===== FY0: Upfront Investment =====
+    rows.push({
+      year: 0,
+      revenue: { aiEnabled: 0, acceleration: 0, total: 0 },
+      cogs: { reduction: 0, inference: 0, net: 0 },
+      grossProfit: 0,
+      grossMargin: null,
+      sm: { savings: 0, newCost: 0, net: 0 },
+      rd: { savings: 0, newCost: 0, net: 0 },
+      ga: { savings: 0, newCost: 0, separationCost: 0, net: 0 },
+      totalOpex: 0,
+      ebitda: 0,
+      ebitdaMargin: null,
+      da: 0,
+      ebit: 0,
+      taxRate: EFFECTIVE_TAX_RATE,
+      tax: 0,
+      netIncome: 0,
+      capex: upfrontInvestment,
+      freeCashFlow: -upfrontInvestment,
+      cumulativeFCF: -upfrontInvestment,
+      discountedFCF: -upfrontInvestment,
+      cumulativeDiscountedFCF: -upfrontInvestment,
+    });
+    cumulativeFCF = -upfrontInvestment;
+
+    // ===== FY1-FY5 =====
+    for (let yr = 0; yr < DCF_YEARS; yr++) {
+      const fy = yr + 1;
+      const wageGrowth = Math.pow(1 + wageInflationRate, yr);
+      const driftFactor = Math.pow(1 - modelDriftRate, yr);
+      const ramp = adoptionRamp[yr];
+
+      // Savings per category (apply adoption ramp, wage inflation where applicable, drift where applicable)
+      const headcountSavings = headcountRA * cumulativeReductionAt(yr) * wageGrowth;
+      const efficiencySavings = efficiencyRA * ramp * wageGrowth * driftFactor;
+      const errorSavings = errorReductionRA * ramp * wageGrowth * driftFactor;
+      const toolSavings = toolReplacementRA * ramp;           // no wage, no drift
+      const revenueRealized = archetypeRevenueRA * ramp;      // revenue acceleration
+      const kpiSavings = archetypeKpiRA * ramp;               // KPI-driven savings
+
+      // AI ongoing costs (already escalated per schedule)
+      const aiOngoing = ongoingCostsByYear[yr];
+      const separationCost = separationByYear[yr] * Math.pow(1 + wageInflationRate, yr);
+
+      // ----- REVENUE (incremental top line) -----
+      const aiEnabledRevenue = revenueRealized;        // from archetype revenue eligibility
+      const accelRevenue = 0;                           // placeholder — could be split later
+      const totalRevenue = aiEnabledRevenue + accelRevenue;
+
+      // ----- COGS -----
+      // COGS-displaced headcount savings (reduction to COGS = positive to P&L)
+      const cogsHeadcountSavings = displacedFn === 'COGS' ? headcountSavings : 0;
+      const cogsEfficiency = displacedFn === 'COGS' ? efficiencySavings + errorSavings : 0;
+      const cogsReduction = cogsHeadcountSavings + cogsEfficiency;
+      // COGS addition: inference costs if the AI serves customers
+      const cogsInference = inferenceInCOGS ? aiOngoing * 0.6 : 0;  // 60% of AI ongoing is inference
+      const netCogs = cogsInference - cogsReduction;    // positive = cost increase, negative = savings
+      const grossProfit = totalRevenue - netCogs;
+      const grossMargin = totalRevenue > 0 ? grossProfit / totalRevenue : null;
+
+      // ----- S&M -----
+      const smHeadcountSavings = displacedFn === 'S&M' ? headcountSavings : 0;
+      const smEfficiency = displacedFn === 'S&M' ? efficiencySavings + errorSavings : 0;
+      const smToolSavings = displacedFn === 'S&M' ? toolSavings : 0;
+      const smSavings = smHeadcountSavings + smEfficiency + smToolSavings;
+      const smNewCost = 0;   // S&M enabler tools rolled into main AI ongoing
+      const smNet = smNewCost - smSavings;
+
+      // ----- R&D -----
+      // Where AI platform, retraining, compliance, and drift-monitoring land
+      const rdHeadcountSavings = displacedFn === 'R&D' ? headcountSavings : 0;
+      const rdEfficiency = displacedFn === 'R&D' ? efficiencySavings + errorSavings : 0;
+      const rdToolSavings = displacedFn === 'R&D' ? toolSavings : 0;
+      const rdSavings = rdHeadcountSavings + rdEfficiency + rdToolSavings;
+      // AI ongoing cost lands in R&D unless inference is COGS (then the remaining 40% here)
+      const rdNewCost = aiFn === 'R&D' ? (inferenceInCOGS ? aiOngoing * 0.4 : aiOngoing) : 0;
+      const rdNet = rdNewCost - rdSavings;
+
+      // ----- G&A -----
+      const gaHeadcountSavings = displacedFn === 'G&A' ? headcountSavings : 0;
+      const gaEfficiency = displacedFn === 'G&A' ? efficiencySavings + errorSavings : 0;
+      const gaToolSavings = displacedFn === 'G&A' ? toolSavings : 0;
+      const gaKpiSavings = kpiSavings; // KPI savings (SLA penalties, compliance wins) land in G&A by default
+      const gaSavings = gaHeadcountSavings + gaEfficiency + gaToolSavings + gaKpiSavings;
+      const gaNewCost = aiFn === 'G&A' ? aiOngoing : 0;
+      const gaNet = gaNewCost - gaSavings + separationCost;
+
+      const totalOpex = smNet + rdNet + gaNet;
+
+      // ----- EBITDA / EBIT / Net Income / FCF -----
+      const ebitda = grossProfit - totalOpex;
+      const ebitdaMargin = totalRevenue > 0 ? ebitda / totalRevenue : null;
+      const da = annualDA;
+      const ebit = ebitda - da;
+      const tax = Math.max(0, ebit) * EFFECTIVE_TAX_RATE;  // no tax shield on losses
+      const netIncome = ebit - tax;
+      const capex = 0;  // capex was year 0
+      const fcf = netIncome + da - capex;
+      cumulativeFCF += fcf;
+      const discountedFCF = fcf / Math.pow(1 + discountRate, fy);
+      cumulativeDiscountedFCF += discountedFCF;
+
+      rows.push({
+        year: fy,
+        revenue: { aiEnabled: aiEnabledRevenue, acceleration: accelRevenue, total: totalRevenue },
+        cogs: { reduction: cogsReduction, inference: cogsInference, net: netCogs },
+        grossProfit,
+        grossMargin,
+        sm: { savings: smSavings, newCost: smNewCost, net: smNet },
+        rd: { savings: rdSavings, newCost: rdNewCost, net: rdNet },
+        ga: { savings: gaSavings, newCost: gaNewCost, separationCost, net: gaNet },
+        totalOpex,
+        ebitda,
+        ebitdaMargin,
+        da,
+        ebit,
+        taxRate: EFFECTIVE_TAX_RATE,
+        tax,
+        netIncome,
+        capex,
+        freeCashFlow: fcf,
+        cumulativeFCF,
+        discountedFCF,
+        cumulativeDiscountedFCF,
+      });
+    }
+
+    // Totals
+    const totals = rows.slice(1).reduce((t, r) => ({
+      revenue: t.revenue + r.revenue.total,
+      cogs: t.cogs + r.cogs.net,
+      grossProfit: t.grossProfit + r.grossProfit,
+      sm: t.sm + r.sm.net,
+      rd: t.rd + r.rd.net,
+      ga: t.ga + r.ga.net,
+      totalOpex: t.totalOpex + r.totalOpex,
+      ebitda: t.ebitda + r.ebitda,
+      ebit: t.ebit + r.ebit,
+      netIncome: t.netIncome + r.netIncome,
+      fcf: t.fcf + r.freeCashFlow,
+    }), { revenue: 0, cogs: 0, grossProfit: 0, sm: 0, rd: 0, ga: 0, totalOpex: 0, ebitda: 0, ebit: 0, netIncome: 0, fcf: 0 });
+
+    // CAGR for each P&L line from FY1 → FY5 (4-year growth)
+    // Handles sign changes and zero starts with guard logic
+    function cagr(start, end, years) {
+      if (!isFinite(start) || !isFinite(end)) return null;
+      if (start === 0) return end === 0 ? 0 : null;   // undefined growth from zero
+      if ((start < 0 && end > 0) || (start > 0 && end < 0)) return null;  // sign flip: CAGR not meaningful
+      const ratio = end / start;
+      if (ratio <= 0) return null;
+      return Math.pow(ratio, 1 / years) - 1;
+    }
+    const fy1 = rows[1] || {};
+    const fy5 = rows[5] || {};
+    const years = 4;  // FY1 to FY5 = 4 compounding periods
+    const cagrByLine = {
+      revenue: cagr(fy1.revenue?.total ?? 0, fy5.revenue?.total ?? 0, years),
+      cogs: cagr(fy1.cogs?.net ?? 0, fy5.cogs?.net ?? 0, years),
+      grossProfit: cagr(fy1.grossProfit ?? 0, fy5.grossProfit ?? 0, years),
+      sm: cagr(fy1.sm?.net ?? 0, fy5.sm?.net ?? 0, years),
+      rd: cagr(fy1.rd?.net ?? 0, fy5.rd?.net ?? 0, years),
+      ga: cagr(fy1.ga?.net ?? 0, fy5.ga?.net ?? 0, years),
+      totalOpex: cagr(fy1.totalOpex ?? 0, fy5.totalOpex ?? 0, years),
+      ebitda: cagr(fy1.ebitda ?? 0, fy5.ebitda ?? 0, years),
+      ebit: cagr(fy1.ebit ?? 0, fy5.ebit ?? 0, years),
+      netIncome: cagr(fy1.netIncome ?? 0, fy5.netIncome ?? 0, years),
+      freeCashFlow: cagr(fy1.freeCashFlow ?? 0, fy5.freeCashFlow ?? 0, years),
+    };
+
+    // ROI formula: full breakdown shown in UI
+    const roiFormula = {
+      // ROIC (as used in the exec scorecard)
+      // = average annual NOPAT / capital deployed
+      // Built from incremental P&L totals for traceability
+      averageAnnualEbit: totals.ebit / DCF_YEARS,
+      averageAnnualNOPAT: (totals.ebit / DCF_YEARS) * (1 - EFFECTIVE_TAX_RATE),
+      capitalDeployed: upfrontInvestment,
+      roic: upfrontInvestment > 0
+        ? ((totals.ebit / DCF_YEARS) * (1 - EFFECTIVE_TAX_RATE)) / upfrontInvestment
+        : null,
+      // NPV = Σ FCF_t / (1+r)^t − CapEx
+      npvFromPL: cumulativeDiscountedFCF,
+      // Simple ROI = 5Y Net Cash / Investment
+      fiveYearNetCash: totals.fcf + upfrontInvestment,   // totals.fcf already includes −capex
+      simpleROI5Year: upfrontInvestment > 0
+        ? (totals.fcf) / upfrontInvestment
+        : null,
+    };
+
+    return {
+      rows,
+      totals,
+      cagr: cagrByLine,
+      roiFormula,
+      functionMapping: { displacedFn, aiFn, inferenceInCOGS },
+      assumptions: {
+        taxRate: EFFECTIVE_TAX_RATE,
+        discountRate,
+        amortizationYears: IMPLEMENTATION_AMORTIZATION_YEARS,
+        annualDA,
+        annualRevenue,
+        dcfNPV: cumulativeDiscountedFCF,
+      },
+    };
+  }
+
+  // Helper: cumulative HR reduction ratio at year yr (mirrors buildYearCashFlows)
+  function cumulativeReductionAt(yr) {
+    let cum = 0;
+    for (let i = 0; i <= yr; i++) cum += HEADCOUNT_REDUCTION_SCHEDULE[i];
+    return cum;
+  }
+
+  const incrementalPL = buildIncrementalPL();
+
   // Probability-weighted expected value across scenarios
   const scenarioWeights = { conservative: 0.25, base: 0.50, optimistic: 0.25 };
   const expectedNPV = Object.entries(scenarioWeights).reduce(
@@ -1239,6 +1493,7 @@ export function runCalculations(inputs) {
     cumulative5Year: doNothingCumulative,
     vsAiProjectNPV: doNothingCumulative + baseNPV, // net advantage of AI
   };
+
 
   // =====================================================================
   // R&D TAX CREDIT (informational only — NOT in NPV/ROIC)
@@ -2204,6 +2459,7 @@ export function runCalculations(inputs) {
       netAnnualSavings,
     },
     valueBreakdown,
+    incrementalPL,
     opportunityCost,
     competitiveErosion,
     revenueEnablement,

@@ -1003,6 +1003,49 @@ export const SCENARIO_CONFIGS = {
 // ---------------------------------------------------------------------------
 export const EFFECTIVE_TAX_RATE = 0.21; // US corporate rate for NOPAT calculation
 
+// =========================================================================
+// INCREMENTAL P&L — function mapping by archetype
+// Used to bucket displaced-headcount savings and ongoing AI costs into
+// the standard CFO P&L categories (COGS, S&M, R&D, G&A) so the incremental
+// P&L shows the right line-item impact per the archetype.
+// =========================================================================
+export const ARCHETYPE_FUNCTION_MAPPING = {
+  'internal-process-automation': {
+    displacedFunction: 'G&A',     // back-office ops displaced
+    aiOngoingFunction: 'R&D',     // platform, retraining
+    inferenceInCOGS: false,
+  },
+  'customer-facing-ai': {
+    displacedFunction: 'COGS',    // customer support reps often in COGS
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: true,        // inference serves customers → COGS
+  },
+  'data-analytics-automation': {
+    displacedFunction: 'G&A',     // finance / ops analysts
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+  'revenue-growth-ai': {
+    displacedFunction: 'S&M',     // sales ops / marketing analysts
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+  'risk-compliance-legal-ai': {
+    displacedFunction: 'G&A',     // legal / compliance / audit
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+  'knowledge-management-ai': {
+    displacedFunction: 'G&A',     // mixed, default G&A (enterprise search)
+    aiOngoingFunction: 'R&D',
+    inferenceInCOGS: false,
+  },
+};
+
+// D&A schedule: implementation cost amortized straight-line over 5 years
+// (ASC 350-40 internal-use software capitalization)
+export const IMPLEMENTATION_AMORTIZATION_YEARS = 5;
+
 // ---------------------------------------------------------------------------
 // Productivity Dip Parameters — scaled by company size
 // Larger organizations have longer change absorption cycles
