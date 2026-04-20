@@ -2689,6 +2689,95 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   doc.text(sourceLines, MARGIN, y);
   y += sourceLines.length * 3 + 4;
 
+  // Schedule 2b: Token Cost Discount Waterfall (step-by-step math)
+  const tcm = results?.aiCostModel?.tokenCostModel;
+  if (tcm && tcm.msrpInputPer1M != null) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...NAVY);
+    checkPageBreak(60);
+    const providerLabel = tcm.aiProvider || 'Blended';
+    const tierLabel = results?.consultingAssumptions?.modelTier || 'standard';
+    doc.text(`Schedule 2b: Token Cost Discount Waterfall — ${providerLabel} / ${tierLabel}`, MARGIN, y);
+    y += 5;
+
+    const inputSavingsPct = tcm.msrpInputPer1M > 0
+      ? (1 - tcm.effectiveInputCostPer1M / tcm.msrpInputPer1M)
+      : 0;
+    const outputSavingsPct = tcm.msrpOutputPer1M > 0
+      ? (1 - tcm.outputCostPer1M / tcm.msrpOutputPer1M)
+      : 0;
+
+    const waterfallRows = [
+      [
+        '1. MSRP (published list price)',
+        'Published provider rate',
+        `$${tcm.msrpInputPer1M.toFixed(4)}`,
+        `$${tcm.msrpOutputPer1M.toFixed(4)}`,
+      ],
+      [
+        '2. Enterprise volume discount',
+        `× (1 − ${(tcm.enterpriseDiscount * 100).toFixed(0)}%) — by company size`,
+        `$${tcm.afterEnterpriseInput.toFixed(4)}`,
+        `$${tcm.afterEnterpriseOutput.toFixed(4)}`,
+      ],
+      [
+        '3. Contract commitment discount',
+        `× ${tcm.contractDiscount.toFixed(2)} (${tcm.contractType})`,
+        `$${tcm.inputCostPer1M.toFixed(4)}`,
+        `$${tcm.outputCostPer1M.toFixed(4)}`,
+      ],
+      [
+        '4. Prompt caching (input only)',
+        `× (1 − ${(tcm.promptCachingRate * 100).toFixed(0)}% × 90%)`,
+        `$${tcm.effectiveInputCostPer1M.toFixed(4)}`,
+        `$${tcm.outputCostPer1M.toFixed(4)}`,
+      ],
+      [
+        'Total effective discount vs MSRP',
+        'Combined stack',
+        `${(inputSavingsPct * 100).toFixed(1)}%`,
+        `${(outputSavingsPct * 100).toFixed(1)}%`,
+      ],
+    ];
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Step', 'Formula', 'Input $/1M', 'Output $/1M']],
+      body: waterfallRows,
+      ...autoTableTheme(),
+      styles: { ...autoTableTheme().styles, fontSize: 7.5, cellPadding: 2 },
+      headStyles: { ...autoTableTheme().headStyles, fontSize: 7.5, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.32, fontStyle: 'bold' },
+        1: { cellWidth: CONTENT_W * 0.34, fontStyle: 'italic', textColor: [120, 120, 130] },
+        2: { cellWidth: CONTENT_W * 0.17, halign: 'right' },
+        3: { cellWidth: CONTENT_W * 0.17, halign: 'right' },
+      },
+      didParseCell: (data) => {
+        // Highlight the effective rate row (index 3) and the summary row (index 4)
+        if (data.section === 'body' && data.row.index === 3) {
+          data.cell.styles.fillColor = [232, 245, 233];
+          data.cell.styles.textColor = NAVY;
+        }
+        if (data.section === 'body' && data.row.index === 4) {
+          data.cell.styles.fillColor = [248, 244, 220];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.textColor = NAVY;
+        }
+      },
+    });
+
+    y = doc.lastAutoTable.finalY + 2;
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(6.5);
+    doc.setTextColor(120, 120, 130);
+    const waterfallNote = 'Waterfall: MSRP × (1 − enterprise discount by company size) × contract commitment discount = base rate; then input-only: × (1 − caching rate × 90%) = effective rate. Input rates reflect prompt-caching; output rates do not (caching applies only to input tokens).';
+    const noteLines = doc.splitTextToSize(waterfallNote, CONTENT_W);
+    doc.text(noteLines, MARGIN, y);
+    y += noteLines.length * 3 + 4;
+  }
+
   // Schedule 3: Platform Costs
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);

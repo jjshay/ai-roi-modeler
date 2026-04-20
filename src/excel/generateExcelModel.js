@@ -1626,6 +1626,71 @@ export async function generateExcelModel(formData, mcResults, results) {
     val(V5, beRow, 1, 'Agent Complexity'); val(V5, beRow, 2, ca.agentComplexity || 'standard'); beRow++;
   }
 
+  // --- Token Cost Discount Waterfall (step-by-step math) ---
+  const tcm = results?.aiCostModel?.tokenCostModel;
+  if (tcm && tcm.msrpInputPer1M != null) {
+    beRow += 2;
+    sub(V5, beRow, `TOKEN COST DISCOUNT WATERFALL (per 1M tokens) — ${ca.aiProvider || 'Blended'} / ${ca.modelTier || 'standard'}`, 6);
+    beRow += 1;
+    tableHeaders(V5, beRow, ['Step', 'Formula', 'Input $/1M', 'Output $/1M', 'Notes', '']);
+    beRow += 1;
+
+    // Step 1: MSRP
+    val(V5, beRow, 1, '1. MSRP (list price)');
+    val(V5, beRow, 2, 'Published provider rate');
+    val(V5, beRow, 3, tcm.msrpInputPer1M, '$#,##0.0000');
+    val(V5, beRow, 4, tcm.msrpOutputPer1M, '$#,##0.0000');
+    val(V5, beRow, 5, `Source: provider docs as of ${PROVIDER_PRICING_AS_OF.date}`);
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    // Step 2: Enterprise volume discount
+    val(V5, beRow, 1, '2. Enterprise volume discount');
+    val(V5, beRow, 2, `× (1 − ${(tcm.enterpriseDiscount * 100).toFixed(0)}%)`);
+    val(V5, beRow, 3, tcm.afterEnterpriseInput, '$#,##0.0000');
+    val(V5, beRow, 4, tcm.afterEnterpriseOutput, '$#,##0.0000');
+    val(V5, beRow, 5, `Based on company size: ${ca.companySize || formData.companySize || '—'}`);
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    // Step 3: Contract commitment discount
+    val(V5, beRow, 1, '3. Contract commitment discount');
+    val(V5, beRow, 2, `× ${tcm.contractDiscount.toFixed(2)}`);
+    val(V5, beRow, 3, tcm.inputCostPer1M, '$#,##0.0000');
+    val(V5, beRow, 4, tcm.outputCostPer1M, '$#,##0.0000');
+    val(V5, beRow, 5, `${tcm.contractType} commitment → base rate`);
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    // Step 4: Prompt caching (input only)
+    val(V5, beRow, 1, '4. Prompt caching (input only)');
+    val(V5, beRow, 2, `× (1 − ${(tcm.promptCachingRate * 100).toFixed(0)}% × 90%)`);
+    val(V5, beRow, 3, tcm.effectiveInputCostPer1M, '$#,##0.0000', resultFill);
+    val(V5, beRow, 4, tcm.outputCostPer1M, '$#,##0.0000', resultFill);
+    val(V5, beRow, 5, 'Cache hit rate × 90% discount on hits');
+    val(V5, beRow, 6, 'EFFECTIVE');
+    beRow++;
+
+    // Net effective rate savings summary
+    const inputSavingsPct = tcm.msrpInputPer1M > 0
+      ? (1 - tcm.effectiveInputCostPer1M / tcm.msrpInputPer1M)
+      : 0;
+    const outputSavingsPct = tcm.msrpOutputPer1M > 0
+      ? (1 - tcm.outputCostPer1M / tcm.msrpOutputPer1M)
+      : 0;
+    beRow++;
+    val(V5, beRow, 1, 'Total effective discount vs MSRP');
+    val(V5, beRow, 2, '');
+    val(V5, beRow, 3, inputSavingsPct, PCT);
+    val(V5, beRow, 4, outputSavingsPct, PCT);
+    val(V5, beRow, 5, 'Combined discount stack');
+    val(V5, beRow, 6, '');
+    beRow++;
+
+    note(V5, beRow, 1, 'Waterfall: MSRP × (1 − enterprise discount) × contract discount = base rate; then input-only: × (1 − caching rate × caching discount) = effective rate.');
+    beRow += 1;
+  }
+
   // --- Provider Pricing Reference Table (full table, dynamically rendered) ---
   beRow += 2;
   sub(V5, beRow, `AI MODEL PRICING BY PROVIDER — as of ${PROVIDER_PRICING_AS_OF.date}`, 6);
