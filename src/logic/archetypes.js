@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Project Archetypes — categorize AI projects by business purpose
-// Replaces the flat "process type" selector with 5 strategic archetypes.
+// Replaces the flat "process type" selector with four strategic archetypes.
 // Each archetype carries editable default assumptions keyed by industry.
 // ---------------------------------------------------------------------------
 
@@ -27,12 +27,12 @@ export const PROJECT_ARCHETYPES = [
   },
   {
     id: 'customer-facing-ai',
-    label: 'Customer-Facing AI',
+    label: 'Customer Service',
     icon: '\ud83d\udcac',
-    description: 'AI-powered customer interactions, support, and personalized experiences',
+    description: 'Automate routine customer service, support, and self-service interactions',
     example: 'e.g. Klarna\'s AI assistant handles 2/3 of customer chats, resolving issues in 2 min vs. 11 min with human agents',
-    tags: ['External', 'Revenue'],
-    sourceProcessTypes: ['Customer Communication', 'Content Creation'],
+    tags: ['External', 'Customer Service'],
+    sourceProcessTypes: ['Customer Communication'],
   },
   {
     id: 'data-analytics-automation',
@@ -44,15 +44,6 @@ export const PROJECT_ARCHETYPES = [
     sourceProcessTypes: ['Data Analysis & Reporting', 'Research & Intelligence', 'Document Processing'],
   },
   {
-    id: 'revenue-growth-ai',
-    label: 'Revenue & Growth AI',
-    icon: '\ud83d\udcc8',
-    description: 'Drive revenue through AI-enhanced sales, marketing, and market intelligence',
-    example: 'e.g. Salesforce Einstein AI increased lead conversion rates by 30% for enterprise sales teams',
-    tags: ['External', 'Revenue'],
-    sourceProcessTypes: ['Customer Communication', 'Content Creation', 'Research & Intelligence'],
-  },
-  {
     id: 'risk-compliance-legal-ai',
     label: 'Risk, Compliance & Legal AI',
     icon: '\ud83d\udee1\ufe0f',
@@ -61,21 +52,33 @@ export const PROJECT_ARCHETYPES = [
     tags: ['Internal', 'Operations', 'Data'],
     sourceProcessTypes: ['Quality & Compliance', 'Document Processing', 'Research & Intelligence'],
   },
-  {
-    id: 'knowledge-management-ai',
-    label: 'Knowledge Management AI',
-    icon: '\ud83e\udde0',
-    description: 'Capture institutional knowledge, power enterprise search, and automate documentation',
-    example: 'e.g. Novo Nordisk\'s AI knowledge base cut new employee onboarding time by 40% and reduced repeat support tickets by 25%',
-    tags: ['Internal', 'Data'],
-    sourceProcessTypes: ['Research & Intelligence', 'Document Processing', 'Content Creation'],
-  },
 ];
 
 // Lookup map for quick access
 export const ARCHETYPE_MAP = Object.fromEntries(
   PROJECT_ARCHETYPES.map(a => [a.id, a])
 );
+
+// Old share links may still carry these IDs. They are intentionally not mapped
+// to current cases because their historical inputs are not comparable to the
+// supported operating models.
+export const RETIRED_ARCHETYPE_IDS = new Set([
+  'revenue-growth-ai',
+  'knowledge-management-ai',
+]);
+
+export const RETIRED_ARCHETYPE_LABELS = {
+  'revenue-growth-ai': 'Revenue & Growth AI',
+  'knowledge-management-ai': 'Knowledge Management AI',
+};
+
+export function isRetiredArchetype(archetypeId) {
+  return RETIRED_ARCHETYPE_IDS.has(archetypeId);
+}
+
+export function getRetiredArchetypeLabel(archetypeId) {
+  return RETIRED_ARCHETYPE_LABELS[archetypeId] || 'This AI use case';
+}
 
 // ---------------------------------------------------------------------------
 // Helper: average a numeric property across multiple processType lookups
@@ -107,8 +110,9 @@ function buildDefaults(archetype, industry) {
   // Adoption rate defaults to 0.70 (changeReadiness=3); user overrides via wizard
   const adoptionRate = 0.70;
 
-  // Revenue eligible: only customer-facing and revenue/growth archetypes
-  const revenueEligible = ['customer-facing-ai', 'revenue-growth-ai'].includes(archetype.id);
+  // Revenue projections are not a selectable AI ROI value stream. Customer
+  // support can still show validated operating-cost avoidance separately.
+  const revenueEligible = false;
 
   const defaults = {
     automationPotential,

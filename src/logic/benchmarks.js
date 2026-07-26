@@ -410,26 +410,6 @@ export function getRealisticTimeline(industry, companySize) {
   return Math.ceil(industryData.base * industryData.complexity * sizeMulti);
 }
 
-// ---------------------------------------------------------------------------
-// AI Implementation Cost Model - Salary & Staffing Benchmarks
-// All figures sourced from industry research; see BENCHMARK_SOURCES below.
-// ---------------------------------------------------------------------------
-
-// Fully-loaded annual cost (salary + benefits + taxes + overhead) by location
-// Sources: Glassdoor 2026, Alcor BPO 2025, Motion Recruitment 2026, Qubit Labs 2026
-// Fully-loaded multiplier: 1.25-1.40x base salary (health, 401k, FICA, workspace)
-// Fully-loaded = salary + benefits + taxes + overhead (~1.25-1.3x base)
-// Tech Hub: weighted avg of SF ($240K), NYC ($228K), Seattle ($231K), Boston ($202K)
-// Remote: weighted avg of Austin, Denver, Chicago, Atlanta — base ~$120K x 1.25
-// Offshore Employee: weighted avg of India ($35K), E. Europe ($75K), LatAm ($55K) FTEs
-// Offshore Contractor: vendor-managed, no benefits — India ($25K), E. Europe ($60K), LatAm ($40K)
-export const AI_TEAM_SALARY = {
-  'US - Major Tech Hub': 225000,
-  'Remote / Distributed': 150000,
-  'Offshore - Employee': 55000,
-  'Offshore - Contractor': 40000,
-};
-
 // API/inference cost per 1,000 requests by process type
 // Based on 2025-2026 enterprise model pricing: GPT-4o ($5/$15 per 1M tokens),
 // Claude Opus 4.5 ($5/$25 per 1M), Gemini 2.5 Pro ($1.25/$10 per 1M)
@@ -527,38 +507,37 @@ export const TOOL_REPLACEMENT_RATE = {
 };
 
 // Legal & compliance review cost by company size
-// Covers AI policy, data privacy (GDPR/CCPA), IP review, vendor contract review,
-// employment law review for workforce restructuring, regulatory filings
+// Assumes in-house legal handles most work; covers incremental AI policy,
+// data privacy (GDPR/CCPA), IP review. External counsel adds 2-3x.
 export const LEGAL_COMPLIANCE_COST = {
-  'Startup (1-50)': 25000,
-  'SMB (51-500)': 50000,
-  'Mid-Market (501-5,000)': 100000,
-  'Enterprise (5,001-50,000)': 175000,
-  'Large Enterprise (50,000+)': 300000,
+  'Startup (1-50)': 10000,
+  'SMB (51-500)': 20000,
+  'Mid-Market (501-5,000)': 40000,
+  'Enterprise (5,001-50,000)': 75000,
+  'Large Enterprise (50,000+)': 120000,
 };
 
 // Security & privacy audit cost by company size
-// Covers penetration testing, data flow audit, model security review,
-// SOC2/ISO compliance, data residency assessment, third-party risk assessment
+// Assumes existing security team handles most review; covers incremental
+// AI-specific pen testing, model security, data flow audit. Full external audit adds 2-3x.
 export const SECURITY_AUDIT_COST = {
-  'Startup (1-50)': 20000,
-  'SMB (51-500)': 40000,
-  'Mid-Market (501-5,000)': 75000,
-  'Enterprise (5,001-50,000)': 125000,
-  'Large Enterprise (50,000+)': 200000,
+  'Startup (1-50)': 8000,
+  'SMB (51-500)': 15000,
+  'Mid-Market (501-5,000)': 30000,
+  'Enterprise (5,001-50,000)': 60000,
+  'Large Enterprise (50,000+)': 100000,
 };
 
 // Contingency reserve as % of implementation cost
-// Source: PMI (Project Management Institute) recommends 10-25% for technology projects
-// AI projects carry higher uncertainty; PMI recommends 10-25%
-export const CONTINGENCY_RATE = 0.20; // 20% of computed implementation cost
+// Source: PMI recommends 10-25% for technology projects; 10% for well-scoped AI projects
+export const CONTINGENCY_RATE = 0.10; // 10% of computed implementation cost
 
 // Change management friction — covers internal marketing, champions program, adoption support
 // Covers internal marketing, champions program, resistance management, retraining
 // Source: McKinsey Change 2025: 60% of failed AI projects cite culture as #1 barrier.
 // Prosci ADKAR 2025: change management programs average 10-15% of implementation budget.
 // 12% = midpoint of Prosci range.
-export const CULTURAL_RESISTANCE_RATE = 0.12; // 12% of implementation cost
+export const CULTURAL_RESISTANCE_RATE = 0.04; // 4% of implementation cost — resistance premium on top of change mgmt
 
 // AI vendor cost escalation — annual % price increase after Year 1
 // Vendors raise prices once locked in; typical SaaS escalation is 7-15%
@@ -675,10 +654,13 @@ export const COMPLIANCE_RISK_ESCALATION = {
 };
 
 // ---------------------------------------------------------------------------
-// Revenue Enablement
+// Legacy commercial-context benchmarks
+// These exports are retained for saved-model compatibility and cost-of-inaction
+// context. They do not define a selectable Revenue & Growth AI case or a core DCF
+// value stream.
 // ---------------------------------------------------------------------------
 
-// Revenue uplift percentages by industry (conservative, risk-adjusted)
+// Historical commercial-uplift percentages by industry (not used as core savings)
 // Source: BCG "How AI Creates Value" 2025, a16z AI in the Enterprise 2024
 export const REVENUE_UPLIFT = {
   'Technology / Software': { timeToMarket: 0.08, customerExperience: 0.05, newCapability: 0.04 },
@@ -693,15 +675,21 @@ export const REVENUE_UPLIFT = {
   'Other': { timeToMarket: 0.04, customerExperience: 0.04, newCapability: 0.03 },
 };
 
-// Process types eligible for revenue enablement calculations
-// DEPRECATED: use assumptions.revenueEligible from archetype defaults instead
+// Legacy process list retained for backwards-compatible imports only.
+// New models must not use it to activate revenue benefits.
 export const REVENUE_ELIGIBLE_PROCESSES = [
   'Customer Communication',
   'Content Creation',
   'Research & Intelligence',
 ];
 
-// Revenue risk discount — applied on top of normal risk adjustments (conservative haircut)
+/** Legacy commercial-context benchmark (integer percent, before risk discount). */
+export function getTotalRevenueUplift(industry) {
+  const d = REVENUE_UPLIFT[industry] || REVENUE_UPLIFT['Other'];
+  return Math.round((d.timeToMarket + d.customerExperience + d.newCapability) * 100);
+}
+
+// Legacy commercial-context risk discount (conservative haircut).
 export const REVENUE_RISK_DISCOUNT = 0.50;
 
 // ---------------------------------------------------------------------------
@@ -751,8 +739,8 @@ export const VALUE_PHASES = [
     phase: 2,
     label: 'Core Automation',
     monthRange: [6, 12],
-    description: 'Headcount optimization, error reduction, and initial revenue impact',
-    valueTypes: ['headcount', 'errorReduction', 'archetypeRevenue'],
+    description: 'Headcount optimization, error reduction, and validated direct support-cost avoidance',
+    valueTypes: ['headcount', 'errorReduction', 'caseDirectSavings'],
     realizationPct: 0.40,
   },
   {
@@ -760,15 +748,15 @@ export const VALUE_PHASES = [
     label: 'Optimization',
     monthRange: [12, 24],
     description: 'Full adoption and process refinement',
-    valueTypes: ['headcount', 'efficiency', 'errorReduction', 'archetypeRevenue'],
+    valueTypes: ['headcount', 'efficiency', 'errorReduction', 'caseDirectSavings'],
     realizationPct: 0.75,
   },
   {
     phase: 4,
     label: 'Scale & Innovate',
     monthRange: [24, 36],
-    description: 'Revenue enablement and scalability benefits',
-    valueTypes: ['headcount', 'efficiency', 'errorReduction', 'toolReplacement', 'archetypeRevenue'],
+    description: 'Scaled, validated operating savings and process refinement',
+    valueTypes: ['headcount', 'efficiency', 'errorReduction', 'toolReplacement', 'caseDirectSavings'],
     realizationPct: 1.0,
   },
 ];
@@ -946,8 +934,8 @@ export const REGULATORY_EVENT_BENCHMARKS = {
 };
 
 // ---------------------------------------------------------------------------
-// V3: Revenue Acceleration — cycle time reduction benchmarks by industry
-// Months of cycle time AI typically reduces for regulatory/review processes
+// V3 legacy cycle-time context benchmarks by industry.
+// Retained for historical analysis; not a revenue-benefit input to the core DCF.
 // Source: BCG 2025, McKinsey Operations Practice 2025
 // ---------------------------------------------------------------------------
 export const CYCLE_TIME_REDUCTION = {
@@ -1009,11 +997,11 @@ export const EFFECTIVE_TAX_RATE = 0.21; // US corporate rate for NOPAT calculati
 // Source: McKinsey Change 2025
 // ---------------------------------------------------------------------------
 export const PRODUCTIVITY_DIP_PARAMS = {
-  'Startup (1-50)':              { months: 2, dipRate: 0.20 },
-  'SMB (51-500)':                { months: 2.5, dipRate: 0.22 },
-  'Mid-Market (501-5,000)':      { months: 3, dipRate: 0.25 },
-  'Enterprise (5,001-50,000)':   { months: 4, dipRate: 0.28 },
-  'Large Enterprise (50,000+)':  { months: 5, dipRate: 0.30 },
+  'Startup (1-50)':              { months: 1, dipRate: 0.10 },
+  'SMB (51-500)':                { months: 1.5, dipRate: 0.12 },
+  'Mid-Market (501-5,000)':      { months: 2, dipRate: 0.15 },
+  'Enterprise (5,001-50,000)':   { months: 2.5, dipRate: 0.18 },
+  'Large Enterprise (50,000+)':  { months: 3, dipRate: 0.20 },
 };
 
 // ---------------------------------------------------------------------------

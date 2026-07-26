@@ -19,14 +19,14 @@ describe('Current State calculations', () => {
     expect(r.currentState.annualLaborCost).toBe(20 * 85000);
   });
 
-  it('computes annual rework cost as labor × error rate', () => {
+  it('does not infer rework from a blanket labor percentage', () => {
     const r = runCalculations(BASE_INPUTS);
-    expect(r.currentState.annualReworkCost).toBe(20 * 85000 * 0.15);
+    expect(r.currentState.annualReworkCost).toBe(0);
   });
 
-  it('computes total current cost as labor + rework + tools', () => {
+  it('computes total current cost as labor + measured rework + tools', () => {
     const r = runCalculations(BASE_INPUTS);
-    const expected = 20 * 85000 + 20 * 85000 * 0.15 + 50000;
+    const expected = 20 * 85000 + 50000;
     expect(r.currentState.totalCurrentCost).toBe(expected);
   });
 
@@ -182,27 +182,19 @@ describe('Opportunity Cost of Inaction', () => {
 });
 
 // =====================================================================
-// Revenue Enablement
+// Retired Revenue Enablement
 // =====================================================================
-describe('Revenue Enablement', () => {
-  it('eligible for revenue-eligible process types', () => {
+describe('Retired Revenue Enablement', () => {
+  it('keeps old revenue inputs out of the operating-cost model', () => {
     const r = runCalculations(REVENUE_ELIGIBLE_INPUTS);
-    expect(r.revenueEnablement.eligible).toBe(true);
-    expect(r.revenueEnablement.totalAnnualRevenue).toBeGreaterThan(0);
+    expect(r.revenueEnablement.eligible).toBe(false);
+    expect(r.revenueEnablement.retired).toBe(true);
   });
 
-  it('not eligible for non-revenue process types', () => {
+  it('returns the same retired state for non-revenue process types', () => {
     const r = runCalculations(NON_REVENUE_INPUTS);
     expect(r.revenueEnablement.eligible).toBe(false);
-  });
-
-  it('returns breakdown by revenue type', () => {
-    const r = runCalculations(REVENUE_ELIGIBLE_INPUTS);
-    if (r.revenueEnablement.eligible) {
-      expect(r.revenueEnablement.timeToMarket).toBeGreaterThan(0);
-      expect(r.revenueEnablement.customerExperience).toBeGreaterThan(0);
-      expect(r.revenueEnablement.newCapability).toBeGreaterThan(0);
-    }
+    expect(r.revenueEnablement.retired).toBe(true);
   });
 });
 
@@ -518,9 +510,31 @@ describe('Probability-Weighted Expected Value', () => {
 // AI Cost Model
 // =====================================================================
 describe('AI Cost Model', () => {
-  it('uses location-specific salary', () => {
-    const r = runCalculations(BASE_INPUTS);
-    expect(r.aiCostModel.aiSalary).toBe(225000); // US Major Tech Hub
+  it('uses the entered workforce rate and ignores a retired location field', () => {
+    const baseline = runCalculations(BASE_INPUTS);
+    const legacyLocation = runCalculations({
+      ...BASE_INPUTS,
+      teamLocation: 'Offshore - Employee',
+      blendedAISalary: 40000,
+    });
+
+    expect(baseline.aiCostModel.deploymentFullyBurdenedRate).toBe(BASE_INPUTS.avgSalary);
+    expect(legacyLocation.aiCostModel.deploymentFullyBurdenedRate).toBe(BASE_INPUTS.avgSalary);
+    expect(legacyLocation.aiCostModel.realisticImplCost).toBe(baseline.aiCostModel.realisticImplCost);
+  });
+
+  it('uses the direct employee / contractor blend for deployment and run costs', () => {
+    const r = runCalculations({
+      ...BASE_INPUTS,
+      directEmployeeCount: 6,
+      employeeFullyBurdenedCost: 150000,
+      offshoreContractorCount: 4,
+      contractorFullyBurdenedCost: 75000,
+    });
+
+    expect(r.aiCostModel.deploymentFullyBurdenedRate).toBe(120000);
+    expect(r.aiCostModel.deploymentPlan.rateSource).toBe('entered-blended-workforce-cost');
+    expect(r.aiCostModel.ongoingAiLaborCost).toBeGreaterThan(0);
   });
 
   it('realistic impl cost >= user budget (risk-adjusted)', () => {
@@ -565,10 +579,10 @@ describe('AI Cost Model', () => {
 // Hidden Costs
 // =====================================================================
 describe('Hidden Costs', () => {
-  it('change management = 15% of impl cost', () => {
+  it('change management = 8% of impl cost', () => {
     const r = runCalculations(BASE_INPUTS);
     expect(r.hiddenCosts.changeManagement).toBeCloseTo(
-      r.aiCostModel.realisticImplCost * 0.15,
+      r.aiCostModel.realisticImplCost * 0.08,
       0
     );
   });
@@ -840,9 +854,9 @@ describe('Value Creation Pathways (V3)', () => {
     expect(r.valuePathways.capacityCreation.revenueAcceleration).toBe(0);
   });
 
-  it('revenue acceleration is positive when annual revenue is provided', () => {
+  it('revenue acceleration remains zero even when old annual-revenue input is provided', () => {
     const r = runCalculations({ ...BASE_INPUTS, annualRevenue: 5000000 });
-    expect(r.valuePathways.capacityCreation.revenueAcceleration).toBeGreaterThan(0);
+    expect(r.valuePathways.capacityCreation.revenueAcceleration).toBe(0);
   });
 
   it('costOnlyAnnual matches cost efficiency pathway', () => {
@@ -980,15 +994,15 @@ describe('Project Archetypes & Assumptions', () => {
     expect(r.valueBreakdown.toolReplacement.gross).toBe(50000 * 0.80);
   });
 
-  it('assumptions.revenueEligible=true makes revenue pathway eligible', () => {
+  it('legacy revenueEligible=true cannot re-enable the retired revenue pathway', () => {
     const custom = {
       ...BASE_INPUTS,
       assumptions: { ...BASE_INPUTS.assumptions, revenueEligible: true },
       annualRevenue: 5000000,
     };
     const r = runCalculations(custom);
-    expect(r.revenueEnablement.eligible).toBe(true);
-    expect(r.revenueEnablement.totalAnnualRevenue).toBeGreaterThan(0);
+    expect(r.revenueEnablement.eligible).toBe(false);
+    expect(r.revenueEnablement.retired).toBe(true);
   });
 
   it('assumptions.revenueEligible=false blocks revenue pathway', () => {
@@ -1037,7 +1051,6 @@ describe('Project Archetypes & Assumptions', () => {
       'internal-process-automation',
       'customer-facing-ai',
       'data-analytics-automation',
-      'revenue-growth-ai',
       'risk-compliance-legal-ai',
     ];
     for (const id of archetypeIds) {
@@ -1050,7 +1063,7 @@ describe('Project Archetypes & Assumptions', () => {
           apiCostPer1kRequests: 10,
           requestsPerPersonHour: 15,
           toolReplacementRate: 0.45,
-          revenueEligible: ['customer-facing-ai', 'revenue-growth-ai'].includes(id),
+          revenueEligible: false,
         },
       };
       const r = runCalculations(inputs);
@@ -1135,9 +1148,9 @@ describe('Productivity Dip by Size (V4)', () => {
     expect(enterpriseDipFraction).toBeGreaterThan(startupDipFraction);
   });
 
-  it('Mid-Market uses 3 months at 25% dip', () => {
+  it('Mid-Market uses 2 months at 15% dip', () => {
     const r = runCalculations(BASE_INPUTS); // Mid-Market
-    const expected = (BASE_INPUTS.teamSize * BASE_INPUTS.avgSalary / 12) * 3 * 0.25;
+    const expected = (BASE_INPUTS.teamSize * BASE_INPUTS.avgSalary / 12) * 2 * 0.15;
     expect(r.hiddenCosts.productivityDip).toBeCloseTo(expected, 0);
   });
 });
@@ -1218,14 +1231,11 @@ describe('Break-Even Adoption Rate (V4)', () => {
   });
 });
 
-describe('Revenue Displacement Risk (V4)', () => {
-  it('deducted from revenue enablement for eligible projects', () => {
+describe('Retired Revenue Displacement Risk (V4)', () => {
+  it('does not create a revenue forecast from old eligible inputs', () => {
     const r = runCalculations(REVENUE_ELIGIBLE_INPUTS);
-    expect(r.revenueEnablement.eligible).toBe(true);
-    expect(r.revenueEnablement.displacementRisk).toBeGreaterThan(0);
-    // Total should be less than sum of components (displacement deducted)
-    const grossSum = r.revenueEnablement.timeToMarket + r.revenueEnablement.customerExperience + r.revenueEnablement.newCapability;
-    expect(r.revenueEnablement.totalAnnualRevenue).toBeLessThan(grossSum);
+    expect(r.revenueEnablement.eligible).toBe(false);
+    expect(r.revenueEnablement.retired).toBe(true);
   });
 });
 

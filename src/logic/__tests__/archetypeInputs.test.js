@@ -7,6 +7,7 @@ import {
   classifyArchetype,
   mapArchetypeInputs,
   getArchetypeInputDefaults,
+  sanitizeArchetypeInputs,
   validateArchetypeInputs,
 } from '../archetypeInputs';
 import { PROJECT_ARCHETYPES } from '../archetypes';
@@ -15,8 +16,10 @@ import { PROJECT_ARCHETYPES } from '../archetypes';
 // Schema Validation
 // ---------------------------------------------------------------------------
 describe('ARCHETYPE_INPUT_SCHEMAS', () => {
-  it('has exactly 6 archetype schemas', () => {
-    expect(ARCHETYPE_INPUT_SCHEMAS).toHaveLength(6);
+  it('has exactly 4 supported archetype schemas', () => {
+    expect(ARCHETYPE_INPUT_SCHEMAS).toHaveLength(4);
+    expect(ARCHETYPE_INPUT_SCHEMAS.map(schema => schema.id)).not.toContain('revenue-growth-ai');
+    expect(ARCHETYPE_INPUT_SCHEMAS.map(schema => schema.id)).not.toContain('knowledge-management-ai');
   });
 
   it('every schema has a matching entry in PROJECT_ARCHETYPES', () => {
@@ -26,9 +29,18 @@ describe('ARCHETYPE_INPUT_SCHEMAS', () => {
     }
   });
 
-  it('every schema has 8 inputs', () => {
+  it('every schema has a short, complete operating-input set', () => {
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
-      expect(schema.inputs).toHaveLength(8);
+      expect(schema.inputs.length).toBeGreaterThanOrEqual(5);
+      expect(schema.inputs.length).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('gives every case a plain-language calculation, assumption, and footnote', () => {
+    for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
+      expect(schema.caseGuide?.calculation).toBeTruthy();
+      expect(schema.caseGuide?.assumption).toBeTruthy();
+      expect(schema.caseGuide?.footnote).toBeTruthy();
     }
   });
 
@@ -76,8 +88,8 @@ describe('ARCHETYPE_INPUT_SCHEMAS', () => {
 // ARCHETYPE_INPUT_MAP
 // ---------------------------------------------------------------------------
 describe('ARCHETYPE_INPUT_MAP', () => {
-  it('has all 6 archetypes indexed by id', () => {
-    expect(Object.keys(ARCHETYPE_INPUT_MAP)).toHaveLength(6);
+  it('has all 4 supported archetypes indexed by id', () => {
+    expect(Object.keys(ARCHETYPE_INPUT_MAP)).toHaveLength(4);
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       expect(ARCHETYPE_INPUT_MAP[schema.id]).toBe(schema);
     }
@@ -92,17 +104,17 @@ describe('getArchetypeInputDefaults', () => {
     const d = getArchetypeInputDefaults('internal-process-automation');
     expect(d.processVolume).toBe(5000);
     expect(d.handlingTimeMin).toBe(15);
-    expect(d.errorRate).toBe(0.08);
+    expect(d.pctAutomatable).toBe(0.65);
   });
 
   it('returns empty object for unknown archetype', () => {
     expect(getArchetypeInputDefaults('unknown')).toEqual({});
   });
 
-  it('returns 8 keys per archetype', () => {
+  it('returns all schema keys per archetype', () => {
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       const d = getArchetypeInputDefaults(schema.id);
-      expect(Object.keys(d)).toHaveLength(8);
+      expect(Object.keys(d)).toHaveLength(schema.inputs.length);
     }
   });
 });
@@ -116,21 +128,23 @@ describe('mapArchetypeInputs', () => {
     const overrides = mapArchetypeInputs('internal-process-automation', defaults);
     expect(overrides.automationPotential).toBeGreaterThan(0);
     expect(overrides.automationPotential).toBeLessThanOrEqual(0.85);
-    expect(overrides.errorRate).toBe(0.08);
-    expect(overrides.hoursPerWeek).toBeGreaterThan(0);
+    expect(overrides.caseBuildComplexityMultiplier).toBeGreaterThan(0);
+    expect(overrides.caseWorkloadHoursPerWeek).toBeGreaterThan(0);
   });
 
-  it('maps customer-facing-ai to include revenueImpact', () => {
+  it('maps customer-facing-ai to measured direct support-cost context, not revenue', () => {
     const defaults = getArchetypeInputDefaults('customer-facing-ai');
     const overrides = mapArchetypeInputs('customer-facing-ai', defaults);
-    expect(overrides.revenueImpact).toBeGreaterThan(0);
+    expect(overrides.caseDirectSavings).toBeGreaterThan(0);
+    expect(overrides.revenueImpact).toBeUndefined();
     expect(overrides.automationPotential).toBeGreaterThan(0);
   });
 
-  it('maps risk-compliance-legal-ai to include riskReduction', () => {
+  it('maps risk-compliance-legal-ai to evidence-gated risk-avoidance context', () => {
     const defaults = getArchetypeInputDefaults('risk-compliance-legal-ai');
     const overrides = mapArchetypeInputs('risk-compliance-legal-ai', defaults);
-    expect(overrides.riskReduction).toBeGreaterThan(0);
+    expect(overrides.caseRiskAvoidance).toBeGreaterThan(0);
+    expect(overrides.riskReduction).toBeUndefined();
   });
 
   it('returns empty object for unknown archetype', () => {
@@ -148,12 +162,32 @@ describe('mapArchetypeInputs', () => {
     }
   });
 
-  it('hoursPerWeek is always positive when mapped', () => {
+  it('case workload hours are always positive when mapped', () => {
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       const defaults = getArchetypeInputDefaults(schema.id);
       const overrides = mapArchetypeInputs(schema.id, defaults);
-      if (overrides.hoursPerWeek !== undefined) {
-        expect(overrides.hoursPerWeek).toBeGreaterThan(0);
+      if (overrides.caseWorkloadHoursPerWeek !== undefined) {
+        expect(overrides.caseWorkloadHoursPerWeek).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('routes every displayed case input into at least one model calculation', () => {
+    for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
+      const defaults = getArchetypeInputDefaults(schema.id);
+      const baseline = mapArchetypeInputs(schema.id, defaults);
+
+      for (const input of schema.inputs) {
+        const alternateValue = input.default === input.max ? input.min : input.max;
+        const changed = mapArchetypeInputs(schema.id, {
+          ...defaults,
+          [input.key]: alternateValue,
+        });
+
+        expect(
+          changed,
+          `${schema.id}.${input.key} must change an output used by the model`,
+        ).not.toEqual(baseline);
       }
     }
   });
@@ -200,11 +234,41 @@ describe('validateArchetypeInputs', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Model guardrails
+// ---------------------------------------------------------------------------
+describe('sanitizeArchetypeInputs', () => {
+  it('bounds hostile saved-link values before they reach the calculation engine', () => {
+    const { values, corrections } = sanitizeArchetypeInputs('customer-facing-ai', {
+      ticketsPerMonth: 999999999,
+      resolutionTimeMin: 10000,
+      eligibleIntentPct: 5,
+      deflectionTarget: 4,
+      costPerResolvedTicket: 999999999,
+    });
+    expect(values.ticketsPerMonth).toBe(5000000);
+    expect(values.resolutionTimeMin).toBe(120);
+    expect(values.eligibleIntentPct).toBe(0.95);
+    expect(values.deflectionTarget).toBe(0.60);
+    expect(values.costPerResolvedTicket).toBe(5000);
+    expect(corrections.length).toBeGreaterThan(0);
+  });
+
+  it('returns no case inputs for the retired knowledge-management case', () => {
+    const { values, corrections } = sanitizeArchetypeInputs('knowledge-management-ai', {
+      searchSuccessRate: 0.55,
+      targetSearchSuccessRate: 0.95,
+    });
+    expect(values).toEqual({});
+    expect(corrections).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Classification
 // ---------------------------------------------------------------------------
 describe('Classification', () => {
-  it('has profiles for all 6 archetypes', () => {
-    expect(Object.keys(CLASSIFICATION_PROFILES)).toHaveLength(6);
+  it('has profiles for all 4 supported archetypes', () => {
+    expect(Object.keys(CLASSIFICATION_PROFILES)).toHaveLength(4);
     for (const schema of ARCHETYPE_INPUT_SCHEMAS) {
       expect(CLASSIFICATION_PROFILES[schema.id]).toBeDefined();
     }

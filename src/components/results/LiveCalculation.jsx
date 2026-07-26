@@ -1,28 +1,263 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { runCalculations } from '../../logic/calculations';
 import { getRecommendation } from '../../logic/recommendations';
 import { AI_MATURITY_PREMIUM } from '../../logic/benchmarks';
 import { formatCurrency, formatPercent, formatCompact } from '../../utils/formatters';
 import { getOutputTier, tierShows, AUTO_EXPAND } from '../../utils/outputTier';
+import { getValueBreakdownCategories, getValueBreakdownTotals } from './ValueBreakdown';
+
+// ---------------------------------------------------------------------------
+// Interactive driver configuration — maps lever labels → formData fields
+// ---------------------------------------------------------------------------
+const LEVER_FIELD_MAP = {
+  'Team Size':          { path: 'teamSize', type: 'number', min: 1, max: 100000, step: 1 },
+  'Avg Cost per Person':{ path: 'avgSalary', type: 'currency', min: 10000, max: 10000000, step: 5000 },
+  'Error / Rework Rate':{ path: 'errorRate', type: 'percent', min: 0, max: 0.50, step: 0.01 },
+  'Automation Potential':{ path: 'assumptions.automationPotential', type: 'percent', min: 0.10, max: 0.95, step: 0.01 },
+  'Implementation Cost': { path: 'implementationBudget', type: 'currency', min: 0, max: 50000000, step: 10000 },
+  'Ongoing Annual Cost': { path: 'ongoingAnnualCost', type: 'currency', min: 0, max: 10000000, step: 5000 },
+};
+
+function getNestedValue(obj, path) {
+  return path.split('.').reduce((o, k) => o?.[k], obj);
+}
+
+function setNestedValue(obj, path, value) {
+  const clone = { ...obj };
+  const keys = path.split('.');
+  if (keys.length === 1) {
+    clone[keys[0]] = value;
+  } else {
+    clone[keys[0]] = { ...clone[keys[0]], [keys[1]]: value };
+  }
+  return clone;
+}
+
+const WATERFALL_COLORS = {
+  efficiency: 'bg-emerald-500',
+  errorReduction: 'bg-teal-400',
+  headcount: 'bg-blue-500',
+  toolReplacement: 'bg-violet-400',
+  contractExit: 'bg-indigo-400',
+  caseDirectSavings: 'bg-cyan-600',
+};
+
+/**
+ * Build the visible savings waterfall from cash/cost value streams only.
+ * Legacy `archetypeRevenue` is deliberately excluded because it was a
+ * forecast, not a verified operating savings category.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildSavingsBuckets(valueBreakdown = {}, scale = 1) {
+  const safeScale = Number.isFinite(Number(scale)) ? Number(scale) : 1;
+  return getValueBreakdownCategories(valueBreakdown)
+    .map(({ key, label }) => ({
+      label,
+      value: Math.max(0, Number(valueBreakdown[key]?.riskAdjusted) || 0) * safeScale,
+      color: WATERFALL_COLORS[key] || 'bg-slate-400',
+    }))
+    .filter((bucket) => bucket.value > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Tooltip: cost buildup for each driver
+// ---------------------------------------------------------------------------
+function LeverTooltip({ lever, results, formData }) {
+  const vb = results.valueBreakdown;
+  const ai = results.aiCostModel;
+  const assumptions = results.executiveSummary?.keyAssumptions;
+
+  const buildupLines = useMemo(() => {
+    const lines = [];
+    switch (lever.label) {
+      case 'Automation Potential':
+        lines.push(`Efficiency savings: ${formatCompact(vb?.efficiency?.riskAdjusted || 0)}/yr`);
+        lines.push(`Error reduction: ${formatCompact(vb?.errorReduction?.riskAdjusted || 0)}/yr`);
+        lines.push(`Headcount savings: ${formatCompact(vb?.headcount?.gross || 0)}/yr (phased)`);
+        lines.push(`Total gross: ${formatCompact(vb?.totalGross || 0)}/yr`);
+        break;
+      case 'Implementation Cost':
+        lines.push(`Upfront investment: ${formatCompact(results.upfrontInvestment || 0)}`);
+        lines.push(`Software + integration: ${formatCompact(ai?.platformAndTools || 0)}`);
+        lines.push(`Change mgmt + training: ${formatCompact(ai?.changeMgmtTraining || 0)}`);
+        lines.push(`5-yr ongoing: ${formatCompact(ai?.totalOngoing5Year || 0)}`);
+        break;
+      case 'Avg Cost per Person':
+        lines.push(`Team: ${formData.teamSize} × ${formatCurrency(formData.avgSalary || 0)}`);
+        lines.push(`Annual labor: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0))}`);
+        lines.push(`Rework cost: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0) * (formData.errorRate || 0.10))}/yr`);
+        break;
+      case 'Team Size':
+        lines.push(`Annual labor: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0))}`);
+        lines.push(`Automatable: ${formatPercent(assumptions?.automationPotential || 0)}`);
+        lines.push(`Potential headcount: ${Math.round((formData.teamSize || 0) * (assumptions?.automationPotential || 0))} FTEs`);
+        break;
+      case 'Ongoing Annual Cost':
+        lines.push(`Base ongoing: ${formatCompact(ai?.baseAnnualOngoing || 0)}/yr`);
+        lines.push(`LLM/API costs: ${formatCompact(ai?.llmApiCost || ai?.tokenCost || 0)}/yr`);
+        lines.push(`5-yr total: ${formatCompact(ai?.totalOngoing5Year || 0)}`);
+        break;
+      case 'Error / Rework Rate':
+        lines.push(`Rework cost: ${formatCompact(vb?.errorReduction?.gross || 0)}/yr`);
+        lines.push(`Error savings from AI: ${formatCompact(vb?.errorReduction?.riskAdjusted || 0)}/yr`);
+        break;
+      default:
+        lines.push(`NPV range: ${formatCompact(lever.npvLow)} to ${formatCompact(lever.npvHigh)}`);
+    }
+    lines.push(`Swing: ${formatCompact(lever.npvSwing)}`);
+    return lines;
+  }, [lever, vb, ai, formData, results, assumptions]);
+
+  return (
+    <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-gray-900/95 backdrop-blur-xl text-white text-xs rounded-2xl shadow-2xl shadow-black/10 px-4 py-3 pointer-events-none">
+      <p className="font-medium mb-1.5 text-white/60 tracking-wide uppercase text-[10px]">{lever.label}</p>
+      {buildupLines.map((line, i) => (
+        <p key={i} className="text-white/80 leading-relaxed">{line}</p>
+      ))}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900/95" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inline editable driver input
+// ---------------------------------------------------------------------------
+function DriverInput({ lever, config, currentValue, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [localVal, setLocalVal] = useState('');
+  const inputRef = useRef(null);
+
+  const displayValue = config.type === 'percent'
+    ? `${(currentValue * 100).toFixed(0)}%`
+    : config.type === 'currency'
+      ? formatCompact(currentValue)
+      : currentValue.toLocaleString();
+
+  const handleStartEdit = () => {
+    const rawDisplay = config.type === 'percent'
+      ? (currentValue * 100).toFixed(0)
+      : config.type === 'currency'
+        ? Math.round(currentValue).toString()
+        : currentValue.toString();
+    setLocalVal(rawDisplay);
+    setEditing(true);
+  };
+
+  useEffect(() => {
+    if (editing && inputRef.current) inputRef.current.focus();
+  }, [editing]);
+
+  const handleCommit = () => {
+    setEditing(false);
+    const raw = parseFloat(localVal.replace(/[^0-9.-]/g, ''));
+    if (isNaN(raw)) return;
+    const final = config.type === 'percent'
+      ? Math.max(config.min, Math.min(config.max, raw / 100))
+      : Math.max(config.min, Math.min(config.max, raw));
+    onChange(final);
+  };
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        {config.type === 'currency' && <span className="text-gray-400 text-xs">$</span>}
+        <input
+          ref={inputRef}
+          type="text"
+          value={localVal}
+          onChange={(e) => setLocalVal(e.target.value)}
+          onBlur={handleCommit}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleCommit(); if (e.key === 'Escape') setEditing(false); }}
+          className="w-24 px-2 py-1 rounded-lg border border-gray-300 bg-white text-navy font-mono text-xs font-medium focus:outline-none focus:ring-2 focus:ring-navy/20 focus:border-navy/40 transition-shadow"
+        />
+        {config.type === 'percent' && <span className="text-gray-400 text-xs">%</span>}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleStartEdit}
+      className="inline-flex items-center gap-1 font-mono font-medium text-navy text-xs hover:text-gold transition-colors cursor-pointer group"
+      title="Click to edit"
+    >
+      {displayValue}
+      <svg className="w-3 h-3 text-gray-300 group-hover:text-gold transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+      </svg>
+    </button>
+  );
+}
+
+function DriverCard({ index, lever, config, currentValue, results, formData, leverInputDisplay, onValueChange }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <motion.div
+      key={lever.label}
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: 0.6 + index * 0.1, duration: 0.3 }}
+      className="rounded-2xl bg-white/60 backdrop-blur-sm border border-gray-200/60 p-4 relative transition-all duration-200 hover:bg-white/80"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-gray-900 text-white text-[10px] font-semibold">{index + 1}</span>
+          <span className="text-gray-900 font-medium text-sm tracking-tight">{lever.label}</span>
+        </div>
+        <span className="font-mono text-gray-500 text-xs">{formatCompact(lever.npvSwing)} swing</span>
+      </div>
+      <div className="ml-9 flex items-center gap-2">
+        <span className="text-[11px] text-gray-400">Current:</span>
+        {config && currentValue != null ? (
+          <DriverInput
+            lever={lever}
+            config={config}
+            currentValue={currentValue}
+            onChange={onValueChange}
+          />
+        ) : (
+          leverInputDisplay && (
+            <span className="font-mono font-medium text-navy text-xs">{leverInputDisplay}</span>
+          )
+        )}
+      </div>
+      <AnimatePresence>
+        {hovered && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 5 }}
+            transition={{ duration: 0.15 }}
+          >
+            <LeverTooltip lever={lever} results={results} formData={formData} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
 
 function MetricCard({ label, value, subtext, color = 'navy', delay = 0 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.5 }}
-      className="bg-white rounded-2xl shadow-lg p-6 text-center"
+      transition={{ delay, duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+      className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 text-center"
     >
-      <p className="text-gray-500 text-sm mb-1">{label}</p>
-      <p className={`font-mono text-3xl font-bold ${
+      <p className="text-gray-400 text-[11px] font-medium uppercase tracking-widest mb-2">{label}</p>
+      <p className={`font-mono text-3xl font-bold tracking-tight ${
         color === 'green' ? 'text-emerald-600' :
         color === 'red' ? 'text-red-500' :
-        color === 'gold' ? 'text-amber-500' : 'text-navy'
+        color === 'gold' ? 'text-amber-500' : 'text-gray-900'
       }`}>
         {value}
       </p>
-      {subtext && <p className="text-gray-400 text-xs mt-1">{subtext}</p>}
+      {subtext && <p className="text-gray-400 text-[11px] mt-2 leading-relaxed">{subtext}</p>}
     </motion.div>
   );
 }
@@ -63,27 +298,27 @@ function SimpleBarChart({ projections, delay = 0 }) {
   const maxSavings = Math.max(...projections.map(p => p.grossSavings), 1);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {projections.map((yr, i) => {
         const pct = (yr.grossSavings / maxSavings) * 100;
         return (
           <motion.div
             key={yr.year}
-            initial={{ opacity: 0, x: -20 }}
+            initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: delay + i * 0.1, duration: 0.4 }}
+            transition={{ delay: delay + i * 0.08, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
             className="flex items-center gap-3"
           >
-            <span className="text-gray-500 text-sm w-12 shrink-0">FY {yr.year}</span>
-            <div className="flex-1 h-8 bg-gray-100 rounded-full overflow-hidden">
+            <span className="text-gray-400 text-xs w-10 shrink-0 font-medium">FY {yr.year}</span>
+            <div className="flex-1 h-5 bg-gray-100/80 rounded-lg overflow-hidden">
               <motion.div
                 initial={{ width: 0 }}
                 animate={{ width: `${pct}%` }}
-                transition={{ delay: delay + i * 0.1 + 0.2, duration: 0.6, ease: 'easeOut' }}
-                className="h-full bg-gradient-to-r from-gold to-amber-400 rounded-full"
+                transition={{ delay: delay + i * 0.08 + 0.15, duration: 0.6, ease: 'easeOut' }}
+                className="h-full bg-gray-900 rounded-lg"
               />
             </div>
-            <span className="font-mono font-semibold text-navy text-sm w-24 text-right">
+            <span className="font-mono text-gray-900 text-xs w-24 text-right">
               {formatCurrency(yr.grossSavings)}
             </span>
           </motion.div>
@@ -127,24 +362,22 @@ function TornadoChart({ extendedSensitivity, baseNPV }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.3 }}
           >
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-xs text-gray-600 w-32 sm:w-40 shrink-0 truncate">{row.label}</span>
-              <div className="flex-1 relative h-5 bg-gray-100 rounded">
-                {/* Base NPV line */}
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[11px] text-gray-500 w-32 sm:w-40 shrink-0 truncate">{row.label}</span>
+              <div className="flex-1 relative h-4 bg-gray-100/80 rounded-lg">
                 <div
-                  className="absolute top-0 bottom-0 w-px bg-navy/40 z-10"
+                  className="absolute top-0 bottom-0 w-px bg-gray-400/40 z-10"
                   style={{ left: `${basePct}%` }}
                 />
-                {/* Bar */}
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${widthPct}%` }}
                   transition={{ delay: i * 0.08 + 0.2, duration: 0.4, ease: 'easeOut' }}
-                  className="absolute top-0.5 bottom-0.5 rounded bg-gradient-to-r from-red-400 via-amber-400 to-emerald-400"
+                  className="absolute top-0.5 bottom-0.5 rounded-md bg-gradient-to-r from-red-300 via-amber-300 to-emerald-300"
                   style={{ left: `${leftPct}%` }}
                 />
               </div>
-              <span className="text-xs font-mono text-gray-500 w-20 text-right shrink-0">
+              <span className="text-[11px] font-mono text-gray-400 w-20 text-right shrink-0">
                 {formatCompact(row.npvHigh - row.npvLow)}
               </span>
             </div>
@@ -167,18 +400,18 @@ function CollapsibleSection({ title, subtitle, children, defaultOpen = false }) 
   const [open, setOpen] = useState(defaultOpen);
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="bg-white rounded-3xl shadow-xl mb-8 overflow-hidden"
+      transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+      className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm mb-6 overflow-hidden"
     >
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-6 cursor-pointer text-left hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center justify-between px-6 py-5 cursor-pointer text-left hover:bg-white/50 transition-colors"
       >
         <div>
-          <h3 className="text-navy font-bold text-lg">{title}</h3>
-          {subtitle && <p className="text-gray-500 text-xs mt-0.5">{subtitle}</p>}
+          <h3 className="text-gray-900 font-semibold text-base tracking-tight">{title}</h3>
+          {subtitle && <p className="text-gray-400 text-[11px] mt-0.5">{subtitle}</p>}
         </div>
         <motion.svg
           animate={{ rotate: open ? 180 : 0 }}
@@ -267,14 +500,14 @@ function CostVsSavingsBar({ totalCost, totalSavings, delay = 0 }) {
       transition={{ delay, duration: 0.5 }}
       className="space-y-2"
     >
-      <div className="flex h-12 rounded-xl overflow-hidden shadow-inner">
+      <div className="flex h-8 rounded-xl overflow-hidden">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${costPct}%` }}
           transition={{ delay: delay + 0.2, duration: 0.8, ease: 'easeOut' }}
-          className="bg-gradient-to-r from-red-400 to-red-500 flex items-center justify-center"
+          className="bg-red-400/80 flex items-center justify-center"
         >
-          <span className="text-white text-xs font-semibold px-2 truncate">
+          <span className="text-white text-[11px] font-medium px-2 truncate">
             {formatCurrency(totalCost)}
           </span>
         </motion.div>
@@ -282,9 +515,9 @@ function CostVsSavingsBar({ totalCost, totalSavings, delay = 0 }) {
           initial={{ width: 0 }}
           animate={{ width: `${savingsPct}%` }}
           transition={{ delay: delay + 0.4, duration: 0.8, ease: 'easeOut' }}
-          className="bg-gradient-to-r from-emerald-400 to-emerald-500 flex items-center justify-center"
+          className="bg-emerald-400/80 flex items-center justify-center"
         >
-          <span className="text-white text-xs font-semibold px-2 truncate">
+          <span className="text-white text-[11px] font-medium px-2 truncate">
             {formatCurrency(totalSavings)}
           </span>
         </motion.div>
@@ -299,99 +532,20 @@ function CostVsSavingsBar({ totalCost, totalSavings, delay = 0 }) {
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-function EmailGateModal({ onSubmit, onClose, formData }) {
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-  const handleSubmit = async () => {
-    if (!isValid) return;
-    setSubmitting(true);
-    localStorage.setItem('roi_lead_email', email);
-    if (name) localStorage.setItem('roi_lead_name', name);
-
-    // Fire-and-forget API call to capture lead
-    if (API_URL) {
-      try {
-        await fetch(`${API_URL}/api/leads`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            name: name || undefined,
-            industry: formData?.industry || undefined,
-            companySize: formData?.companySize || undefined,
-            source: 'report_download',
-          }),
-        });
-      } catch {
-        // Lead capture failure should not block download
-      }
-    }
-    setSubmitting(false);
-    onSubmit();
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-navy font-bold text-lg mb-1">Get Your Report</h3>
-        <p className="text-gray-500 text-sm mb-6">Enter your email to download the full analysis.</p>
-        <div className="space-y-3 mb-6">
-          <input
-            type="text"
-            placeholder="Your name (optional)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
-          />
-          <input
-            type="email"
-            placeholder="Work email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
-            autoFocus
-          />
-        </div>
-        <button
-          onClick={handleSubmit}
-          disabled={!isValid || submitting}
-          className="w-full bg-gold text-navy font-bold py-3 rounded-xl text-sm cursor-pointer transition-all hover:bg-sky disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {submitting ? 'Submitting...' : 'Download Report'}
-        </button>
-        <button
-          onClick={onClose}
-          className="w-full mt-2 text-gray-400 text-xs hover:text-gray-600 cursor-pointer transition-colors"
-        >
-          Cancel
-        </button>
-      </motion.div>
-    </motion.div>
-  );
-}
-
 export default function LiveCalculation({ formData, onDownload, onDownloadExcel, onStartOver, onEditInputs, onShare }) {
   // Custom adoption ramp — editable on results page, defaults to benchmark ramp
   const [customRamp, setCustomRamp] = useState(null);
+  // Driver overrides — inline edits on the "What Drives This Result" cards
+  const [driverOverrides, setDriverOverrides] = useState({});
   const effectiveFormData = useMemo(() => {
-    if (!customRamp) return formData;
-    return { ...formData, customAdoptionRamp: customRamp };
-  }, [formData, customRamp]);
+    let fd = formData;
+    if (customRamp) fd = { ...fd, customAdoptionRamp: customRamp };
+    // Merge driver overrides into formData (supports nested paths like 'assumptions.automationPotential')
+    for (const [path, value] of Object.entries(driverOverrides)) {
+      if (value !== undefined) fd = setNestedValue(fd, path, value);
+    }
+    return fd;
+  }, [formData, customRamp, driverOverrides]);
   const results = useMemo(() => runCalculations(effectiveFormData), [effectiveFormData]);
 
   // Derive output tier from role
@@ -449,23 +603,21 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
   // Map lever labels to current input values for display
   const leverInputValues = useMemo(() => ({
     'Team Size': `${formData.teamSize} people`,
-    'Avg Cost per Person': formatCurrency(formData.avgSalary || 0),
+    'Avg Cost per Person': formatCompact(formData.avgSalary || 0),
     'Error Rate': `${((formData.errorRate || results.executiveSummary?.keyAssumptions?.errorRate || 0.10) * 100).toFixed(0)}%`,
     'Automation Potential': formatPercent(results.executiveSummary?.keyAssumptions?.automationPotential || 0),
-    'Implementation Cost': formatCurrency(formData.implementationBudget || 0),
-    'Ongoing Cost': formatCurrency(formData.ongoingAnnualCost || 0),
+    'Implementation Cost': formatCompact(formData.implementationBudget || 0),
+    'Ongoing Cost': formatCompact(formData.ongoingAnnualCost || 0),
     'Discount Rate': formatPercent(results.discountRate || 0),
   }), [formData, results]);
 
-  // Download loading states + email gate
+  // Download loading states
   const [pdfLoading, setPdfLoading] = useState(false);
   const [excelLoading, setExcelLoading] = useState(false);
-  const [emailGateAction, setEmailGateAction] = useState(null); // null | 'pdf' | 'excel'
   const [shareCopied, setShareCopied] = useState(false);
+  const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
 
-  const hasEmail = () => !!localStorage.getItem('roi_lead_email');
-
-  const executePdfDownload = useCallback(async () => {
+  const handlePdfDownload = useCallback(async () => {
     setPdfLoading(true);
     try {
       await Promise.resolve(onDownload(results, recommendation, mcResults));
@@ -474,32 +626,16 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
     }
   }, [onDownload, results, recommendation, mcResults]);
 
-  const executeExcelDownload = useCallback(async () => {
+  const handleExcelDownload = useCallback(async () => {
     setExcelLoading(true);
     try {
       await Promise.resolve(onDownloadExcel(mcResults, results));
+    } catch (err) {
+      console.error('Excel download failed:', err);
     } finally {
       setTimeout(() => setExcelLoading(false), 500);
     }
   }, [onDownloadExcel, mcResults, results]);
-
-  const handlePdfDownload = useCallback(() => {
-    if (hasEmail()) { executePdfDownload(); }
-    else { setEmailGateAction('pdf'); }
-  }, [executePdfDownload]);
-
-  const handleExcelDownload = useCallback(() => {
-    if (hasEmail()) { executeExcelDownload(); }
-    else { setEmailGateAction('excel'); }
-  }, [executeExcelDownload]);
-
-
-
-  const handleEmailSubmit = useCallback(() => {
-    setEmailGateAction(null);
-    if (emailGateAction === 'pdf') executePdfDownload();
-    else if (emailGateAction === 'excel') executeExcelDownload();
-  }, [emailGateAction, executePdfDownload, executeExcelDownload]);
 
   // Compute totals row for executive year-by-year
   const totalsRow = useMemo(() => {
@@ -513,54 +649,44 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
   }, [scenario.projections]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 py-8 px-4">
+    <div className="min-h-screen bg-[#f5f5f7] py-10 px-4">
       <div className="max-w-2xl mx-auto">
 
-        {/* Hero Verdict */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6 }}
-          className={`text-center mb-8 p-8 rounded-3xl shadow-xl ${
-            isPositiveROI
-              ? 'bg-gradient-to-br from-emerald-500 to-emerald-600'
-              : 'bg-gradient-to-br from-red-500 to-red-600'
-          }`}
-        >
+        {/* Back button */}
+        {onEditInputs && (
           <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
-            className="text-6xl mb-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="mb-6"
           >
-            {isPositiveROI ? '✓' : '✗'}
+            <button
+              onClick={onEditInputs}
+              className="inline-flex items-center gap-1.5 text-[13px] text-gray-400 hover:text-gray-900 transition-colors cursor-pointer"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Edit Inputs
+            </button>
           </motion.div>
-          <h1 className="text-white text-2xl md:text-3xl font-bold mb-2">
-            {isPositiveROI ? 'This Investment Makes Sense' : 'Not Yet Profitable'}
-          </h1>
-          <p className="text-white/80 text-sm max-w-md mx-auto">
-            {isPositiveROI
-              ? `Expected ${formatCurrency(netReturn)} net return over 5 years`
-              : `Current scenario shows ${formatCurrency(-netReturn)} shortfall. See suggestions below.`
-            }
-          </p>
-        </motion.div>
+        )}
 
         {/* Scenario Toggle */}
         <div className="flex justify-center mb-6">
-          <div className="inline-flex bg-white rounded-xl shadow-md p-1 gap-1">
+          <div className="inline-flex bg-white/60 backdrop-blur-xl rounded-full border border-gray-200/60 p-1 gap-0.5">
             {[
-              { key: 'conservative', label: 'Conservative', color: 'text-red-500' },
-              { key: 'base', label: 'Base Case', color: 'text-amber-600' },
-              { key: 'optimistic', label: 'Optimistic', color: 'text-emerald-600' },
+              { key: 'conservative', label: 'Conservative' },
+              { key: 'base', label: 'Base Case' },
+              { key: 'optimistic', label: 'Optimistic' },
             ].map((s) => (
               <button
                 key={s.key}
                 onClick={() => setActiveScenario(s.key)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                className={`px-5 py-2 rounded-full text-[13px] font-medium transition-all duration-200 cursor-pointer ${
                   activeScenario === s.key
-                    ? `bg-navy text-white shadow-sm`
-                    : `text-gray-500 hover:text-navy hover:bg-gray-50`
+                    ? 'bg-gray-900 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-900'
                 }`}
               >
                 {s.label}
@@ -570,98 +696,354 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         </div>
 
         {/* ============================================ */}
-        {/* ZONE A — Executive Scorecard (above the fold) */}
+        {/* ZONE A — Hero ROI + Key Metrics */}
         {/* ============================================ */}
 
-        {/* Executive Scorecard — 3 Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+        {/* Hero: ROI front and center */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: [0.25, 0.1, 0.25, 1] }}
+          className="text-center mb-8"
+        >
+          <p className="text-gray-400 text-[11px] uppercase tracking-widest font-medium mb-2">5-Year ROI</p>
+          <motion.p
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.15, duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+            className={`font-mono text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight ${
+              scenarioROI >= 0 ? 'text-emerald-600' : 'text-red-500'
+            }`}
+          >
+            {formatPercent(scenarioROI)}
+          </motion.p>
+          <p className="text-gray-500 text-sm mt-3 max-w-sm mx-auto leading-relaxed">
+            {isPositiveROI
+              ? `${formatCurrency(netReturn)} net return on ${formatCompact(capitalDeployed)} invested`
+              : `${formatCurrency(-netReturn)} shortfall — see suggestions below`
+            }
+          </p>
+        </motion.div>
+
+        {/* Key Metrics — 3 Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           <MetricCard
-            label="5-FY ROIC"
-            value={formatPercent(scenarioROI)}
-            subtext={`${formatCompact(capitalDeployed)} capital deployed`}
-            color={scenarioROI >= 0 ? 'green' : 'red'}
+            label="Break-Even"
+            value={scenario.paybackMonths > 60 ? '>5 yrs' : `${scenario.paybackMonths} mo`}
+            subtext={scenario.paybackMonths <= 60 ? `${Math.round(scenario.paybackMonths / 12 * 10) / 10} years` : 'Does not break even in 5 years'}
+            color={scenario.paybackMonths <= 36 ? 'green' : scenario.paybackMonths <= 60 ? 'neutral' : 'red'}
             delay={0.2}
           />
           <MetricCard
-            label="Payback"
-            value={scenario.paybackMonths > 60 ? '>5 yrs' : `${Math.round(scenario.paybackMonths / 12 * 10) / 10} yrs`}
-            subtext={scenario.paybackMonths <= 60 ? `${scenario.paybackMonths} months` : 'No break-even'}
+            label="Annual Savings (Year 5)"
+            value={formatCompact(scenario.projections[4]?.grossSavings || 0)}
+            subtext={`Net: ${formatCompact(scenario.projections[4]?.netCashFlow || 0)} after costs`}
+            color={(scenario.projections[4]?.netCashFlow || 0) >= 0 ? 'green' : 'red'}
             delay={0.3}
           />
           <MetricCard
-            label="5-FY Net Return"
+            label="5-Year Net Return"
             value={formatCompact(netReturn)}
-            subtext={`Net cash flows minus ${formatCompact(upfrontInvestment)} upfront`}
+            subtext={`${formatCompact(totalGrossSavings)} savings − ${formatCompact(totalCostOfOwnership)} costs`}
             color={netReturn >= 0 ? 'green' : 'red'}
             delay={0.4}
           />
         </div>
 
-        {/* What Drives This Result? — promoted to top, right after scorecard */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
-        >
-          <h3 className="text-navy font-bold text-lg mb-1">What Drives This Result?</h3>
-          <p className="text-gray-500 text-xs mb-4">
-            {leverCount === 1 ? 'The single biggest lever on your ROI' : `The ${leverCount} biggest levers on your ROI — focus here first`}
-          </p>
-          <div className="space-y-3">
-            {results.executiveSummary.topLevers.slice(0, leverCount).map((lever, i) => (
-              <motion.div
-                key={lever.label}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.6 + i * 0.1, duration: 0.3 }}
-                className="rounded-xl bg-gray-50 p-4"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-navy text-white text-xs font-bold">{i + 1}</span>
-                    <span className="text-navy font-semibold text-sm">{lever.label}</span>
+        {/* Savings Waterfall — how annual savings build up */}
+        {results.valueBreakdown && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.45, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
+          >
+            {(() => {
+              // Show Year 5 (full ramp) savings breakdown
+              const yr5 = scenario.projections[4] || scenario.projections[scenario.projections.length - 1];
+              const vb = results.valueBreakdown;
+              const yr5Gross = yr5?.grossSavings || 0;
+              const yr5Net = yr5?.netCashFlow || 0;
+              const yr5Ongoing = yr5?.ongoingCost || 0;
+
+              // Scale breakdown proportionally to year 5 gross
+              const totalRA = getValueBreakdownTotals(vb).riskAdjusted || 1;
+              const scale = yr5Gross / totalRA;
+              const savingsBuckets = buildSavingsBuckets(vb, scale);
+
+              const maxVal = Math.max(...savingsBuckets.map(b => b.value), yr5Ongoing, 1);
+
+              return (
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-baseline justify-between mb-1">
+                      <h3 className="text-gray-900 font-semibold text-base tracking-tight">Where the Savings Come From</h3>
+                      <span className="text-[11px] text-gray-400">Year 5 (full ramp)</span>
+                    </div>
+                    <p className="text-gray-400 text-[11px]">
+                      Annual gross savings: <span className="font-mono font-semibold text-gray-900">{formatCompact(yr5Gross)}</span>
+                      {' '}&middot;{' '}
+                      After ongoing costs: <span className={`font-mono font-semibold ${yr5Net >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{formatCompact(yr5Net)}</span>
+                    </p>
                   </div>
-                  <span className="font-mono font-bold text-navy text-sm">{formatCompact(lever.npvSwing)} swing</span>
+
+                  {/* Savings buckets */}
+                  <div className="space-y-2.5">
+                    {savingsBuckets.map((b, bi) => {
+                      const pct = (b.value / maxVal) * 100;
+                      return (
+                        <div key={b.label} className="space-y-1">
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-[13px] font-medium text-gray-700">{b.label}</span>
+                            <span className="font-mono text-[13px] font-semibold text-gray-900">{formatCompact(b.value)}</span>
+                          </div>
+                          <div className="h-4 w-full rounded-lg bg-gray-100/80 overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.max(pct, 3)}%` }}
+                              transition={{ duration: 0.6, delay: 0.15 + bi * 0.08, ease: 'easeOut' }}
+                              className={`h-full rounded-lg ${b.color}`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Ongoing costs (negative) */}
+                    {yr5Ongoing > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-gray-100">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-[13px] font-medium text-red-400">Less: Ongoing AI Costs</span>
+                          <span className="font-mono text-[13px] font-semibold text-red-500">−{formatCompact(yr5Ongoing)}</span>
+                        </div>
+                        <div className="h-4 w-full rounded-lg bg-gray-100/80 overflow-hidden">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.max((yr5Ongoing / maxVal) * 100, 3)}%` }}
+                            transition={{ duration: 0.6, delay: 0.15 + savingsBuckets.length * 0.08, ease: 'easeOut' }}
+                            className="h-full rounded-lg bg-red-400/60"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Net total bar */}
+                  <div className="border-t border-gray-200/60 pt-3">
+                    <div className="flex items-baseline justify-between mb-2">
+                      <span className="text-[13px] font-bold text-gray-900">Net Annual Value (Year 5)</span>
+                      <span className={`font-mono text-base font-bold ${yr5Net >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{formatCompact(yr5Net)}</span>
+                    </div>
+                    <div className="flex h-3 w-full overflow-hidden rounded-full gap-px">
+                      {savingsBuckets.map((b) => {
+                        const segPct = yr5Gross > 0 ? (b.value / yr5Gross) * 100 : 0;
+                        return (
+                          <div
+                            key={b.label}
+                            className={`${b.color} rounded-full`}
+                            style={{ width: `${Math.max(segPct, b.value > 0 ? 3 : 0)}%` }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-                {leverInputValues[lever.label] && (
-                  <p className="text-xs text-gray-500 ml-10">
-                    Your input: <span className="font-mono font-medium text-navy">{leverInputValues[lever.label]}</span>
-                  </p>
-                )}
-              </motion.div>
-            ))}
+              );
+            })()}
+          </motion.div>
+        )}
+
+        {/* Download + Actions — right after the key findings */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+          className="text-center space-y-4 mb-8"
+        >
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={handlePdfDownload}
+              disabled={pdfLoading}
+              className="bg-gray-900 text-white font-medium py-3.5 px-8 rounded-full text-sm cursor-pointer transition-all duration-200 hover:bg-gray-800 active:scale-[0.98] disabled:opacity-50 disabled:cursor-wait"
+            >
+              {pdfLoading ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Generating...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 justify-center">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
+                  </svg>
+                  Download Presentation
+                </span>
+              )}
+            </button>
+            <button
+              onClick={handleExcelDownload}
+              disabled={excelLoading}
+              className="bg-white/80 backdrop-blur-sm text-gray-900 font-medium py-3.5 px-8 rounded-full text-sm border border-gray-200/60 cursor-pointer transition-all duration-200 hover:bg-white active:scale-[0.98] disabled:opacity-50 disabled:cursor-wait"
+            >
+              {excelLoading ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Generating...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 justify-center">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
+                  </svg>
+                  Download Excel Model
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="flex items-center justify-center gap-5">
+            {onShare && (
+              <button
+                onClick={() => {
+                  onShare();
+                  setShareCopied(true);
+                  setTimeout(() => setShareCopied(false), 2000);
+                }}
+                className="text-gray-500 hover:text-gray-900 text-[13px] cursor-pointer transition-colors"
+              >
+                {shareCopied ? 'Link Copied!' : 'Share Link'}
+              </button>
+            )}
+            {onEditInputs && (
+              <button
+                onClick={onEditInputs}
+                className="text-gray-500 hover:text-gray-900 text-[13px] cursor-pointer transition-colors"
+              >
+                Edit Inputs
+              </button>
+            )}
+            {onStartOver && (
+              <button
+                onClick={onStartOver}
+                className="text-gray-400 hover:text-gray-900 text-[13px] cursor-pointer transition-colors"
+              >
+                Start Over
+              </button>
+            )}
           </div>
         </motion.div>
+
+        {/* What Drives This Result? — interactive driver cards */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+          className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
+        >
+          <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-1">What Drives This Result?</h3>
+          <p className="text-gray-400 text-[11px] mb-4">
+            {leverCount === 1 ? 'The single biggest lever on your ROI' : `Top ${leverCount} levers — click values to adjust live`}
+          </p>
+          <div className="space-y-2.5">
+            {results.executiveSummary.topLevers.slice(0, leverCount).map((lever, i) => {
+              const config = LEVER_FIELD_MAP[lever.label];
+              // Use formData value, falling back to calculated effective value for null/auto fields
+              let currentRaw = config ? getNestedValue(effectiveFormData, config.path) : null;
+              if (currentRaw == null && config) {
+                const fallbacks = {
+                  'implementationBudget': results.aiCostModel?.realisticImplCost,
+                  'ongoingAnnualCost': results.aiCostModel?.baseOngoingCost,
+                };
+                currentRaw = fallbacks[config.path] ?? null;
+              }
+              return (
+                <DriverCard
+                  key={lever.label}
+                  index={i}
+                  lever={lever}
+                  config={config}
+                  currentValue={currentRaw}
+                  results={results}
+                  formData={effectiveFormData}
+                  leverInputDisplay={leverInputValues[lever.label]}
+                  onValueChange={(val) => {
+                    if (config) {
+                      setDriverOverrides(prev => ({ ...prev, [config.path]: val }));
+                    }
+                  }}
+                />
+              );
+            })}
+          </div>
+          {Object.keys(driverOverrides).length > 0 && (
+            <button
+              onClick={() => setDriverOverrides({})}
+              className="mt-3 text-[11px] text-gray-400 hover:text-gray-900 transition-colors cursor-pointer"
+            >
+              Reset to original values
+            </button>
+          )}
+        </motion.div>
+
+        {/* Detailed Analysis Toggle */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6, duration: 0.4 }}
+          className="text-center mb-6"
+        >
+          <button
+            onClick={() => setShowDetailedAnalysis(!showDetailedAnalysis)}
+            className="inline-flex items-center gap-2 rounded-full bg-white/80 backdrop-blur-sm border border-gray-200/60 px-6 py-3 text-[13px] font-medium text-gray-900 transition-all hover:bg-white cursor-pointer"
+          >
+            <svg
+              className={`h-4 w-4 transition-transform duration-200 ${showDetailedAnalysis ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+            {showDetailedAnalysis ? 'Hide Detailed Analysis' : 'View Detailed Analysis'}
+          </button>
+        </motion.div>
+
+        {showDetailedAnalysis && (<>
 
         {/* Break-Even & Volume Sensitivity */}
         {results.volumeSensitivity && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.55, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            transition={{ delay: 0.55, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
           >
-            <h3 className="text-navy font-bold text-lg mb-1">Volume Sensitivity</h3>
-            <p className="text-gray-500 text-xs mb-4">
+            <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-1">Volume Sensitivity</h3>
+            <p className="text-gray-400 text-[11px] mb-4">
               How changes in {results.volumeSensitivity.inputLabel.toLowerCase()} affect your 5-year NPV
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="border-b-2 border-navy/10">
-                    <th className="text-left py-2 text-gray-500 font-medium">{results.volumeSensitivity.inputLabel}</th>
-                    <th className="text-right py-2 text-gray-500 font-medium">Change</th>
-                    <th className="text-right py-2 text-gray-500 font-medium">5-FY NPV</th>
-                    <th className="text-right py-2 text-gray-500 font-medium">NPV Impact</th>
+                  <tr className="border-b border-gray-200/60">
+                    <th className="text-left py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">{results.volumeSensitivity.inputLabel}</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">Change</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">5-FY NPV</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">NPV Impact</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.volumeSensitivity.levels.map((level, i) => {
                     const isCurrent = level.delta === 0;
                     return (
-                      <tr key={i} className={`border-b border-gray-100 ${isCurrent ? 'bg-gold/5 font-semibold' : ''}`}>
-                        <td className="py-2 font-mono text-navy">
+                      <tr key={i} className={`border-b border-gray-100/80 ${isCurrent ? 'bg-gray-50/50 font-semibold' : ''}`}>
+                        <td className="py-2.5 font-mono text-gray-900">
                           {level.volume.toLocaleString()}
                           {isCurrent && <span className="ml-2 text-xs text-gray-400 font-normal">(current)</span>}
                         </td>
@@ -680,36 +1062,91 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 </tbody>
               </table>
             </div>
-            {results.breakEvenUnits && results.breakEvenUnits.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <p className="text-xs text-gray-500 font-medium mb-2">Break-Even Thresholds</p>
-                <div className="flex flex-wrap gap-2">
-                  {results.breakEvenUnits.slice(0, 3).map((item) => (
-                    <div key={item.key} className="bg-gray-50 rounded-lg px-3 py-2 text-xs">
-                      <span className="text-gray-500">{item.label}:</span>{' '}
-                      <span className="font-mono font-semibold text-navy">
-                        {item.type === 'percent' ? `${(item.breakEvenValue * 100).toFixed(1)}%` : item.breakEvenValue.toLocaleString()}
-                      </span>
-                      <span className={`ml-1 font-mono ${item.direction === 'floor' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        ({item.direction === 'floor' ? `${item.marginPct > 0 ? '+' : ''}${item.marginPct}% margin` : `${Math.abs(item.marginPct)}% gap`})
-                      </span>
-                    </div>
-                  ))}
+            {results.breakEvenUnits && results.breakEvenUnits.length > 0 && (() => {
+              // Filter out items with trivial break-even (margin > 500% means the input barely matters)
+              const meaningful = results.breakEvenUnits.filter(item => Math.abs(item.marginPct) <= 500);
+              if (meaningful.length === 0) return null;
+              return (
+                <div className="mt-4 pt-4 border-t border-gray-200/60">
+                  <p className="text-[11px] text-gray-400 font-medium uppercase tracking-wider mb-2">Break-Even Thresholds</p>
+                  <div className="flex flex-wrap gap-2">
+                    {meaningful.slice(0, 3).map((item) => {
+                      const pct = Math.min(Math.abs(item.marginPct), 500);
+                      const sign = item.marginPct > 0 ? '+' : '-';
+                      return (
+                        <div key={item.key} className="bg-gray-50/80 rounded-xl px-3 py-2 text-[11px]">
+                          <span className="text-gray-400">{item.label}:</span>{' '}
+                          <span className="font-mono font-semibold text-gray-900">
+                            {item.type === 'percent' ? `${(item.breakEvenValue * 100).toFixed(1)}%` : item.breakEvenValue.toLocaleString()}
+                          </span>
+                          <span className={`ml-1 font-mono ${item.direction === 'floor' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            ({item.direction === 'floor' ? `${sign}${pct}% margin` : `${pct}% gap`})
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
+          </motion.div>
+        )}
+
+        {/* Process Volume by Year */}
+        {results.adoptionRamp && effectiveFormData.archetypeInputs?.processVolume > 0 && effectiveShow('yearByYear') !== 'totals-only' && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.55, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
+          >
+            <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-1">Process Volume by Year</h3>
+            <p className="text-gray-400 text-[11px] mb-4">
+              {(effectiveFormData.archetypeInputs.processVolume * 12).toLocaleString()} transactions/year — AI handles more as adoption ramps
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-gray-200/60">
+                    <th className="text-left py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">FY</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">Annual Vol.</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">AI-Handled</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">Manual</th>
+                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">AI %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.adoptionRamp.map((ramp, yr) => {
+                    const annualVol = effectiveFormData.archetypeInputs.processVolume * 12;
+                    const autPct = results.executiveSummary?.keyAssumptions?.automationPotential || 0;
+                    const aiHandled = Math.round(annualVol * autPct * ramp);
+                    const manual = annualVol - aiHandled;
+                    const aiPct = Math.round(autPct * ramp * 100);
+                    return (
+                      <tr key={yr} className="border-b border-gray-100/80">
+                        <td className="py-2.5 font-medium text-gray-900">FY {yr + 1}</td>
+                        <td className="py-2.5 text-right font-mono text-gray-900">{annualVol.toLocaleString()}</td>
+                        <td className="py-2.5 text-right font-mono text-emerald-600">{aiHandled.toLocaleString()}</td>
+                        <td className="py-2.5 text-right font-mono text-gray-400">{manual.toLocaleString()}</td>
+                        <td className="py-2.5 text-right font-mono font-semibold text-gray-900">{aiPct}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </motion.div>
         )}
 
         {/* Year-by-Year Table */}
         {effectiveShow('yearByYear') && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            transition={{ delay: 0.5, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
           >
-            <h3 className="text-navy font-bold text-lg mb-4">
+            <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-4">
               {effectiveShow('yearByYear') === 'totals-only' ? '5-FY Summary' : 'FY-by-FY Breakdown'}
             </h3>
             <div className="overflow-x-auto">
@@ -765,62 +1202,62 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {/* Key Assumptions — 2x2 + timeline */}
         {effectiveShow('keyAssumptions') && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.9, duration: 0.5 }}
-            className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+            transition={{ delay: 0.9, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
           >
-            <h3 className="text-navy font-bold text-lg mb-4">Key Assumptions</h3>
+            <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-4">Key Assumptions</h3>
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-gray-500 text-xs mb-1">Automation Potential</p>
-                <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.automationPotential)}</p>
+              <div className="bg-gray-50/80 rounded-xl p-3 text-center">
+                <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Automation</p>
+                <p className="font-mono text-xl font-bold text-gray-900">{formatPercent(results.executiveSummary.keyAssumptions.automationPotential)}</p>
               </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-gray-500 text-xs mb-1">Adoption Rate</p>
-                <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.adoptionRate)}</p>
+              <div className="bg-gray-50/80 rounded-xl p-3 text-center">
+                <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Adoption</p>
+                <p className="font-mono text-xl font-bold text-gray-900">{formatPercent(results.executiveSummary.keyAssumptions.adoptionRate)}</p>
               </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-gray-500 text-xs mb-1">Risk Multiplier</p>
-                <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.riskMultiplier)}</p>
+              <div className="bg-gray-50/80 rounded-xl p-3 text-center">
+                <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Risk Factor</p>
+                <p className="font-mono text-xl font-bold text-gray-900">{formatPercent(results.executiveSummary.keyAssumptions.riskMultiplier)}</p>
               </div>
-              <div className="bg-gray-50 rounded-xl p-3 text-center">
-                <p className="text-gray-500 text-xs mb-1">Discount Rate</p>
-                <p className="font-mono text-xl font-bold text-navy">{formatPercent(results.executiveSummary.keyAssumptions.discountRate)}</p>
+              <div className="bg-gray-50/80 rounded-xl p-3 text-center">
+                <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Discount Rate</p>
+                <p className="font-mono text-xl font-bold text-gray-900">{formatPercent(results.executiveSummary.keyAssumptions.discountRate)}</p>
               </div>
             </div>
-            <div className="mt-3 bg-gray-50 rounded-xl p-3 text-center">
-              <p className="text-gray-500 text-xs mb-1">Implementation Timeline</p>
-              <p className="font-mono text-xl font-bold text-navy">{results.executiveSummary.keyAssumptions.timelineMonths} months</p>
+            <div className="mt-3 bg-gray-50/80 rounded-xl p-3 text-center">
+              <p className="text-gray-400 text-[10px] uppercase tracking-wider mb-1">Timeline</p>
+              <p className="font-mono text-xl font-bold text-gray-900">{results.executiveSummary.keyAssumptions.timelineMonths} months</p>
             </div>
           </motion.div>
         )}
 
         {/* Transition Ramp Editor */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.95, duration: 0.5 }}
-          className="bg-white rounded-3xl shadow-xl p-6 mb-8"
+          transition={{ delay: 0.95, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+          className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
         >
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-navy font-bold text-lg">Transition Ramp</h3>
+            <h3 className="text-gray-900 font-semibold text-base tracking-tight">Transition Ramp</h3>
             {customRamp && (
               <button
                 onClick={() => setCustomRamp(null)}
-                className="text-xs text-gray-400 hover:text-navy cursor-pointer transition-colors underline"
+                className="text-[11px] text-gray-400 hover:text-gray-900 cursor-pointer transition-colors"
               >
-                Reset to default
+                Reset
               </button>
             )}
           </div>
-          <p className="text-gray-500 text-xs mb-4">
-            Adjust what % of full automation is realized each year. Changes update all results instantly.
+          <p className="text-gray-400 text-[11px] mb-5">
+            Adjust automation realization per year. Changes update all results.
           </p>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-5 gap-3">
             {results.adoptionRamp.map((val, i) => (
               <div key={i} className="text-center">
-                <p className="text-xs text-gray-500 mb-1">FY {i + 1}</p>
+                <p className="text-[10px] text-gray-400 mb-1.5 font-medium">FY {i + 1}</p>
                 <input
                   type="number"
                   min={0}
@@ -833,122 +1270,25 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                     newRamp[i] = newVal;
                     setCustomRamp(newRamp);
                   }}
-                  className="w-full text-center font-mono text-sm font-bold text-navy bg-gray-50 rounded-lg border border-gray-200 py-2 focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+                  className="w-full text-center font-mono text-sm font-semibold text-gray-900 bg-gray-50/80 rounded-xl border border-gray-200/60 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 transition-shadow"
                 />
-                <p className="text-[10px] text-gray-400 mt-0.5">%</p>
+                <p className="text-[10px] text-gray-400 mt-1">%</p>
               </div>
             ))}
           </div>
-          {/* Visual bar representation */}
-          <div className="flex items-end gap-2 mt-3 h-12">
+          <div className="flex items-end gap-2 mt-4 h-10">
             {results.adoptionRamp.map((val, i) => (
               <div key={i} className="flex-1 flex flex-col items-center">
                 <div
-                  className="w-full rounded-t bg-gold/60 transition-all duration-300"
-                  style={{ height: `${val * 48}px` }}
+                  className="w-full rounded-md bg-gray-900/20 transition-all duration-300"
+                  style={{ height: `${val * 40}px` }}
                 />
               </div>
             ))}
           </div>
         </motion.div>
 
-        {/* CTA Buttons */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1, duration: 0.5 }}
-          className="text-center space-y-4 mb-8"
-        >
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <button
-              onClick={handlePdfDownload}
-              disabled={pdfLoading}
-              className="bg-gold text-navy font-bold py-4 px-8 rounded-2xl text-lg shadow-lg shadow-gold/30 cursor-pointer transition-all hover:bg-sky hover:text-navy hover:shadow-sky/30 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
-            >
-              {pdfLoading ? (
-                <span className="flex items-center gap-2 justify-center">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Generating PDF...
-                </span>
-              ) : 'Summary Report'}
-            </button>
-            <button
-              onClick={handleExcelDownload}
-              disabled={excelLoading}
-              className="bg-gold text-navy font-bold py-4 px-8 rounded-2xl text-lg shadow-lg shadow-gold/30 cursor-pointer transition-all hover:bg-sky hover:text-navy hover:shadow-sky/30 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
-            >
-              {excelLoading ? (
-                <span className="flex items-center gap-2 justify-center">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Generating Excel...
-                </span>
-              ) : 'Financial Model'}
-            </button>
-          </div>
-
-          <div className="flex items-center justify-center gap-4">
-            {onShare && (
-              <button
-                onClick={() => {
-                  onShare();
-                  setShareCopied(true);
-                  setTimeout(() => setShareCopied(false), 2000);
-                }}
-                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
-              >
-                {shareCopied ? 'Link Copied!' : 'Share Link'}
-              </button>
-            )}
-            {onEditInputs && (
-              <button
-                onClick={onEditInputs}
-                className="text-navy hover:text-gold text-sm font-medium underline underline-offset-2 cursor-pointer transition-colors"
-              >
-                Edit Inputs
-              </button>
-            )}
-            {onStartOver && (
-              <button
-                onClick={onStartOver}
-                className="text-gray-400 hover:text-navy text-sm underline underline-offset-2 cursor-pointer transition-colors"
-              >
-                Start Over
-              </button>
-            )}
-          </div>
-        </motion.div>
-
-        {/* "View Full Analysis" toggle for executive tier */}
-        {tier === 'executive' && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.05, duration: 0.5 }}
-            className="text-center mb-8"
-          >
-            <button
-              onClick={() => setShowFullAnalysis(!showFullAnalysis)}
-              className="inline-flex items-center gap-2 rounded-xl bg-gold px-6 py-3 text-sm font-semibold text-navy shadow-sm transition-all hover:bg-sky cursor-pointer"
-            >
-              <svg
-                className={`h-4 w-4 transition-transform ${showFullAnalysis ? 'rotate-180' : ''}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-              {showFullAnalysis ? 'Hide Full Analysis' : 'View Full Analysis'}
-            </button>
-          </motion.div>
-        )}
+        {/* (old executive toggle removed — replaced by universal "Detailed Analysis" toggle above) */}
 
         {/* What Would Make This Work - shown only for negative ROI */}
         {effectiveShow('whatWouldMakeItWork') && netReturn < 0 && (
@@ -956,30 +1296,30 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.1, duration: 0.5 }}
-            className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 mb-8"
+            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-amber-200/60 p-6 mb-6"
           >
-            <h3 className="text-amber-800 font-bold text-lg mb-3 flex items-center gap-2">
+            <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-3">
               What Would Make This Work?
             </h3>
-            <ul className="space-y-2 text-amber-900 text-sm">
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">&rarr;</span>
-                <span><strong>Larger team scope:</strong> AI savings scale with team size. Consider expanding to {Math.max(formData.teamSize * 2, 30)}+ people.</span>
+            <ul className="space-y-2.5 text-gray-600 text-[13px]">
+              <li className="flex items-start gap-2.5">
+                <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
+                <span><strong className="text-gray-900">Larger team scope:</strong> AI savings scale with team size. Consider expanding to {Math.max(formData.teamSize * 2, 30)}+ people.</span>
               </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">&rarr;</span>
-                <span><strong>Higher-value processes:</strong> Focus on processes with more manual hours or higher error costs.</span>
+              <li className="flex items-start gap-2.5">
+                <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
+                <span><strong className="text-gray-900">Higher-value processes:</strong> Focus on processes with more manual hours or higher error costs.</span>
               </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">&rarr;</span>
-                <span><strong>Improve data readiness:</strong> Clean, accessible data reduces implementation time by 30-50%.</span>
+              <li className="flex items-start gap-2.5">
+                <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
+                <span><strong className="text-gray-900">Improve data readiness:</strong> Clean, accessible data can shorten implementation work; validate the timeline with the delivery team.</span>
               </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5">&rarr;</span>
-                <span><strong>Secure executive sponsorship:</strong> Projects with C-level support succeed 2x more often.</span>
+              <li className="flex items-start gap-2.5">
+                <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
+                <span><strong className="text-gray-900">Secure executive sponsorship:</strong> Name an accountable sponsor with decision rights and approved resources.</span>
               </li>
             </ul>
-            <p className="text-amber-700 text-xs mt-4 pt-3 border-t border-amber-200">
+            <p className="text-gray-400 text-[11px] mt-4 pt-3 border-t border-gray-200/60">
               Download the full report to see detailed breakeven analysis and scenario modeling.
             </p>
           </motion.div>
@@ -1066,19 +1406,21 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         )}
 
         {/* Break-Even Unit Economics */}
-        {effectiveShow('breakEvenUnits') && results.breakEvenUnits && results.breakEvenUnits.length > 0 && (
+        {effectiveShow('breakEvenUnits') && results.breakEvenUnits && results.breakEvenUnits.length > 0 && (() => {
+          const meaningful = results.breakEvenUnits.filter(item => Math.abs(item.marginPct) <= 500);
+          if (meaningful.length === 0) return null;
+          return (
           <CollapsibleSection title="Break-Even Unit Economics" subtitle="Minimum input thresholds for a positive NPV">
             <p className="text-gray-500 text-xs mb-4">
-              {results.breakEvenUnits[0]?.direction === 'floor'
+              {meaningful[0]?.direction === 'floor'
                 ? 'Your current inputs exceed break-even. These are the minimum values before NPV turns negative.'
                 : 'These are the target values each input must reach for NPV to turn positive.'}
             </p>
             <div className="space-y-2">
-              {results.breakEvenUnits.map((item) => {
+              {meaningful.map((item) => {
                 const isFloor = item.direction === 'floor';
-                const rawPct = item.marginPct;
-                const pct = Math.abs(rawPct) > 999 ? (rawPct > 0 ? 999 : -999) : rawPct;
-                const pctLabel = Math.abs(item.marginPct) > 999 ? `${pct > 0 ? '>' : '<'}999` : `${pct > 0 ? '+' : ''}${pct}`;
+                const pct = item.marginPct;
+                const pctLabel = `${pct > 0 ? '+' : ''}${pct}`;
                 const formatVal = (v, type) => type === 'percent' ? `${(v * 100).toFixed(1)}%` : v >= 1000 ? v.toLocaleString() : v.toString();
                 return (
                   <div key={item.key} className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5">
@@ -1104,7 +1446,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
               })}
             </div>
           </CollapsibleSection>
-        )}
+          );
+        })()}
 
         {/* Capital Allocation: AI vs Alternatives */}
         {effectiveShow('workforceAlternatives') && results.workforceAlternatives && (
@@ -1365,7 +1708,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="font-semibold text-navy text-sm">B. Capacity Creation</p>
-                    <p className="text-xs text-gray-500">Freed time + revenue acceleration</p>
+                    <p className="text-xs text-gray-500">Freed time available for redeployment</p>
                   </div>
                   <span className="font-mono font-bold text-blue-600 text-lg">
                     {formatCompact(results.valuePathways.capacityCreation.totalAnnualValue)}
@@ -1375,9 +1718,6 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
                   <span>{Math.round(results.valuePathways.capacityCreation.hoursFreed).toLocaleString()} hrs freed</span>
                   <span>{results.valuePathways.capacityCreation.fteEquivalent.toFixed(1)} FTE equiv</span>
-                  {results.valuePathways.capacityCreation.revenueAcceleration > 0 && (
-                    <span>Rev accel: {formatCompact(results.valuePathways.capacityCreation.revenueAcceleration)}</span>
-                  )}
                 </div>
                 {!results.valuePathways.capacityCreation.includeInNPV && (
                   <p className="text-[10px] text-gray-400 mt-1 italic">Not included in NPV</p>
@@ -1608,18 +1948,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           </CollapsibleSection>
         )}
 
+        </>)}
+        {/* End of showDetailedAnalysis wrapper */}
+
       </div>
 
-      {/* Email Gate Modal */}
-      <AnimatePresence>
-        {emailGateAction && (
-          <EmailGateModal
-            onSubmit={handleEmailSubmit}
-            onClose={() => setEmailGateAction(null)}
-            formData={formData}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

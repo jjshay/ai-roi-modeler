@@ -90,7 +90,7 @@ export default function ScalabilityPremium({ scalabilityPremium, delay = 0 }) {
       </div>
 
       <p className="text-gray-400 text-xs mt-4">
-        AI marginal cost scales at 25% (2x) and 40% (3x) vs linear scaling for traditional ops [20]
+        Illustrative scale curve [M1] — validate the marginal-cost shape with your vendor pricing and measured workload.
       </p>
     </motion.div>
   );

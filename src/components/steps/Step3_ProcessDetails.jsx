@@ -1,20 +1,31 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import CardSelector from '../inputs/CardSelector';
 import SliderInput from '../inputs/SliderInput';
 import CurrencyInput from '../inputs/CurrencyInput';
-import { PROJECT_ARCHETYPES, getArchetypeDefaults } from '../../logic/archetypes';
+import NumberInput from '../inputs/NumberInput';
+import {
+  PROJECT_ARCHETYPES,
+  getArchetypeDefaults,
+  getRetiredArchetypeLabel,
+  isRetiredArchetype,
+} from '../../logic/archetypes';
 import { ARCHETYPE_INPUT_MAP, getArchetypeInputDefaults, mapArchetypeInputs } from '../../logic/archetypeInputs';
-import { getAutomationPotential, getErrorRate } from '../../logic/benchmarks';
+import { runCalculations } from '../../logic/calculations';
+import {
+  calculateContractExitCost,
+  calculateProcessCost,
+  calculateWorkforceMix,
+} from '../../logic/workforceMix';
 import { formatCurrency } from '../../utils/formatters';
 
-const ARCHETYPE_OPTIONS = PROJECT_ARCHETYPES.map(a => ({
-  icon: a.icon,
-  title: a.label,
-  description: a.description,
-  example: a.example,
-  value: a.id,
-  tags: a.tags,
+const ARCHETYPE_OPTIONS = PROJECT_ARCHETYPES.map((archetype) => ({
+  icon: archetype.icon,
+  title: archetype.label,
+  description: archetype.description,
+  example: archetype.example,
+  value: archetype.id,
+  tags: archetype.tags,
 }));
 
 const slideVariants = {
@@ -23,6 +34,8 @@ const slideVariants = {
   exit: { x: -80, opacity: 0 },
 };
 
+const EMPTY_INPUTS = Object.freeze({});
+
 function getStepForNumber(min, max) {
   const range = max - min;
   if (range > 10000) return 100;
@@ -30,535 +43,557 @@ function getStepForNumber(min, max) {
   return 1;
 }
 
-export default function Step3_ProcessDetails({ formData, updateField }) {
-  const [subStep, setSubStep] = useState(0);
-  const [showAssumptions, setShowAssumptions] = useState(false);
-  const advanceTimer = useRef(null);
+function initialSubStep(formData) {
+  if (isRetiredArchetype(formData.projectArchetype)) return 0;
+  if (formData.projectInputsComplete && formData.projectArchetype) return 3;
+  if (formData.projectArchetype) return 1;
+  return 0;
+}
 
-  const autoAdvance = useCallback(
-    (nextSubStep) => {
-      clearTimeout(advanceTimer.current);
-      if (nextSubStep <= 6) {
-        advanceTimer.current = setTimeout(() => {
-          setSubStep(nextSubStep);
-        }, 300);
-      }
-    },
-    [],
+function actionButtonClass(disabled = false) {
+  return `mt-5 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 ${disabled ? 'cursor-not-allowed opacity-40 hover:bg-gold' : ''}`;
+}
+
+const secondaryButtonClass = 'mt-5 rounded-lg border border-navy/20 px-5 py-2.5 text-sm font-semibold text-navy/70 transition-colors hover:border-navy/40 hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2';
+
+function StageIntro({ eyebrow, title, description }) {
+  return (
+    <>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-navy/45">{eyebrow}</p>
+      <h2 className="mb-2 text-2xl font-bold text-navy sm:text-3xl">{title}</h2>
+      <div className="mb-5 h-1 w-16 rounded bg-gold" />
+      {description && <p className="mb-6 text-sm leading-relaxed text-gray-600">{description}</p>}
+    </>
   );
+}
 
-  const isQuick = formData.wizardMode === 'quick';
-
-  const handleArchetype = (id) => {
-    updateField('projectArchetype', id);
-    const defaults = getArchetypeDefaults(id, formData.industry || 'Other');
-    if (defaults) {
-      updateField('assumptions', defaults);
-    }
-    const archetype = PROJECT_ARCHETYPES.find(a => a.id === id);
-    if (archetype && archetype.sourceProcessTypes.length > 0) {
-      updateField('processType', archetype.sourceProcessTypes[0]);
-    }
-    updateField('archetypeInputs', getArchetypeInputDefaults(id));
-    autoAdvance(1);
-  };
-
-  const handleTeamSize = (val) => {
-    updateField('teamSize', val);
-  };
-
-  // Quick mode: 0→archetype, 1→team size, 2→archetype inputs, 3→salary, 4→tool costs (skip 5,6)
-  // Detailed mode: 0→archetype, 1→team size, 2→archetype inputs, 3→salary, 4→tool costs, 5→vendors, 6→termination
-  const nextAfterTeamSize = 2;
-  const nextAfterToolCosts = isQuick ? null : 5; // null = end of step in quick mode
-
-  const handleArchetypeInput = (key, val) => {
-    const current = formData.archetypeInputs || {};
-    updateField('archetypeInputs', { ...current, [key]: val });
-  };
-
-  // Assumptions helpers
-  const assumptions = formData.assumptions || {};
-  const industry = formData.industry || 'Other';
-
-  const updateAssumption = useCallback(
-    (key, value) => {
-      updateField('assumptions', { ...formData.assumptions, [key]: value });
-    },
-    [formData.assumptions, updateField],
+function SummaryMetric({ label, value, detail }) {
+  return (
+    <div className="rounded-lg bg-white/70 px-3 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/70">{label}</p>
+      <p className="mt-1 font-mono text-lg font-bold text-emerald-900">{value}</p>
+      {detail && <p className="mt-1 text-[11px] leading-relaxed text-emerald-800/70">{detail}</p>}
+    </div>
   );
+}
 
-  const handleResetAssumptions = useCallback(() => {
-    const fresh = getArchetypeDefaults(formData.projectArchetype, industry);
-    if (fresh) {
-      updateField('assumptions', fresh);
-    }
-  }, [formData.projectArchetype, industry, updateField]);
+function readableMessage(message) {
+  if (!message) return null;
+  return typeof message === 'string' ? message : message.message;
+}
 
-  const defaults = getArchetypeDefaults(formData.projectArchetype, industry) || {};
-  const showRevenue = assumptions.revenueEligible !== undefined;
-
-  const computed = useMemo(() => {
-    const archetypeInputs = formData.archetypeInputs || {};
-    return mapArchetypeInputs(formData.projectArchetype, archetypeInputs);
-  }, [formData.projectArchetype, formData.archetypeInputs]);
-
+export default function Step3_ProcessDetails({ formData, updateField, onFlowStateChange }) {
+  const [subStep, setSubStep] = useState(() => initialSubStep(formData));
+  const workforce = useMemo(() => calculateWorkforceMix(formData), [formData]);
+  const contractExit = useMemo(() => calculateContractExitCost(formData), [formData]);
+  const isRetiredSelection = isRetiredArchetype(formData.projectArchetype);
+  const retiredArchetypeLabel = getRetiredArchetypeLabel(formData.projectArchetype);
   const archetypeSchema = formData.projectArchetype
     ? ARCHETYPE_INPUT_MAP[formData.projectArchetype]
     : null;
-  const archetypeInfo = formData.projectArchetype
-    ? PROJECT_ARCHETYPES.find(a => a.id === formData.projectArchetype)
-    : null;
-  const archetypeInputValues = formData.archetypeInputs || {};
+  const caseGuide = archetypeSchema?.caseGuide;
+  const archetypeInputValues = formData.archetypeInputs || EMPTY_INPUTS;
+  const computed = useMemo(
+    () => mapArchetypeInputs(formData.projectArchetype, archetypeInputValues),
+    [formData.projectArchetype, archetypeInputValues],
+  );
+  const processCost = useMemo(
+    () => calculateProcessCost({ ...formData, ...archetypeInputValues }),
+    [formData, archetypeInputValues],
+  );
+  const modelResult = useMemo(() => {
+    if (!formData.projectArchetype || isRetiredSelection) return null;
+    try {
+      return runCalculations(formData);
+    } catch {
+      return null;
+    }
+  }, [formData, isRetiredSelection]);
+  const caseEconomics = modelResult?.caseEconomics;
+  const modelWarnings = useMemo(() => {
+    const messages = [
+      ...(caseEconomics?.bumperMessages || []),
+      ...(caseEconomics?.warnings || []),
+      ...(modelResult?.inputWarnings || []),
+    ]
+      .map(readableMessage)
+      .filter(Boolean);
+    return [...new Set(messages)];
+  }, [caseEconomics, modelResult]);
 
-  // Current cost helpers
-  const teamSize = formData.teamSize || 10;
-  const avgSalary = formData.avgSalary ?? 100000;
-  const errorRate = formData.errorRate ?? 0.10;
-  const annualLaborCost = teamSize * avgSalary;
-  const reworkCost = annualLaborCost * errorRate;
-  const totalCost = annualLaborCost + reworkCost;
+  const computedWorkloadHours = caseEconomics?.caseWorkloadHoursPerWeek
+    ?? computed.caseWorkloadHoursPerWeek;
+  const availableCapacityHours = caseEconomics?.availableProcessHoursPerWeek
+    ?? workforce.totalHeadcount * workforce.hoursPerWeek;
+  const workloadRatio = caseEconomics?.workloadRatio
+    ?? (computedWorkloadHours > 0 && availableCapacityHours > 0
+      ? computedWorkloadHours / availableCapacityHours
+      : null);
+  const workloadBlocked = Boolean(
+    caseEconomics?.workloadBlocked
+    || caseEconomics?.blocksSavings
+    || caseEconomics?.workloadStatus === 'blocked'
+    || (Number.isFinite(workloadRatio) && workloadRatio > 1.25)
+  );
 
-  // Determine section title
-  const isCostSection = subStep >= 3;
+  const workforceReady = workforce.totalHeadcount > 0
+    && (workforce.directEmployeeCount === 0 || workforce.employeeFullyBurdenedCost > 0)
+    && (workforce.offshoreContractorCount === 0 || workforce.contractorFullyBurdenedCost > 0)
+    && workforce.hoursPerWeek > 0;
+  const isComplete = subStep === 3
+    && !isRetiredSelection
+    && Boolean(formData.projectInputsComplete)
+    && workforceReady;
+
+  useEffect(() => {
+    onFlowStateChange?.(isComplete);
+  }, [isComplete, onFlowStateChange]);
+
+  const handleArchetype = useCallback((id) => {
+    if (isRetiredArchetype(formData.projectArchetype)) {
+      // Keep legacy fields available for audit/export, but do not map them to
+      // a different use case. The user must explicitly select a supported one.
+      updateField('legacyRetiredProjectArchetype', formData.projectArchetype);
+      updateField('legacyRetiredArchetypeInputs', formData.archetypeInputs || EMPTY_INPUTS);
+      updateField('legacyRetiredAssumptions', formData.assumptions || EMPTY_INPUTS);
+    }
+    updateField('projectArchetype', id);
+    const defaults = getArchetypeDefaults(id, formData.industry || 'Other');
+    if (defaults) updateField('assumptions', defaults);
+    const archetype = PROJECT_ARCHETYPES.find((item) => item.id === id);
+    if (archetype?.sourceProcessTypes?.length) updateField('processType', archetype.sourceProcessTypes[0]);
+    updateField('archetypeInputs', {
+      ...getArchetypeInputDefaults(id),
+      ...(id === 'customer-facing-ai'
+        ? { supportCostValidated: false, supportCostCashRealizable: false }
+        : {}),
+    });
+    updateField('projectInputsComplete', false);
+    updateField('costTransitionComplete', false);
+    setSubStep(1);
+  }, [formData.archetypeInputs, formData.assumptions, formData.industry, formData.projectArchetype, updateField]);
+
+  const updateWorkforceField = useCallback((key, value) => {
+    const nextData = { ...formData, [key]: value };
+    const nextMix = calculateWorkforceMix(nextData);
+    updateField(key, value);
+    // Legacy aggregate values stay aligned for saved models and old exports.
+    updateField('teamSize', nextMix.totalHeadcount);
+    updateField('avgSalary', Math.round(nextMix.blendedFullyBurdenedCost));
+    updateField('projectInputsComplete', false);
+    updateField('costTransitionComplete', false);
+  }, [formData, updateField]);
+
+  const updateContractField = useCallback((key, value) => {
+    updateField(key, value);
+    updateField('projectInputsComplete', false);
+    updateField('costTransitionComplete', false);
+  }, [updateField]);
+
+  const handleArchetypeInput = useCallback((key, value) => {
+    updateField('archetypeInputs', { ...archetypeInputValues, [key]: value });
+    updateField('projectInputsComplete', false);
+    updateField('costTransitionComplete', false);
+  }, [archetypeInputValues, updateField]);
+
+  const isInternalProcess = formData.projectArchetype === 'internal-process-automation';
+  const isCustomerService = formData.projectArchetype === 'customer-facing-ai';
+  const isRiskCase = formData.projectArchetype === 'risk-compliance-legal-ai';
+  const keyDriverInputs = archetypeSchema?.keyDrivers?.length
+    ? archetypeSchema.inputs.filter((input) => archetypeSchema.keyDrivers.includes(input.key))
+    : (archetypeSchema?.inputs || []);
 
   return (
     <div className="mx-auto w-full max-w-xl">
-      <h2 className="mb-2 text-2xl font-bold text-navy sm:text-3xl">
-        {isCostSection ? "Now let's talk dollars" : 'What type of AI project is this?'}
-      </h2>
-      <div className="mb-8 h-1 w-16 rounded bg-gold" />
-
       <AnimatePresence mode="wait">
-        {/* SubStep 0: Archetype selection */}
         {subStep === 0 && (
-          <motion.div key="archetype" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3, ease: 'easeInOut' }}>
+          <Motion.div key="archetype" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.25, ease: 'easeInOut' }}>
+            <StageIntro
+              eyebrow="Project baseline"
+              title="What type of AI project is this?"
+              description="Start with the work being changed. The model then uses your current workforce and process economics—not a generic team-size estimate."
+            />
+            {isRetiredSelection && (
+              <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
+                <p className="font-semibold">{retiredArchetypeLabel} is no longer supported.</p>
+                <p className="mt-1">
+                  Its previous inputs are preserved as historical context, but they are not comparable to a supported operating case. Choose one of the four use cases below to continue; no legacy values will be silently remapped.
+                </p>
+              </div>
+            )}
             <CardSelector
-              label="Select the archetype that best describes your project"
+              label="Select the archetype that best describes the project"
               options={ARCHETYPE_OPTIONS}
               value={formData.projectArchetype}
               onChange={handleArchetype}
             />
-          </motion.div>
+          </Motion.div>
         )}
 
-        {/* SubStep 1: Team size */}
-        {subStep === 1 && (
-          <motion.div key="teamSize" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3, ease: 'easeInOut' }}>
-            <div className="space-y-4">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-2">
-                <p className="text-sm text-emerald-800">
-                  <span className="font-bold italic text-emerald-700">Team size</span> is the #1 driver of AI ROI — larger teams see bigger absolute savings.
-                </p>
+        {subStep === 2 && (
+          <Motion.div key="workforceMix" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.25, ease: 'easeInOut' }}>
+            <StageIntro
+              eyebrow="Current workforce"
+              title="Who does this work today?"
+              description="Enter the fully burdened annual cost for the people currently performing this process. The model calculates the blended mix and total ongoing headcount cost."
+            />
+            <div className="space-y-5">
+              <div className="rounded-xl border border-navy/10 bg-navy/[0.025] p-4">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-navy/60">Direct employees</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <NumberInput
+                    label="Number of direct employees"
+                    value={formData.directEmployeeCount ?? 0}
+                    onChange={(value) => updateWorkforceField('directEmployeeCount', value)}
+                    min={0}
+                    max={100000}
+                    suffix="people"
+                  />
+                  <CurrencyInput
+                    label="Average fully burdened annual cost"
+                    value={formData.employeeFullyBurdenedCost ?? 125000}
+                    onChange={(value) => updateWorkforceField('employeeFullyBurdenedCost', value)}
+                    presets={[75000, 100000, 125000, 150000, 200000, 250000]}
+                    defaultValue={125000}
+                    max={2000000}
+                    helperText="User-entered. Planning starting point [L1]: $125K fully burdened; replace it with HR or finance data. Entries above $2M/year are blocked—model unusually costly roles separately."
+                  />
+                </div>
               </div>
-              <SliderInput
-                label="How many people currently work on this process?"
-                value={formData.teamSize ?? 10}
-                onChange={handleTeamSize}
+
+              <div className="rounded-xl border border-sky/20 bg-sky/[0.04] p-4">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-navy/60">Offshore contractors</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <NumberInput
+                    label="Number of offshore contractors"
+                    value={formData.offshoreContractorCount ?? 0}
+                    onChange={(value) => updateWorkforceField('offshoreContractorCount', value)}
+                    min={0}
+                    max={100000}
+                    suffix="people"
+                  />
+                  <CurrencyInput
+                    label="Average fully burdened annual cost"
+                    value={formData.contractorFullyBurdenedCost ?? 65000}
+                    onChange={(value) => updateWorkforceField('contractorFullyBurdenedCost', value)}
+                    presets={[35000, 50000, 65000, 80000, 100000, 125000]}
+                    defaultValue={65000}
+                    max={2000000}
+                    helperText="User-entered. Planning starting point [L2]: $65K fully burdened; replace it with vendor data. Entries above $2M/year are blocked—model unusually costly roles separately."
+                  />
+                </div>
+              </div>
+
+              <NumberInput
+                label="Hours per person, per week on this process"
+                value={formData.hoursPerWeek ?? 40}
+                onChange={(value) => updateWorkforceField('hoursPerWeek', value)}
                 min={1}
-                max={500}
-                step={1}
-                suffix=" people"
+                max={80}
+                suffix="hours"
+                helperText="User-entered. Default [H1]: 40 hours is a full-time planning convention, not an external benchmark; adjust for actual allocation."
               />
 
-              {/* Show automation potential from archetype defaults */}
-              {computed.automationPotential != null && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-emerald-700">Estimated Automation Potential</p>
-                      <p className="text-[11px] text-emerald-600/70">Based on your archetype selection</p>
-                    </div>
-                    <span className="text-xl font-bold font-mono text-emerald-700">
-                      {Math.round(computed.automationPotential * 100)}%
-                    </span>
-                  </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="mb-3 text-sm font-semibold text-emerald-900">Calculated workforce baseline</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <SummaryMetric label="Total workforce" value={`${workforce.totalHeadcount} people`} />
+                  <SummaryMetric label="Blended annual cost" value={formatCurrency(workforce.blendedFullyBurdenedCost)} detail="Per person" />
+                  <SummaryMetric label="Ongoing headcount cost" value={formatCurrency(workforce.totalAnnualHeadcountCost)} detail="Per year" />
                 </div>
-              )}
+                <p className="mt-3 text-xs text-emerald-800/70">Weighted hourly cost: {formatCurrency(workforce.weightedHourlyCost)} per hour.</p>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setSubStep(nextAfterTeamSize)}
-                className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
-              >
-                Continue
-              </button>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={() => setSubStep(1)} className={secondaryButtonClass}>Back to operating drivers</button>
+                <button type="button" onClick={() => setSubStep(3)} disabled={!workforceReady} className={actionButtonClass(!workforceReady)}>
+                  Continue to contracts
+                </button>
+              </div>
             </div>
-          </motion.div>
+          </Motion.div>
         )}
 
-        {/* SubStep 2: Archetype inputs + assumptions */}
-        {subStep === 2 && archetypeSchema && (
-          <motion.div key="archetypeInputs" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3, ease: 'easeInOut' }}>
-            <div className="space-y-6">
-              {/* Archetype header */}
-              <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
-                <span className="text-2xl" role="img" aria-label={archetypeInfo?.label}>
-                  {archetypeInfo?.icon}
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-emerald-800">{archetypeInfo?.label}</p>
-                  <p className="text-xs text-gray-500">Customize the inputs below to match your process</p>
-                </div>
-              </div>
-
-              {/* Editable Summary Card */}
+        {subStep === 3 && (
+          <Motion.div key="contracts" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.25, ease: 'easeInOut' }}>
+            <StageIntro
+              eyebrow="Existing contracts"
+              title="What contracts could end?"
+              description="The model separates recurring contract spend from the one-time cost of honoring the remaining notice period."
+            />
+            <div className="space-y-5">
+              <NumberInput
+                label="How many existing contracts could be canceled?"
+                value={formData.existingContractCount ?? 0}
+                onChange={(value) => updateContractField('existingContractCount', value)}
+                min={0}
+                max={10000}
+                suffix="contracts"
+                helperText="Count vendor, software, and service agreements expected to end because of this project."
+              />
+              <CurrencyInput
+                label="Annual cost per contract"
+                value={formData.annualCostPerContract ?? 0}
+                onChange={(value) => updateContractField('annualCostPerContract', value)}
+                presets={[0, 10000, 25000, 50000, 100000, 250000]}
+                defaultValue={0}
+                max={50000000}
+                helperText="This is recurring spend that ends after cancellation. Entries above $50M/year are blocked; split a portfolio of contracts into separately defensible assumptions."
+              />
+              <NumberInput
+                label="Breakage / notice period"
+                value={formData.contractNoticePeriodMonths ?? 3}
+                onChange={(value) => updateContractField('contractNoticePeriodMonths', value)}
+                min={0}
+                max={24}
+                suffix="months"
+                helperText="User/model planning assumption [B1]: 3-month notice period. Adjust this to actual contract terms; source notes are in the exported Sources & Footnotes tab."
+              />
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <p className="mb-2 text-[10px] font-medium text-emerald-600">Computed from your inputs — click any value to override</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg bg-white/70 px-3 py-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Automation Potential</p>
-                    <div className="mt-1 flex items-baseline gap-1">
-                      <input
-                        type="number"
-                        min={1} max={85} step={1}
-                        value={assumptions.automationPotential != null ? Math.round(assumptions.automationPotential * 100) : (computed.automationPotential != null ? Math.round(computed.automationPotential * 100) : '')}
-                        onChange={(e) => updateAssumption('automationPotential', Math.min(85, Math.max(1, Number(e.target.value))) / 100)}
-                        className="w-16 bg-transparent text-lg font-bold text-navy border-b border-dashed border-navy/30 focus:border-gold focus:outline-none text-right"
-                      />
-                      <span className="text-sm font-bold text-navy/60">%</span>
-                    </div>
-                    <p className="mt-1 text-[9px] text-emerald-600/60">Ind. avg: {Math.round(getAutomationPotential(industry, formData.processType || 'Other') * 100)}%</p>
-                  </div>
-                  <div className="rounded-lg bg-white/70 px-3 py-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Hours/Week</p>
-                    <div className="mt-1 flex items-baseline gap-1">
-                      <input
-                        type="number"
-                        min={1} max={99999} step={1}
-                        value={assumptions.hoursPerWeek ?? computed.hoursPerWeek ?? ''}
-                        onChange={(e) => updateAssumption('hoursPerWeek', Math.max(1, Number(e.target.value)))}
-                        className="w-20 bg-transparent text-lg font-bold text-navy border-b border-dashed border-navy/30 focus:border-gold focus:outline-none text-right"
-                      />
-                      <span className="text-sm font-bold text-navy/60">hrs</span>
-                    </div>
-                    <p className="mt-1 text-[9px] text-emerald-600/60">Total team hrs on this process</p>
-                  </div>
-                  <div className="rounded-lg bg-white/70 px-3 py-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Error Rate</p>
-                    <div className="mt-1 flex items-baseline gap-1">
-                      <input
-                        type="number"
-                        min={0} max={50} step={0.5}
-                        value={assumptions.errorRate != null ? Math.round(assumptions.errorRate * 1000) / 10 : (computed.errorRate != null ? Math.round(computed.errorRate * 1000) / 10 : '')}
-                        onChange={(e) => updateAssumption('errorRate', Math.min(50, Math.max(0, Number(e.target.value))) / 100)}
-                        className="w-16 bg-transparent text-lg font-bold text-navy border-b border-dashed border-navy/30 focus:border-gold focus:outline-none text-right"
-                      />
-                      <span className="text-sm font-bold text-navy/60">%</span>
-                    </div>
-                    <p className="mt-1 text-[9px] text-emerald-600/60">Ind. avg: {Math.round(getErrorRate(industry, formData.processType || 'Other') * 100)}%</p>
-                  </div>
-                  {computed.revenueImpact != null && computed.revenueImpact > 0 && (
-                    <div className="rounded-lg bg-white/70 px-3 py-2">
-                      <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Revenue Impact</p>
-                      <p className="mt-1 text-lg font-bold text-navy">{formatCurrency(computed.revenueImpact)}</p>
-                    </div>
-                  )}
+                <p className="text-sm font-semibold text-emerald-900">Contract economics</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <SummaryMetric label="Annual contract spend" value={formatCurrency(contractExit.annualExistingContractCost)} detail="Recurring spend that can end" />
+                  <SummaryMetric label="Estimated one-time exit cost" value={formatCurrency(contractExit.contractExitCost)} detail="Notice-period estimate" />
                 </div>
+                <p className="mt-3 text-xs leading-relaxed text-emerald-800/70">
+                  Formula: {contractExit.existingContractCount} contracts × {formatCurrency(contractExit.annualCostPerContract)} annual cost × {contractExit.contractNoticePeriodMonths} / 12 months.
+                </p>
               </div>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={() => setSubStep(2)} className={secondaryButtonClass}>Back to workforce</button>
+                <button
+                  type="button"
+                  onClick={() => updateField('projectInputsComplete', true)}
+                  className={actionButtonClass()}
+                >
+                  Continue to company context
+                </button>
+              </div>
+            </div>
+          </Motion.div>
+        )}
 
-              {/* Scrollable compact input list */}
-              <div className="max-h-[40vh] space-y-5 overflow-y-auto pr-1">
-                {archetypeSchema.inputs.map((input) => {
+        {subStep === 1 && archetypeSchema && (
+          <Motion.div key="processDetails" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.25, ease: 'easeInOut' }}>
+            <StageIntro
+              eyebrow="Process economics"
+              title="What drives this work?"
+              description="Start with the operating facts for this use case. These drivers establish the measured workload and the model’s defensible efficiency ceiling before workforce actions are considered."
+            />
+            <div className="space-y-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-navy/45">
+                Key operating drivers · {keyDriverInputs.length}
+              </p>
+              {keyDriverInputs.map((input) => {
                   const rawValue = archetypeInputValues[input.key] ?? input.default;
+                  const label = input.key === 'handlingTimeMin'
+                    ? 'Average time per process (minutes)'
+                    : input.label;
+                  const helperText = input.key === 'handlingTimeMin'
+                    ? 'Total hands-on time to complete one process today.'
+                    : input.note;
 
                   if (input.type === 'percent') {
-                    const displayValue = Math.round(rawValue * 100);
-                    const displayMin = Math.round(input.min * 100);
-                    const displayMax = Math.round(input.max * 100);
                     return (
-                      <div key={input.key} className="space-y-1">
-                        <SliderInput
-                          label={input.label}
-                          value={displayValue}
-                          onChange={(v) => handleArchetypeInput(input.key, v / 100)}
-                          min={displayMin}
-                          max={displayMax}
-                          step={1}
-                          suffix="%"
-                          helperText={input.note}
-                        />
-                      </div>
+                      <SliderInput
+                        key={input.key}
+                        label={label}
+                        value={Math.round(rawValue * 100)}
+                        onChange={(value) => handleArchetypeInput(input.key, value / 100)}
+                        min={Math.round(input.min * 100)}
+                        max={Math.round(input.max * 100)}
+                        step={1}
+                        suffix="%"
+                        helperText={helperText}
+                      />
                     );
                   }
 
                   if (input.type === 'scale') {
                     return (
-                      <div key={input.key} className="space-y-1">
-                        <SliderInput
-                          label={input.label}
-                          value={rawValue}
-                          onChange={(v) => handleArchetypeInput(input.key, v)}
-                          min={1}
-                          max={5}
-                          step={1}
-                          suffix=""
-                          helperText={input.note}
-                        />
-                      </div>
+                      <SliderInput
+                        key={input.key}
+                        label={label}
+                        value={rawValue}
+                        onChange={(value) => handleArchetypeInput(input.key, value)}
+                        min={1}
+                        max={5}
+                        step={1}
+                        helperText={helperText}
+                      />
                     );
                   }
 
-                  const step = getStepForNumber(input.min, input.max);
                   return (
-                    <div key={input.key} className="space-y-1">
-                      <SliderInput
-                        label={input.label}
-                        value={rawValue}
-                        onChange={(v) => handleArchetypeInput(input.key, v)}
-                        min={input.min}
-                        max={input.max}
-                        step={step}
-                        suffix=""
-                        helperText={input.note}
-                      />
-                    </div>
+                    <SliderInput
+                      key={input.key}
+                      label={label}
+                      value={rawValue}
+                      onChange={(value) => handleArchetypeInput(input.key, value)}
+                      min={input.min}
+                      max={input.max}
+                      step={getStepForNumber(input.min, input.max)}
+                      helperText={helperText}
+                    />
                   );
-                })}
-              </div>
+              })}
 
-              {/* Collapsible Fine-tune Assumptions */}
-              <button
-                type="button"
-                onClick={() => setShowAssumptions(!showAssumptions)}
-                className="flex w-full items-center gap-2 rounded-lg border-2 border-dashed border-navy/20 px-4 py-2.5 text-sm font-medium text-navy/60 transition-all duration-150 hover:border-navy/40 hover:text-navy hover:bg-navy/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className={`h-4 w-4 transition-transform duration-200 ${showAssumptions ? 'rotate-90' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-                Fine-tune assumptions (optional)
-              </button>
-
-              <AnimatePresence>
-                {showAssumptions && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="space-y-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                      <p className="text-xs text-gray-500">
-                        These values are pre-set from industry benchmarks. Adjust to match your situation.
-                      </p>
-
-                      <SliderInput
-                        label="Expected Adoption Rate"
-                        value={Math.round((assumptions.adoptionRate ?? 0.70) * 100)}
-                        onChange={(v) => updateAssumption('adoptionRate', v / 100)}
-                        min={20}
-                        max={95}
-                        step={5}
-                        suffix="%"
-                        helperText={`Benchmark: ${Math.round((defaults.adoptionRate ?? 0.70) * 100)}%`}
-                      />
-
-                      <SliderInput
-                        label="Tool Replacement Rate"
-                        value={Math.round((assumptions.toolReplacementRate ?? 0.40) * 100)}
-                        onChange={(v) => updateAssumption('toolReplacementRate', v / 100)}
-                        min={10}
-                        max={80}
-                        step={5}
-                        suffix="%"
-                        helperText={`Benchmark: ${Math.round((defaults.toolReplacementRate ?? 0.40) * 100)}%`}
-                      />
-
-                      <SliderInput
-                        label="Talent Retention Premium"
-                        value={Math.round((formData.retainedTalentPremiumRate ?? 0.10) * 100)}
-                        onChange={(v) => updateField('retainedTalentPremiumRate', v / 100)}
-                        min={0}
-                        max={20}
-                        step={1}
-                        suffix="%"
-                        helperText="Wage increase to retain top performers. Default: 10%"
-                      />
-
-                      <label className="flex items-center gap-3 cursor-pointer rounded-lg bg-white/70 px-3 py-2.5">
-                        <input
-                          type="checkbox"
-                          checked={formData.isAgenticWorkflow || false}
-                          onChange={(e) => updateField('isAgenticWorkflow', e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
-                        />
-                        <div>
-                          <span className="text-sm font-medium text-navy">Agentic AI Workflow?</span>
-                          <p className="text-xs text-gray-500">Multi-step reasoning chains use 2-5x more API calls</p>
-                        </div>
-                      </label>
-
-                      {showRevenue && (
-                        <label className="flex items-center gap-3 cursor-pointer rounded-lg bg-white/70 px-3 py-2.5">
-                          <input
-                            type="checkbox"
-                            checked={assumptions.revenueEligible ?? false}
-                            onChange={(e) => updateAssumption('revenueEligible', e.target.checked)}
-                            className="h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
-                          />
-                          <div>
-                            <span className="text-sm font-medium text-navy">Revenue Eligible</span>
-                            <p className="text-xs text-gray-500">Enable revenue uplift calculations</p>
-                          </div>
-                        </label>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={handleResetAssumptions}
-                        className="rounded-lg border border-dashed border-navy/20 px-3 py-1.5 text-xs font-medium text-navy/50 transition-all duration-150 hover:border-navy/40 hover:text-navy hover:bg-white/50"
-                      >
-                        Reset to Defaults
-                      </button>
+              {caseGuide && (
+                <div className="rounded-xl border border-navy/10 bg-navy/[0.025] p-4">
+                  <p className="text-sm font-semibold text-navy">How this case works</p>
+                  <div className="mt-3 space-y-3 text-xs leading-relaxed text-navy/75">
+                    <div>
+                      <p className="font-semibold uppercase tracking-wide text-navy/50">Calculation</p>
+                      <p className="mt-1">{caseGuide.calculation}</p>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </motion.div>
-        )}
-
-        {/* SubStep 3: Average salary */}
-        {subStep === 3 && (
-          <motion.div
-            key="avgSalary"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            <div className="space-y-4">
-              <CurrencyInput
-                label="What's the average fully-loaded annual cost per person?"
-                value={formData.avgSalary ?? 100000}
-                onChange={(val) => updateField('avgSalary', val)}
-                presets={[100000, 125000, 150000, 200000, 250000, 300000]}
-                defaultValue={100000}
-                helperText="Salary + benefits + overhead (1.3-1.5x base). Higher cost = bigger savings from AI automation."
-              />
-
-              {formData.avgSalary != null && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
-                  <p className="text-sm font-semibold text-emerald-800">Current Annual Process Cost</p>
-                  <div className="space-y-1 text-sm text-emerald-800/80">
-                    <p>
-                      Labor: {formatCurrency(annualLaborCost)}{' '}
-                      <span className="text-emerald-700/50">({teamSize} people x {formatCurrency(avgSalary)})</span>
-                    </p>
-                    <p>+ Rework Cost: {formatCurrency(reworkCost)}</p>
-                    <div className="mt-2 border-t border-emerald-200 pt-2">
-                      <p className="text-base font-bold text-emerald-800">Total: {formatCurrency(totalCost)}</p>
+                    <div>
+                      <p className="font-semibold uppercase tracking-wide text-navy/50">Model assumption</p>
+                      <p className="mt-1">{caseGuide.assumption}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/70 px-3 py-2 text-navy/60">
+                      {caseGuide.footnote}
                     </div>
                   </div>
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={() => setSubStep(4)}
-                className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
-              >
-                Continue
-              </button>
-            </div>
-          </motion.div>
-        )}
+              {isCustomerService && (
+                <div className="rounded-xl border border-sky/25 bg-sky/[0.05] p-4">
+                  <div className="space-y-3">
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(archetypeInputValues.supportCostValidated)}
+                        onChange={(event) => handleArchetypeInput('supportCostValidated', event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-navy">
+                          Operations has validated the fully loaded cost per resolved contact with actual support data.
+                        </span>
+                        <span className="mt-1 block text-xs leading-relaxed text-navy/65">
+                          Check this only when the cost-per-contact input is backed by Operations or Finance.
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(archetypeInputValues.supportCostCashRealizable)}
+                        onChange={(event) => handleArchetypeInput('supportCostCashRealizable', event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-navy">
+                          The avoided contacts will reduce external or support spend—not only free internal time.
+                        </span>
+                        <span className="mt-1 block text-xs leading-relaxed text-navy/65">
+                          Confirm only when an approved staffing, BPO, or vendor-spend action makes the contact-cost reduction cash-realizable.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                  {(!archetypeInputValues.supportCostValidated || !archetypeInputValues.supportCostCashRealizable) && (
+                    <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                      Evidence gate active: both confirmations are required before contact-cost avoidance appears in the core DCF. Until then, it remains planning context and capacity only.
+                    </p>
+                  )}
+                </div>
+              )}
 
-        {/* SubStep 4: Tool costs */}
-        {subStep === 4 && (
-          <motion.div
-            key="toolCosts"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            <div className="space-y-4">
-              <CurrencyInput
-                label="Annual spend on current tools/software for this process?"
-                value={formData.currentToolCosts ?? 0}
-                onChange={(val) => updateField('currentToolCosts', val)}
-                presets={[0, 10000, 25000, 50000, 100000]}
-                defaultValue={0}
-                helperText="Include licenses, subscriptions, and maintenance costs"
-              />
-              {nextAfterToolCosts != null && (
+              {isRiskCase && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
+                  <p className="font-semibold">Risk avoidance is planning context, not core ROI.</p>
+                  <p className="mt-1 text-xs">
+                    Historical remediation or loss figures help scope controls and validation. They are excluded from NPV, IRR, and payback until Finance validates the loss history and evidence for preventability.
+                  </p>
+                </div>
+              )}
+
+              {computed.automationPotential != null && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-emerald-700">Estimated automation potential</p>
+                      <p className="text-[11px] text-emerald-600/70">Computed from your process inputs</p>
+                    </div>
+                    <span className="font-mono text-xl font-bold text-emerald-700">{Math.round(computed.automationPotential * 100)}%</span>
+                  </div>
+                </div>
+              )}
+
+              {Number.isFinite(computedWorkloadHours) && computedWorkloadHours > 0 && (
+                <div className={`rounded-xl border p-4 ${workloadBlocked ? 'border-red-300 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div>
+                      <p className={`text-sm font-semibold ${workloadBlocked ? 'text-red-950' : 'text-emerald-900'}`}>
+                        Workload-to-capacity check
+                      </p>
+                      <p className={`mt-1 text-xs leading-relaxed ${workloadBlocked ? 'text-red-800' : 'text-emerald-800/70'}`}>
+                        The model compares the use-case workload to the hours you will enter for the workforce next. Savings cannot be defended if they imply more work than the stated team can perform.
+                      </p>
+                    </div>
+                    {Number.isFinite(workloadRatio) && (
+                      <span className={`font-mono text-lg font-bold ${workloadBlocked ? 'text-red-800' : 'text-emerald-800'}`}>
+                        {(workloadRatio * 100).toFixed(0)}% coverage
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <SummaryMetric label="Case workload" value={`${Math.round(computedWorkloadHours).toLocaleString()} hrs/week`} detail="From the operating drivers above" />
+                    <SummaryMetric label="Stated team capacity" value={`${Math.round(availableCapacityHours).toLocaleString()} hrs/week`} detail="Current workforce × weekly process hours" />
+                  </div>
+                  {workloadBlocked && (
+                    <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-xs leading-relaxed text-red-900">
+                      Bumper active: correct the workload or workforce allocation before the model will allow an efficiency-driven ROI claim.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {modelWarnings.length > 0 && (
+                <div className={`rounded-xl border p-4 ${workloadBlocked ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'}`}>
+                  <p className={`text-sm font-semibold ${workloadBlocked ? 'text-red-950' : 'text-amber-950'}`}>
+                    {workloadBlocked ? 'Fix before using savings' : 'Model guidance'}
+                  </p>
+                  <ul className={`mt-2 list-disc space-y-1 pl-5 text-xs leading-relaxed ${workloadBlocked ? 'text-red-900' : 'text-amber-900'}`}>
+                    {modelWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {isInternalProcess && (
+                <div className="rounded-xl border border-gold/40 bg-gold/10 p-4">
+                  <p className="text-sm font-semibold text-navy">Current process cost</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <SummaryMetric label="Cost per process" value={formatCurrency(processCost.costPerProcess)} detail={`${formatCurrency(processCost.hourlyCost)}/hour blended labor`} />
+                    <SummaryMetric label="Current monthly cost" value={formatCurrency(processCost.monthlyProcessCost)} detail="Volume × cost per process" />
+                    <SummaryMetric label="Current annual cost" value={formatCurrency(processCost.annualProcessCost)} detail="Before AI" />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => setSubStep(nextAfterToolCosts)}
-                  className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                  onClick={() => {
+                    updateField('projectInputsComplete', false);
+                    setSubStep(0);
+                  }}
+                  className={secondaryButtonClass}
                 >
-                  Continue
+                  Back to project type
                 </button>
-              )}
-            </div>
-          </motion.div>
-        )}
-
-        {/* SubStep 5: Vendors replaced */}
-        {subStep === 5 && (
-          <motion.div
-            key="vendorsReplaced"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            <div className="space-y-4">
-              <SliderInput
-                label="How many existing vendors/tools will AI replace?"
-                value={formData.vendorsReplaced ?? 0}
-                onChange={(val) => updateField('vendorsReplaced', val)}
-                min={0}
-                max={3}
-                step={1}
-                helperText="Count major software vendors or service contracts that will be terminated"
-              />
-              {(formData.vendorsReplaced ?? 0) > 0 && (
                 <button
                   type="button"
-                  onClick={() => setSubStep(6)}
-                  className="mt-4 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                  onClick={() => setSubStep(2)}
+                  className={actionButtonClass()}
                 >
-                  Continue
+                  Continue to workforce
                 </button>
-              )}
+              </div>
             </div>
-          </motion.div>
-        )}
-
-        {/* SubStep 6: Vendor termination cost */}
-        {subStep === 6 && (
-          <motion.div
-            key="vendorTerminationCost"
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
-            <div className="space-y-4">
-              <CurrencyInput
-                label={`Estimated cost to terminate ${formData.vendorsReplaced} vendor contract${formData.vendorsReplaced > 1 ? 's' : ''}?`}
-                value={formData.vendorTerminationCost ?? 0}
-                onChange={(val) => updateField('vendorTerminationCost', val)}
-                presets={[0, 25000, 50000, 100000, 250000]}
-                defaultValue={0}
-                helperText="Include early termination fees, remaining contract obligations, migration costs"
-              />
-            </div>
-          </motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
     </div>

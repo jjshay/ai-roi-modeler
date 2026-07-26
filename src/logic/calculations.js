@@ -1,6 +1,5 @@
 import {
   getAutomationPotential,
-  getErrorRate,
   getIndustrySuccessRate,
   ADOPTION_MULTIPLIERS,
   DATA_TIMELINE_MULTIPLIER,
@@ -13,7 +12,6 @@ import {
   MAX_HEADCOUNT_REDUCTION,
   HEADCOUNT_REDUCTION_SCHEDULE,
   SEPARATION_COST_BREAKDOWN,
-  AI_TEAM_SALARY,
   API_COST_PER_1K_REQUESTS,
   REQUESTS_PER_PERSON_HOUR,
   MAX_IMPL_TEAM,
@@ -43,9 +41,6 @@ import {
   LEGACY_MAINTENANCE_CREEP,
   COMPETITIVE_PENALTY,
   COMPLIANCE_RISK_ESCALATION,
-  REVENUE_UPLIFT,
-  REVENUE_ELIGIBLE_PROCESSES,
-  REVENUE_RISK_DISCOUNT,
   FEDERAL_RD_CREDIT_RATE,
   STATE_RD_CREDIT_RATES,
   RD_QUALIFICATION_RATE,
@@ -55,7 +50,6 @@ import {
   // V3 imports
   CASH_REALIZATION_DEFAULTS,
   REGULATORY_EVENT_BENCHMARKS,
-  CYCLE_TIME_REDUCTION,
 
   EFFECTIVE_TAX_RATE,
   GATE_STRUCTURE,
@@ -64,7 +58,6 @@ import {
   RETAINED_TALENT_PREMIUM_RATE,
   AGENTIC_COMPUTE_MULTIPLIER,
   DATA_TRANSFER_COST_MONTHLY,
-  REVENUE_DISPLACEMENT_RISK_RATE,
   COMPLIANCE_ESCALATION_RATE,
   ALTERNATIVE_HURDLE_RATES,
   AI_ADOPTION_RATE_BY_INDUSTRY,
@@ -79,82 +72,313 @@ import {
   AGENT_INFRASTRUCTURE_MONTHLY,
   MODEL_DRIFT_RATE,
   CAPITAL_ALLOCATION,
+  BENCHMARK_SOURCES,
 } from './benchmarks';
-import { mapArchetypeInputs, ARCHETYPE_INPUT_MAP } from './archetypeInputs';
+import {
+  mapArchetypeInputs,
+  sanitizeArchetypeInputs,
+  ARCHETYPE_INPUT_MAP,
+} from './archetypeInputs';
+import { getRetiredArchetypeLabel, isRetiredArchetype } from './archetypes';
+import {
+  calculateContractExitCost,
+  calculateDeploymentPlan,
+  calculateProcessCost,
+  calculateReworkCost,
+  calculateWorkforceMix,
+  calculateWorkforceTransitionPlan,
+  normalizePercent,
+} from './workforceMix';
 
 export function runCalculations(inputs) {
   // =====================================================================
   // ARCHETYPE INPUT OVERRIDES (optional — refines base variables)
   // =====================================================================
+  const rawArchetypeInputs = inputs.projectArchetype
+    && inputs.archetypeInputs?.[inputs.projectArchetype]
+    && typeof inputs.archetypeInputs[inputs.projectArchetype] === 'object'
+    ? inputs.archetypeInputs[inputs.projectArchetype]
+    : (inputs.archetypeInputs || {});
+  const hasSupportedArchetype = Boolean(ARCHETYPE_INPUT_MAP[inputs.projectArchetype]);
+  const hasCaseInputs = hasSupportedArchetype
+    && inputs.archetypeInputs
+    && Object.keys(rawArchetypeInputs).length > 0;
+  const archetypeInputSanitization = hasCaseInputs
+    ? sanitizeArchetypeInputs(inputs.projectArchetype, rawArchetypeInputs)
+    : { values: rawArchetypeInputs, corrections: [] };
+  const normalizedArchetypeInputs = archetypeInputSanitization.values;
   let _archetypeOverrides = {};
-  if (inputs.archetypeInputs && inputs.projectArchetype) {
-    _archetypeOverrides = mapArchetypeInputs(inputs.projectArchetype, inputs.archetypeInputs) || {};
+  if (hasCaseInputs) {
+    _archetypeOverrides = mapArchetypeInputs(inputs.projectArchetype, normalizedArchetypeInputs) || {};
   }
 
   // =====================================================================
   // CONTEXT-AWARE DEFAULTS (for null/undefined values)
-  // Archetype overrides refine hoursPerWeek and errorRate if provided
+  // Explicit wizard inputs win; archetype-derived values are the next fallback.
   // =====================================================================
   const assumptions = inputs.assumptions || {};
   const industry = inputs.industry || 'Other';
   const processType = inputs.processType || 'Other';
-  const teamSize = Math.max(1, Math.min(inputs.teamSize || 10, 100000));
-  const avgSalary = Math.max(10000, Math.min(inputs.avgSalary || 100000, 10000000));
-  const hoursPerWeek = Math.max(1, Math.min(assumptions.hoursPerWeek ?? _archetypeOverrides.hoursPerWeek ?? inputs.hoursPerWeek ?? 20, 10000));
-  const errorRate = Math.max(0, Math.min(assumptions.errorRate ?? _archetypeOverrides.errorRate ?? inputs.errorRate ?? getErrorRate(industry, processType), 1));
-  const archetypeRevenueImpact = Math.max(0, _archetypeOverrides.revenueImpact || 0);
-  const currentToolCosts = Math.max(0, inputs.currentToolCosts || 0);
+  // Regulated or safety-critical industries need more integration, governance,
+  // and access controls. This multiplier is a planning envelope, not a quote.
+  const INDUSTRY_COST_MULTIPLIER = {
+    'Financial Services / Banking': 1.30,
+    'Healthcare / Life Sciences': 1.35,
+    'Government / Public Sector': 1.40,
+    'Energy / Utilities': 1.20,
+    'Manufacturing / Industrial': 1.15,
+    'Professional Services / Consulting': 1.10,
+    'Technology / Software': 1.00,
+    'Retail / E-Commerce': 1.00,
+    'Media / Entertainment': 1.00,
+    Other: 1.05,
+  };
+  const industryCostMultiplier = INDUSTRY_COST_MULTIPLIER[industry]
+    ?? INDUSTRY_COST_MULTIPLIER.Other;
+  const workforceMix = calculateWorkforceMix(inputs);
+  const teamSize = workforceMix.hasWorkforceMix
+    ? workforceMix.totalHeadcount
+    : Math.max(1, Math.min(inputs.teamSize || 10, 100000));
+  const avgSalary = workforceMix.hasWorkforceMix
+    ? workforceMix.blendedFullyBurdenedCost
+    : Math.max(10000, Math.min(inputs.avgSalary || 100000, 10000000));
+  const hoursPerWeek = Math.max(
+    1,
+    Math.min(inputs.hoursPerWeek ?? _archetypeOverrides.hoursPerWeek ?? assumptions.hoursPerWeek ?? 40, 10000)
+  );
+  const rawCurrentToolCosts = Math.max(0, Number(inputs.currentToolCosts) || 0);
+  const maximumCurrentToolCosts = 100000000;
+  const currentToolCosts = Math.min(rawCurrentToolCosts, maximumCurrentToolCosts);
   // Normalize companySize — handles truncated values from legacy share links
   const VALID_SIZES = ['Startup (1-50)', 'SMB (51-500)', 'Mid-Market (501-5,000)', 'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)'];
   const rawSize = inputs.companySize || 'Mid-Market (501-5,000)';
   const companySize = VALID_SIZES.includes(rawSize)
     ? rawSize
     : VALID_SIZES.find(s => s.startsWith(rawSize)) || 'Mid-Market (501-5,000)';
-  const teamLocation = inputs.teamLocation || 'US - Major Tech Hub';
   const dataReadiness = inputs.dataReadiness ?? 3;
   const changeReadiness = inputs.changeReadiness ?? 3;
 
-  // Auto-calculate implementation budget if not provided
-  const aiSalaryForCalc = teamLocation === 'Blended'
-    ? (inputs.blendedAISalary || 169500)
-    : (AI_TEAM_SALARY[teamLocation] || 135000);
+  // -------------------------------------------------------------------
+  // CASE WORKLOAD + EVIDENCE GUARDRAILS
+  // -------------------------------------------------------------------
+  // Case inputs establish the workload the team actually performs. This
+  // deliberately wins over a generic 40-hour workweek when calculating
+  // capacity, so a small workflow cannot create a whole-team savings claim.
+  const isRetiredCase = isRetiredArchetype(inputs.projectArchetype);
+  const rawAutomationPotential = _archetypeOverrides.automationPotential
+    ?? inputs.automationPotential
+    ?? assumptions.automationPotential
+    ?? getAutomationPotential(industry, processType);
+  const automationPotential = isRetiredCase
+    ? 0
+    : Math.max(0, Math.min(0.85, Number(rawAutomationPotential) || 0));
+  const workforceAnnualHours = teamSize * hoursPerWeek * 52;
+  const caseWorkloadHoursPerWeek = hasCaseInputs
+    ? Math.max(0, Number(_archetypeOverrides.caseWorkloadHoursPerWeek) || 0)
+    : 0;
+  const availableProcessHoursPerWeek = teamSize * hoursPerWeek;
+  const workloadRatio = availableProcessHoursPerWeek > 0
+    ? caseWorkloadHoursPerWeek / availableProcessHoursPerWeek
+    : 0;
+  const workloadExceedsCapacity = hasCaseInputs && workloadRatio > 1.25;
+  const workloadTooSmallForRedundancy = hasCaseInputs && workloadRatio > 0 && workloadRatio < 0.10;
+  const caseEfficiencyCeilingPct = workloadExceedsCapacity ? 0 : automationPotential;
+  const requestedEfficiencyGainPct = inputs.totalEfficiencyGainPct == null
+    ? caseEfficiencyCeilingPct
+    : normalizePercent(inputs.totalEfficiencyGainPct, caseEfficiencyCeilingPct);
+  const effectiveEfficiencyGainPct = workloadExceedsCapacity
+    ? 0
+    : Math.min(requestedEfficiencyGainPct, caseEfficiencyCeilingPct);
+  const eligibleAnnualHours = hasCaseInputs
+    ? Math.min(workforceAnnualHours, caseWorkloadHoursPerWeek * 52)
+    : workforceAnnualHours;
+  const supportCostValidated = rawArchetypeInputs?.supportCostValidated === true;
+  const supportCostCashRealizable = rawArchetypeInputs?.supportCostCashRealizable === true;
+  const candidateCaseDirectSavings = Math.max(0, Number(_archetypeOverrides.caseDirectSavings) || 0);
+  const caseHourlyCost = workforceMix.hasWorkforceMix
+    ? workforceMix.weightedHourlyCost
+    : avgSalary / 2080;
+  const maximumCaseDirectSavings = eligibleAnnualHours * caseHourlyCost;
+  const boundedCaseDirectSavings = Math.min(candidateCaseDirectSavings, maximumCaseDirectSavings);
+  const caseDirectSavingsEnabled = inputs.projectArchetype === 'customer-facing-ai'
+    && supportCostValidated
+    && supportCostCashRealizable
+    && !workloadExceedsCapacity;
+  const caseDirectSavingsGross = caseDirectSavingsEnabled ? boundedCaseDirectSavings : 0;
+  const caseRiskAvoidance = Math.max(0, Number(_archetypeOverrides.caseRiskAvoidance) || 0);
+  const caseBuildComplexityMultiplier = Math.max(
+    0.80,
+    Math.min(1.50, Number(_archetypeOverrides.caseBuildComplexityMultiplier) || 1)
+  );
+  const caseBumpers = [];
+
+  if (rawCurrentToolCosts > maximumCurrentToolCosts) {
+    caseBumpers.push({
+      field: 'currentToolCosts',
+      severity: 'warning',
+      message: `Current tool costs were capped at $${maximumCurrentToolCosts.toLocaleString()} for this model. Validate a separately documented tool-retirement portfolio before using a higher amount.`,
+    });
+  }
+
+  archetypeInputSanitization.corrections.forEach((correction) => {
+    caseBumpers.push({
+      field: correction.key,
+      severity: 'warning',
+      message: `${correction.label} ${correction.reason}; the model used ${correction.to}.`,
+    });
+  });
+  if (workloadExceedsCapacity) {
+    caseBumpers.push({
+      field: 'caseWorkloadHoursPerWeek',
+      severity: 'blocking',
+      message: `Case workload is ${Math.round(workloadRatio * 100)}% of the entered workforce capacity. Savings and workforce actions are turned off until volume, handling time, or staffing is reconciled (supported maximum: 125%).`,
+    });
+  } else if (workloadTooSmallForRedundancy) {
+    caseBumpers.push({
+      field: 'caseWorkloadHoursPerWeek',
+      severity: 'warning',
+      message: `This case represents only ${Math.round(workloadRatio * 100)}% of the entered workforce capacity. The model permits capacity planning but does not support a redundancy claim below 10% coverage.`,
+    });
+  }
+  if (inputs.totalEfficiencyGainPct != null && requestedEfficiencyGainPct > effectiveEfficiencyGainPct) {
+    caseBumpers.push({
+      field: 'totalEfficiencyGainPct',
+      severity: 'warning',
+      message: `Requested efficiency of ${Math.round(requestedEfficiencyGainPct * 100)}% is capped at ${Math.round(effectiveEfficiencyGainPct * 100)}% by the selected case's eligible workload and automation ceiling.`,
+    });
+  }
+  if (inputs.projectArchetype === 'customer-facing-ai' && !supportCostValidated) {
+    caseBumpers.push({
+      field: 'supportCostValidated',
+      severity: 'info',
+      message: 'Customer support cost avoidance is shown as planning context only and excluded from NPV, IRR, and payback until Operations validates the fully loaded cost per resolved contact.',
+    });
+  }
+  if (inputs.projectArchetype === 'customer-facing-ai' && supportCostValidated && !supportCostCashRealizable) {
+    caseBumpers.push({
+      field: 'supportCostCashRealizable',
+      severity: 'info',
+      message: 'Validated contact cost is treated as capacity only until the organization confirms it will remove external support spend or an equivalent cash cost; it is excluded from NPV, IRR, and payback.',
+    });
+  }
+  if (candidateCaseDirectSavings > maximumCaseDirectSavings) {
+    caseBumpers.push({
+      field: 'costPerResolvedTicket',
+      severity: 'warning',
+      message: `Customer contact-cost avoidance is capped at $${Math.round(maximumCaseDirectSavings).toLocaleString()} because it cannot exceed the measured labor cost of the modeled workload.`,
+    });
+  }
+  if (inputs.projectArchetype === 'risk-compliance-legal-ai' && caseRiskAvoidance > 0) {
+    caseBumpers.push({
+      field: 'caseRiskAvoidance',
+      severity: 'info',
+      message: 'Historical-loss avoidance is planning context only and is excluded from NPV, IRR, and payback until Finance validates evidence.',
+    });
+  }
+  if (inputs.includeRiskReduction && !inputs.riskValueEvidenceValidated) {
+    caseBumpers.push({
+      field: 'includeRiskReduction',
+      severity: 'warning',
+      message: 'Risk avoidance remains outside model value until Finance validates realized-loss evidence; the NPV option is turned off.',
+    });
+  }
+  if (inputs.includeRevenueAcceleration) {
+    caseBumpers.push({
+      field: 'includeRevenueAcceleration',
+      severity: 'info',
+      message: 'Revenue acceleration is not a supported AI ROI value stream in this model and is excluded from NPV, IRR, and payback.',
+    });
+  }
+  if (isRetiredCase) {
+    caseBumpers.push({
+      field: 'projectArchetype',
+      severity: 'blocking',
+      message: `${getRetiredArchetypeLabel(inputs.projectArchetype)} is no longer supported. Select one of the four supported use cases before relying on this model.`,
+    });
+  }
+
+  // Auto-calculate implementation budget from the workforce mix that the
+  // user entered for this process. This deliberately replaces the retired
+  // location-based implementation-team salary assumption.
+  const deploymentRateForCalc = workforceMix.hasWorkforceMix
+    ? workforceMix.blendedFullyBurdenedCost
+    : avgSalary;
   const maxTeamForCalc = MAX_IMPL_TEAM[companySize] || 10;
   const sizeMultForCalc = SIZE_MULTIPLIER[companySize] || 1.0;
   const dataTimeMultForCalc = DATA_TIMELINE_MULTIPLIER[dataReadiness] || 1.10;
   const autoTimelineMonths = Math.ceil(6 * dataTimeMultForCalc * sizeMultForCalc);
-  const autoTimelineYears = autoTimelineMonths / 12;
   const scopeMinEng = Math.max(1, Math.ceil(teamSize / 12));
   const dataHeadcountMultForCalc = dataReadiness <= 2 ? 1.3 : dataReadiness === 3 ? 1.1 : 1.0;
   const rawEng = Math.ceil(scopeMinEng * dataHeadcountMultForCalc);
   const engForCalc = Math.min(rawEng, maxTeamForCalc);
   const pmForCalc = Math.max(0.5, Math.ceil(engForCalc / 5));
-  const autoEngCost = engForCalc * aiSalaryForCalc * autoTimelineYears;
-  const autoPMCost = pmForCalc * (aiSalaryForCalc * 0.85) * autoTimelineYears;
-  const autoImplCost = Math.round((autoEngCost + autoPMCost) * 1.20 / 5000) * 5000;
+  const deploymentPlan = calculateDeploymentPlan(inputs, {
+    workforceMix,
+    baselineTimelineMonths: autoTimelineMonths,
+    baselineImplementationHeadcount: engForCalc + pmForCalc,
+    fallbackAnnualCost: deploymentRateForCalc,
+  });
+  const autoImplLaborCost = deploymentPlan.estimatedDeploymentLaborCost;
+  const autoImplCost = Math.round(
+    autoImplLaborCost * 1.20 * industryCostMultiplier * caseBuildComplexityMultiplier / 5000
+  ) * 5000;
 
   // Use provided values or auto-calculated defaults
-  const implementationBudget = inputs.implementationBudget ?? autoImplCost;
-  const expectedTimeline = inputs.expectedTimeline ?? (autoTimelineMonths / sizeMultForCalc);
+  const implementationBudget = inputs.implementationBudget != null
+    ? inputs.implementationBudget * caseBuildComplexityMultiplier
+    : autoImplCost;
+  const expectedTimeline = inputs.expectedTimeline
+    ?? deploymentPlan.estimatedDurationMonths;
 
   // Auto-calculate ongoing cost if not provided
   const licenseCostForCalc = PLATFORM_LICENSE_COST[companySize] || 48000;
-  const autoOngoing = Math.round((licenseCostForCalc + (engForCalc * aiSalaryForCalc * 0.15)) / 5000) * 5000;
+  const autoOngoing = Math.round((licenseCostForCalc + (engForCalc * deploymentRateForCalc * 0.15)) / 5000) * 5000;
   const ongoingAnnualCost = inputs.ongoingAnnualCost ?? autoOngoing;
 
   // =====================================================================
   // CURRENT STATE
   // =====================================================================
   const hourlyRate = avgSalary / 2080;
-  const annualLaborCost = teamSize * avgSalary;
+  const annualLaborCost = workforceMix.hasWorkforceMix
+    ? workforceMix.totalAnnualHeadcountCost
+    : teamSize * avgSalary;
   const weeklyHours = teamSize * hoursPerWeek;
   const annualHours = weeklyHours * 52;
-  const annualReworkCost = annualLaborCost * errorRate;
-  const totalCurrentCost = annualLaborCost + annualReworkCost + currentToolCosts;
+  const rework = calculateReworkCost(inputs);
+  const annualReworkCost = rework.annualReworkCost;
+  const contractExit = calculateContractExitCost(inputs);
+  const annualContractSpend = contractExit.annualExistingContractCost;
+  const processCost = calculateProcessCost({
+    ...inputs,
+    teamSize,
+    avgSalary,
+    hoursPerWeek,
+    processVolume: inputs.processVolume ?? normalizedArchetypeInputs.processVolume,
+    handlingTimeMin: inputs.handlingTimeMin ?? normalizedArchetypeInputs.handlingTimeMin,
+  });
+  const workforceTransition = calculateWorkforceTransitionPlan(
+    {
+      ...inputs,
+      teamSize,
+      avgSalary,
+      hoursPerWeek,
+      totalEfficiencyGainPct: effectiveEfficiencyGainPct,
+    },
+    workforceMix,
+    {
+      eligibleAnnualHours,
+      allowRedundancies: !workloadExceedsCapacity && !workloadTooSmallForRedundancy,
+    }
+  );
+  const hasExplicitWorkforcePlan = workforceMix.hasWorkforceMix
+    || inputs.totalEfficiencyGainPct != null
+    || inputs.employeesToMakeRedundant != null
+    || inputs.employeesToRetrain != null;
+  const totalCurrentCost = annualLaborCost + annualReworkCost + currentToolCosts + annualContractSpend;
 
   // =====================================================================
   // INDUSTRY BENCHMARKS
   // =====================================================================
-  const automationPotential = assumptions.automationPotential ?? _archetypeOverrides.automationPotential ?? getAutomationPotential(industry, processType);
   const industrySuccessRate = getIndustrySuccessRate(industry);
 
   // Custom adoption ramp: user can override default ADOPTION_RAMP per year
@@ -190,17 +414,35 @@ export function runCalculations(inputs) {
 
   // =====================================================================
   // DISPLACED / RETAINED FTEs (needed for ongoing cost model)
-  // Reviewer fix P1: If team spends <50% time on process, headcount reduction
-  // is unrealistic (employees have other responsibilities). Switch to
-  // capacity reallocation mode where savings come from efficiency only.
+  // Explicit redundancy plans replace inferred layoffs. The legacy approach
+  // remains for older saved models without workforce-mix inputs.
   // =====================================================================
-  const processAllocation = hoursPerWeek / 40; // fraction of time on this process
-  const headcountFeasible = processAllocation >= 0.50;
-  const rawDisplacedFTEs = headcountFeasible
-    ? Math.round(teamSize * automationPotential * adoptionRate)
+  const processAllocation = hasCaseInputs
+    ? Math.min(1, workloadRatio)
+    : hoursPerWeek / 40; // fraction of the entered workforce actually covered by this case
+  const legacyHeadcountFeasible = processAllocation >= 0.50 && !workloadExceedsCapacity;
+  const rawDisplacedFTEs = legacyHeadcountFeasible
+    ? Math.round((eligibleAnnualHours / 2080) * automationPotential * adoptionRate)
     : 0; // no headcount reduction when <50% allocation
-  const maxDisplaced = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
-  const displacedFTEs = Math.min(rawDisplacedFTEs, maxDisplaced);
+  const maxDisplaced = Math.floor(Math.min(
+    teamSize * MAX_HEADCOUNT_REDUCTION,
+    eligibleAnnualHours / 2080,
+  ));
+  const usesExplicitRedundancyPlan = hasExplicitWorkforcePlan;
+  const totalEfficiencyGainPct = workloadExceedsCapacity
+    ? 0
+    : (usesExplicitRedundancyPlan
+      ? workforceTransition.totalEfficiencyGainPct
+      : automationPotential);
+  const displacedFTEs = usesExplicitRedundancyPlan
+    ? workforceTransition.employeesToMakeRedundant
+    : Math.min(rawDisplacedFTEs, maxDisplaced);
+  const headcountReductionSchedule = usesExplicitRedundancyPlan
+    ? workforceTransition.redundancySchedule
+    : HEADCOUNT_REDUCTION_SCHEDULE;
+  const headcountFeasible = usesExplicitRedundancyPlan
+    ? workforceTransition.freedCapacityFTEs >= 0.5
+    : legacyHeadcountFeasible;
   const retainedFTEs = teamSize - displacedFTEs;
 
   // =====================================================================
@@ -223,9 +465,7 @@ export function runCalculations(inputs) {
   // AI IMPLEMENTATION COST MODEL
   // Derives realistic staffing, labor, and operational costs from inputs
   // =====================================================================
-  const aiSalary = teamLocation === 'Blended'
-    ? (inputs.blendedAISalary || 169500)
-    : (AI_TEAM_SALARY[teamLocation] || 135000);
+  const deploymentFullyBurdenedRate = deploymentPlan.annualFullyBurdenedCost;
   const implTimelineYears = adjustedTimeline / 12;
 
   // Implementation engineering headcount
@@ -241,47 +481,107 @@ export function runCalculations(inputs) {
   const aiImplEngineers = Math.min(rawEngineers, maxTeam);
   const aiImplPMs = Math.max(0.5, Math.ceil(aiImplEngineers / 5));
 
-  // Implementation cost breakdown
-  const implEngineeringCost = aiImplEngineers * aiSalary * implTimelineYears;
-  const implPMCost = aiImplPMs * (aiSalary * 0.85) * implTimelineYears;
+  // The deployment plan owns both staffing and the fully burdened rate. This
+  // is the same workforce mix shown in the wizard; no location salary table
+  // can override it through an old link or hidden model default.
+  const pacedDeploymentLaborCost = deploymentPlan.estimatedDeploymentLaborCost * industryCostMultiplier;
+  const implementationStaffingTotal = Math.max(1, aiImplEngineers + aiImplPMs);
+  const implEngineeringCost = pacedDeploymentLaborCost * (aiImplEngineers / implementationStaffingTotal);
+  const implPMCost = pacedDeploymentLaborCost * (aiImplPMs / implementationStaffingTotal);
   const implInfraCost = (implEngineeringCost + implPMCost) * 0.12;
   const implTrainingCost = (implEngineeringCost + implPMCost) * 0.08;
-  const computedImplCost = implEngineeringCost + implPMCost + implInfraCost + implTrainingCost;
+  const computedImplCost = (implEngineeringCost + implPMCost + implInfraCost + implTrainingCost)
+    * caseBuildComplexityMultiplier;
   const realisticImplCost = Math.max(userAdjustedImplCost, computedImplCost);
 
-  // Ongoing AI operations team
-  const ongoingAiHeadcount = Math.max(0.5, Math.round(aiImplEngineers * 0.25 * 2) / 2);
-  const ongoingAiLaborCost = ongoingAiHeadcount * aiSalary;
+  // Ongoing AI operations team — 15% of impl engineers (fractional support post-launch)
+  const ongoingAiHeadcount = Math.max(0.5, Math.round(aiImplEngineers * 0.15 * 2) / 2);
+  const ongoingAiLaborCost = ongoingAiHeadcount * deploymentFullyBurdenedRate;
 
-  // API / inference costs — token-based model with legacy fallback
-  const isAgenticWorkflow = inputs.isAgenticWorkflow || false;
-  const requestsPerHour = assumptions.requestsPerPersonHour ?? REQUESTS_PER_PERSON_HOUR[processType] ?? 12;
-  const monthlyTaskVolume = teamSize * hoursPerWeek * 4.33 * requestsPerHour;
+  // AI cost meters. Explicit inputs override a process-volume estimate, so the
+  // model never treats workforce headcount itself as consumption volume.
+  const asNonNegative = (value, fallback = 0) => {
+    const numeric = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numeric) ? Math.max(0, numeric) : fallback;
+  };
+  const archetypeInputValues = normalizedArchetypeInputs;
+  const monthlyArchetypeVolume = [
+    inputs.processVolume,
+    archetypeInputValues.processVolume,
+    archetypeInputValues.ticketsPerMonth,
+    archetypeInputValues.reportsPerMonth,
+    archetypeInputValues.reviewsPerMonth,
+    archetypeInputValues.queriesPerMonth,
+    archetypeInputValues.documentsPerMonth,
+    asNonNegative(inputs.searchQueriesPerDay) * 30,
+    asNonNegative(archetypeInputValues.searchQueriesPerDay) * 30,
+  ].map(value => asNonNegative(value)).find(value => value > 0) || 0;
+  const isAgenticWorkflow = inputs.isAgenticWorkflow ?? assumptions.isAgenticWorkflow ?? false;
+  const requestsPerHour = assumptions.requestsPerPersonHour
+    ?? REQUESTS_PER_PERSON_HOUR[processType]
+    ?? 12;
+  const modeledMonthlyAiRequests = monthlyArchetypeVolume > 0
+    ? monthlyArchetypeVolume
+    : teamSize * hoursPerWeek * 4.33 * requestsPerHour;
+  const aiLicensedUsers = Math.max(1, asNonNegative(
+    inputs.aiLicensedUsers ?? assumptions.aiLicensedUsers,
+    teamSize
+  ));
+  const monthlyAiRequests = asNonNegative(
+    inputs.monthlyAiRequests ?? assumptions.monthlyAiRequests,
+    modeledMonthlyAiRequests
+  );
+  const monthlyAgentWorkflows = asNonNegative(
+    inputs.monthlyAgentWorkflows ?? assumptions.monthlyAgentWorkflows,
+    isAgenticWorkflow ? monthlyAiRequests : 0
+  );
+  const documentsPerMonth = asNonNegative(
+    inputs.documentsPerMonth ?? assumptions.documentsPerMonth,
+    processType === 'Document Processing' ? monthlyArchetypeVolume : 0
+  );
+  const dataStoredGb = asNonNegative(inputs.dataStoredGb ?? assumptions.dataStoredGb, 0);
+  const connectedApplications = asNonNegative(
+    inputs.connectedApplications ?? assumptions.connectedApplications,
+    0
+  );
+  const monthlyTaskVolume = monthlyAiRequests;
 
   // Token-based cost model (activates when user provides token-level inputs or model tier)
-  const useTokenModel = assumptions.useTokenModel
+  const explicitUseTokenModel = inputs.useTokenModel ?? assumptions.useTokenModel;
+  const useTokenModel = explicitUseTokenModel ?? (
+    inputs.modelTier != null
     || assumptions.modelTier != null
-    || assumptions.avgInputTokensPerRequest != null;
+    || inputs.avgInputTokensPerRequest != null
+    || assumptions.avgInputTokensPerRequest != null
+  );
 
   const tokenProfile = TOKEN_PROFILES[processType] || TOKEN_PROFILES['Other'];
-  const modelTier = assumptions.modelTier || 'standard';
+  const modelTier = inputs.modelTier ?? assumptions.modelTier ?? 'standard';
   const modelPricing = MODEL_TIERS[modelTier] || MODEL_TIERS['standard'];
-  const avgInputTokens = assumptions.avgInputTokensPerRequest ?? tokenProfile.avgInput;
-  const avgOutputTokens = assumptions.avgOutputTokensPerRequest ?? tokenProfile.avgOutput;
-  const inputCostPer1M = assumptions.inputTokenCostPer1M ?? modelPricing.inputPer1M;
-  const outputCostPer1M = assumptions.outputTokenCostPer1M ?? modelPricing.outputPer1M;
+  const avgInputTokens = inputs.avgInputTokensPerRequest
+    ?? assumptions.avgInputTokensPerRequest
+    ?? tokenProfile.avgInput;
+  const avgOutputTokens = inputs.avgOutputTokensPerRequest
+    ?? assumptions.avgOutputTokensPerRequest
+    ?? tokenProfile.avgOutput;
+  const inputCostPer1M = inputs.inputTokenCostPer1M
+    ?? assumptions.inputTokenCostPer1M
+    ?? modelPricing.inputPer1M;
+  const outputCostPer1M = inputs.outputTokenCostPer1M
+    ?? assumptions.outputTokenCostPer1M
+    ?? modelPricing.outputPer1M;
 
   // Prompt caching — reduces effective input token cost
-  const promptCachingRate = assumptions.promptCachingRate ?? PROMPT_CACHING_RATE;
+  const promptCachingRate = inputs.promptCachingRate ?? assumptions.promptCachingRate ?? PROMPT_CACHING_RATE;
   const effectiveInputCostPer1M = inputCostPer1M * (1 - promptCachingRate * CACHED_INPUT_DISCOUNT);
 
   // Agent complexity — multiple LLM calls per task for agentic workflows
-  const agentComplexity = assumptions.agentComplexity || 'moderate';
+  const agentComplexity = inputs.agentComplexity ?? assumptions.agentComplexity ?? 'moderate';
   const agentProfile = isAgenticWorkflow
     ? (AGENT_COST_PROFILES[agentComplexity] || AGENT_COST_PROFILES['moderate'])
     : AGENT_COST_PROFILES['simple'];
   const llmCallsPerTask = agentProfile.llmCallsPerTask;
-  const monthlyLLMCalls = monthlyTaskVolume * llmCallsPerTask;
+  const monthlyLLMCalls = monthlyAiRequests * llmCallsPerTask;
 
   // Token costs
   const monthlyInputTokens = monthlyLLMCalls * avgInputTokens;
@@ -291,60 +591,149 @@ export function runCalculations(inputs) {
   const monthlyTokenCost = monthlyInputCost + monthlyOutputCost;
 
   // Agent infrastructure costs (orchestration, vector DB, eval, guardrails)
-  const agentInfraDefaults = AGENT_INFRASTRUCTURE_MONTHLY[companySize] || AGENT_INFRASTRUCTURE_MONTHLY['Mid-Market (501-5,000)'];
+  const agentInfraDefaults = AGENT_INFRASTRUCTURE_MONTHLY[companySize]
+    || AGENT_INFRASTRUCTURE_MONTHLY['Mid-Market (501-5,000)'];
   const monthlyAgentInfraCost = isAgenticWorkflow
-    ? (assumptions.orchestrationPlatformCost ?? agentInfraDefaults.orchestration)
-      + (assumptions.vectorDatabaseCost ?? agentInfraDefaults.vectorDb)
-      + (assumptions.evalMonitoringCost ?? agentInfraDefaults.evalMonitoring)
-      + (assumptions.guardrailsCost ?? agentInfraDefaults.guardrails)
+    ? (inputs.orchestrationPlatformCost ?? assumptions.orchestrationPlatformCost ?? agentInfraDefaults.orchestration)
+      + (inputs.vectorDatabaseCost ?? assumptions.vectorDatabaseCost ?? agentInfraDefaults.vectorDb)
+      + (inputs.evalMonitoringCost ?? assumptions.evalMonitoringCost ?? agentInfraDefaults.evalMonitoring)
+      + (inputs.guardrailsCost ?? assumptions.guardrailsCost ?? agentInfraDefaults.guardrails)
     : 0;
 
-  // Final monthly/annual API cost — token model or legacy fallback
-  const effectiveRequestsPerHour = isAgenticWorkflow ? requestsPerHour * AGENTIC_COMPUTE_MULTIPLIER : requestsPerHour;
-  const monthlyApiVolume = teamSize * hoursPerWeek * 4.33 * effectiveRequestsPerHour;
-  let monthlyApiCost, annualApiCost;
-  if (useTokenModel) {
-    monthlyApiCost = monthlyTokenCost + monthlyAgentInfraCost;
-    annualApiCost = monthlyApiCost * 12;
-  } else {
-    // Legacy request-based cost (backward compat with existing tests/users)
-    const apiCostPerK = assumptions.apiCostPer1kRequests ?? API_COST_PER_1K_REQUESTS[processType] ?? 10;
-    monthlyApiCost = (monthlyApiVolume / 1000) * apiCostPerK + monthlyAgentInfraCost;
-    annualApiCost = monthlyApiCost * 12;
-  }
+  // Consumption is genuinely volume-based: model calls, agent runs, and
+  // document processing. Orchestration/monitoring remains in Run costs.
+  const apiCostPerK = inputs.apiCostPer1kRequests
+    ?? assumptions.apiCostPer1kRequests
+    ?? API_COST_PER_1K_REQUESTS[processType]
+    ?? 10;
+  const monthlyInferenceCost = useTokenModel
+    ? monthlyTokenCost
+    : (monthlyAiRequests / 1000) * apiCostPerK;
+  const monthlyAgentWorkflowComputeCost = monthlyAgentWorkflows
+    * agentProfile.toolCallsPerTask
+    * 0.01
+    * industryCostMultiplier;
+  const monthlyDocumentProcessingCost = documentsPerMonth * 0.002;
+  const monthlyApiVolume = monthlyAiRequests;
+  const monthlyApiCost = monthlyInferenceCost + monthlyAgentWorkflowComputeCost + monthlyDocumentProcessingCost;
+  const annualApiCost = monthlyApiCost * 12;
 
-  // Platform / license costs
-  const annualLicenseCost = PLATFORM_LICENSE_COST[companySize] || 48000;
+  // Access is the fixed platform/user licensing planning envelope.
+  const annualBasePlatformLicense = (PLATFORM_LICENSE_COST[companySize] || 48000) * industryCostMultiplier;
+  const annualUserLicenseCost = aiLicensedUsers * 360 * industryCostMultiplier;
+  const annualLicenseCost = annualBasePlatformLicense + annualUserLicenseCost;
+  const annualAdjacentCost = annualBasePlatformLicense * ADJACENT_PRODUCT_RATE;
 
-  // Adjacent product costs (forced cross-sells from vendor)
-  const annualAdjacentCost = annualLicenseCost * ADJACENT_PRODUCT_RATE;
-
-  // Additional ongoing costs (model maintenance, compliance, retraining, tech debt, insurance)
+  // Run costs cover support, monitoring, governance, continuous improvement,
+  // data transfer/storage, and connected-system upkeep.
   const modelRetrainingCost = realisticImplCost * MODEL_RETRAINING_RATE;
-  const annualComplianceCostVal = ANNUAL_COMPLIANCE_COST[companySize] || 30000;
-  const retainedRetrainingCost = retainedFTEs * avgSalary * RETAINED_RETRAINING_RATE;
+  const annualComplianceCostVal = (ANNUAL_COMPLIANCE_COST[companySize] || 30000) * industryCostMultiplier;
+  const retrainedEmployees = usesExplicitRedundancyPlan
+    ? workforceTransition.employeesToRetrain
+    : retainedFTEs;
+  const retrainingCostPerEmployee = workforceMix.hasWorkforceMix
+    ? workforceMix.employeeFullyBurdenedCost
+    : avgSalary;
+  const retainedRetrainingCost = retrainedEmployees * retrainingCostPerEmployee * RETAINED_RETRAINING_RATE;
   const techDebtCost = realisticImplCost * TECH_DEBT_RATE;
-  const cyberInsuranceCost = CYBER_INSURANCE_INCREASE[companySize] || 12000;
+  const cyberInsuranceCost = (CYBER_INSURANCE_INCREASE[companySize] || 12000) * industryCostMultiplier;
 
   // Retained talent premium — wage increase to keep top performers during AI transition
   const retainedTalentPremiumRate = inputs.retainedTalentPremiumRate ?? RETAINED_TALENT_PREMIUM_RATE;
   const retainedTalentPremium = retainedFTEs * avgSalary * retainedTalentPremiumRate;
 
-  // Data egress/ingress costs
-  const dataTransferCostMonthly = DATA_TRANSFER_COST_MONTHLY[companySize] || 3000;
+  // Data egress, stored data, and connected applications are Run costs rather
+  // than token consumption. They scale with the fixed company envelope and
+  // optional real meters.
+  const dataTransferBaselineMonthly = (DATA_TRANSFER_COST_MONTHLY[companySize] || 3000)
+    * industryCostMultiplier;
+  const dataStorageCostMonthly = dataStoredGb * 0.12;
+  const connectedApplicationCostMonthly = connectedApplications * 100 * industryCostMultiplier;
+  const dataTransferCostMonthly = dataTransferBaselineMonthly
+    + dataStorageCostMonthly
+    + connectedApplicationCostMonthly;
   const dataTransferCostAnnual = dataTransferCostMonthly * 12;
+  const annualAgentInfrastructureCost = monthlyAgentInfraCost * 12;
 
-  // Base year-1 ongoing cost (core AI ops + maintenance/compliance/insurance)
-  // Retained Talent Premium is a workforce planning cost, NOT an AI operating cost —
-  // separated out so it doesn't inflate ongoing AI costs (reviewer fix P0)
-  const coreOngoingCost = ongoingAiLaborCost + annualApiCost + annualLicenseCost + annualAdjacentCost;
-  const computedOngoingCost = coreOngoingCost + modelRetrainingCost + annualComplianceCostVal
-    + retainedRetrainingCost + techDebtCost + cyberInsuranceCost
+  // Four executive buckets: Build is one-time; Access, Consumption, and Run
+  // are annual. Retained talent premium stays outside operating buckets.
+  const accessAnnual = annualLicenseCost + annualAdjacentCost;
+  const consumptionAnnual = annualApiCost;
+  const runAnnual = ongoingAiLaborCost + annualAgentInfrastructureCost + modelRetrainingCost
+    + annualComplianceCostVal + retainedRetrainingCost + techDebtCost + cyberInsuranceCost
     + dataTransferCostAnnual;
+  const coreOngoingCost = accessAnnual + consumptionAnnual + ongoingAiLaborCost
+    + annualAgentInfrastructureCost;
+  const computedOngoingCost = accessAnnual + consumptionAnnual + runAnnual;
   // Use computed ongoing if user didn't provide a value; never silently override user input
   const userProvidedOngoing = inputs.ongoingAnnualCost != null;
   const baseOngoingCost = userProvidedOngoing ? ongoingAnnualCost : computedOngoingCost;
   const ongoingCostOverridden = !userProvidedOngoing && computedOngoingCost > ongoingAnnualCost;
+  const modeledAnnualBucketTotal = accessAnnual + consumptionAnnual + runAnnual;
+  const costAllocationShares = modeledAnnualBucketTotal > 0
+    ? {
+      access: accessAnnual / modeledAnnualBucketTotal,
+      consumption: consumptionAnnual / modeledAnnualBucketTotal,
+      run: runAnnual / modeledAnnualBucketTotal,
+    }
+    : { access: 0, consumption: 0, run: 0 };
+  const planningHorizonYears = Math.max(
+    1,
+    Math.min(DCF_YEARS, Math.round(asNonNegative(inputs.costPlanningHorizonYears, DCF_YEARS)))
+  );
+  const programAllocationTotal = realisticImplCost + (modeledAnnualBucketTotal * planningHorizonYears);
+  const programAllocationShares = programAllocationTotal > 0
+    ? {
+      build: realisticImplCost / programAllocationTotal,
+      access: (accessAnnual * planningHorizonYears) / programAllocationTotal,
+      consumption: (consumptionAnnual * planningHorizonYears) / programAllocationTotal,
+      run: (runAnnual * planningHorizonYears) / programAllocationTotal,
+    }
+    : { build: 0, access: 0, consumption: 0, run: 0 };
+  const planningRanges = {
+    build: { min: 0.30, max: 0.45 },
+    access: { min: 0.20, max: 0.30 },
+    consumption: { min: 0.10, max: 0.25 },
+    run: { min: 0.15, max: 0.25 },
+  };
+  const sourceFootnotes = (ids) => BENCHMARK_SOURCES
+    .filter(source => ids.includes(source.id))
+    .map(({ id, short, full }) => ({ id, short, full }));
+  const benchmarkMetadata = {
+    industryCostMultiplier: {
+      type: 'model-planning-assumption',
+      note: 'The exact industry multipliers are editable model planning guidance for regulated or safety-critical delivery; they are not a quoted market price. The cited sources provide context on integration complexity and delivery timelines, not proof of these exact multipliers.',
+      sources: sourceFootnotes([9, 43]),
+    },
+    planningRanges: {
+      type: 'user-planning-guidance',
+      note: 'Build 30–45%, Access 20–30%, Consumption 10–25%, and Run 15–25% are directional planning ranges supplied for this model, not an external benchmark.',
+      sources: [],
+    },
+    deliveryPace: {
+      type: 'model-user-scenario',
+      note: 'Accelerated (+20% staffing/cost) and extended (-20% staffing/cost) are editable user/model scenarios, not externally benchmarked commitments. The cited PMI material gives only general contingency context.',
+      sources: sourceFootnotes([10]),
+    },
+    usageMeters: {
+      type: 'user-entered-or-model-workload-proxy',
+      note: 'Users, requests, tokens, agent workflows, documents, stored data, and connected applications should be measured company inputs. Defaults are model workload proxies, not market benchmarks; cited sources provide pricing and architecture context only.',
+      sources: sourceFootnotes([11, 29, 30, 36]),
+    },
+  };
+  const costBuckets = {
+    buildIntegrationOneTime: realisticImplCost,
+    accessAnnual,
+    consumptionAnnual,
+    runAnnual,
+    modeledAnnualTotal: modeledAnnualBucketTotal,
+    annualTotal: baseOngoingCost,
+    costAllocationShares,
+    planningHorizonYears,
+    programAllocationShares,
+    planningRanges,
+    benchmarkMetadata,
+  };
 
   // 5-year ongoing costs with tapered vendor escalation + compliance escalation
   // Years 1-2: 12% increase, Years 3-4: 7% (stabilized)
@@ -360,7 +749,16 @@ export function runCalculations(inputs) {
   const totalOngoing5Year = ongoingCostsByYear.reduce((sum, c) => sum + c, 0);
 
   const aiCostModel = {
-    aiSalary,
+    // `aiSalary` is retained as a compatibility alias for older report
+    // templates. It now always equals the entered blended workforce rate.
+    aiSalary: deploymentFullyBurdenedRate,
+    deploymentFullyBurdenedRate,
+    industryCostMultiplier,
+    deploymentPlan: {
+      ...deploymentPlan,
+      adjustedTimelineMonths: adjustedTimeline,
+      estimatedBuildIntegrationCost: realisticImplCost,
+    },
     implEngineers: aiImplEngineers,
     implPMs: aiImplPMs,
     implTimelineYears,
@@ -376,8 +774,24 @@ export function runCalculations(inputs) {
     monthlyApiVolume,
     monthlyApiCost,
     annualApiCost,
+    annualBasePlatformLicense,
+    annualUserLicenseCost,
     annualLicenseCost,
     annualAdjacentCost,
+    costBuckets,
+    costAllocationShares,
+    usageMeters: {
+      aiLicensedUsers,
+      monthlyAiRequests,
+      avgInputTokensPerRequest: avgInputTokens,
+      avgOutputTokensPerRequest: avgOutputTokens,
+      monthlyAgentWorkflows,
+      documentsPerMonth,
+      dataStoredGb,
+      connectedApplications,
+      monthlyArchetypeVolume,
+      monthlyLLMCalls,
+    },
     coreOngoingCost,
     modelRetrainingCost,
     annualComplianceCost: annualComplianceCostVal,
@@ -388,6 +802,10 @@ export function runCalculations(inputs) {
     retainedTalentPremiumRate,
     retainedTalentPremiumNote: 'Workforce planning cost — not included in AI ongoing costs',
     dataTransferCostAnnual,
+    dataTransferBaselineMonthly,
+    dataStorageCostMonthly,
+    connectedApplicationCostMonthly,
+    annualAgentInfrastructureCost,
     isAgenticWorkflow,
     computedOngoingCost,
     userProvidedOngoing,
@@ -436,10 +854,17 @@ export function runCalculations(inputs) {
   // they are phased over Years 2-5 as cash outflows
   // =====================================================================
 
-  // Total separation cost per FTE and breakdown
-  const separationMultiplier = SEPARATION_COST_MULTIPLIER[companySize] || 1.0;
-  const separationCostPerFTE = avgSalary * separationMultiplier;
-  const totalSeparationCost = displacedFTEs * separationCostPerFTE;
+  // Explicit redundancy plans use the requested 1.5× fully burdened employee
+  // cost. Legacy saved models retain the existing company-size benchmark.
+  const separationMultiplier = usesExplicitRedundancyPlan
+    ? 1.5
+    : (SEPARATION_COST_MULTIPLIER[companySize] || 1.0);
+  const separationCostPerFTE = usesExplicitRedundancyPlan
+    ? workforceTransition.oneTimeRedundancyCost / Math.max(displacedFTEs, 1)
+    : avgSalary * separationMultiplier;
+  const totalSeparationCost = usesExplicitRedundancyPlan
+    ? workforceTransition.oneTimeRedundancyCost
+    : displacedFTEs * separationCostPerFTE;
 
   // Itemized separation breakdown
   const separationBreakdown = {};
@@ -451,8 +876,10 @@ export function runCalculations(inputs) {
     };
   }
 
-  // Phased separation costs by year (follows HEADCOUNT_REDUCTION_SCHEDULE)
-  const separationByYear = HEADCOUNT_REDUCTION_SCHEDULE.map(pct => totalSeparationCost * pct);
+  // Explicit plans phase severance 50% / 30% / 20% across Years 1–3.
+  const separationByYear = usesExplicitRedundancyPlan
+    ? workforceTransition.redundancyCostByYear
+    : HEADCOUNT_REDUCTION_SCHEDULE.map(pct => totalSeparationCost * pct);
 
   const severanceWeeks = SEVERANCE_WEEKS[companySize] || 8;
 
@@ -469,12 +896,21 @@ export function runCalculations(inputs) {
   const vendorSwitchingRate = VENDOR_SWITCHING_COST[companySize] || 0.35;
   const vendorSwitchingCost = realisticImplCost * vendorSwitchingRate;
 
-  // Vendor termination cost (user-provided — cost to exit CURRENT vendor contracts)
+  // Legacy vendor termination is retained for existing saved models. New
+  // contract inputs use an auditable notice-period formula.
   const vendorsReplaced = inputs.vendorsReplaced || 0;
-  const vendorTerminationCost = inputs.vendorTerminationCost || 0;
+  const legacyVendorTerminationCost = inputs.vendorTerminationCost || 0;
+  const contractExitCost = contractExit.contractExitCost;
+  // New contract inputs replace the legacy flat vendor-exit field. A legacy
+  // saved model may have only the flat field, so preserve it as the fallback.
+  // Never add both or the cancellation cost is counted twice.
+  const effectiveContractExitCost = contractExit.annualExistingContractCost > 0
+    ? contractExitCost
+    : legacyVendorTerminationCost;
 
   // One-time costs that are truly upfront (NO separation — it's phased)
-  const totalOneTimeCosts = legalComplianceCost + securityAuditCost + contingencyReserve + vendorTerminationCost;
+  const totalOneTimeCosts = legalComplianceCost + securityAuditCost + contingencyReserve
+    + effectiveContractExitCost;
 
   const oneTimeCosts = {
     displacedFTEs,
@@ -487,7 +923,7 @@ export function runCalculations(inputs) {
     totalSeparationCost,
     separationBreakdown,
     separationByYear,
-    separationPhasing: HEADCOUNT_REDUCTION_SCHEDULE,
+    separationPhasing: headcountReductionSchedule,
     severanceWeeks,
     legalComplianceCost,
     securityAuditCost,
@@ -495,19 +931,43 @@ export function runCalculations(inputs) {
     vendorSwitchingCost,
     vendorSwitchingRate,
     vendorsReplaced,
-    vendorTerminationCost,
+    vendorTerminationCost: legacyVendorTerminationCost,
+    existingContractCount: contractExit.existingContractCount,
+    annualCostPerContract: contractExit.annualCostPerContract,
+    contractNoticePeriodMonths: contractExit.contractNoticePeriodMonths,
+    annualContractSpend,
+    contractExitCost,
+    effectiveContractExitCost,
+    benchmarkMetadata: {
+      redundancyCost: {
+        type: 'model-assumption-with-context',
+        note: 'The explicit 1.5× fully burdened cost is a conservative editable model assumption. The cited SHRM range is 1.0–1.5× annual salary, so it provides context rather than direct support for a fully burdened-cost multiplier.',
+        sources: sourceFootnotes([15]),
+      },
+      redundancySchedule: {
+        type: 'user-planning-schedule',
+        note: 'The 50% / 30% / 20% Year 1–3 timing is the model’s stated transition plan, not an external benchmark.',
+        sources: [],
+      },
+      contractExit: {
+        type: 'user-entered-contract-term',
+        note: 'Notice-period months and annual contract cost are user-entered contract terms.',
+        sources: [],
+      },
+    },
+    workforceTransition,
     totalOneTimeCosts,
   };
 
   // =====================================================================
   // HIDDEN COSTS (based on realistic implementation cost)
   // =====================================================================
-  const changeManagement = realisticImplCost * 0.15;
+  const changeManagement = realisticImplCost * 0.08;
   const culturalResistance = realisticImplCost * CULTURAL_RESISTANCE_RATE;
   const dataCleanup =
     realisticImplCost *
-    (dataReadiness <= 2 ? 0.25 : dataReadiness === 3 ? 0.10 : 0);
-  const integrationTesting = realisticImplCost * 0.10;
+    (dataReadiness <= 2 ? 0.15 : dataReadiness === 3 ? 0.05 : 0);
+  const integrationTesting = realisticImplCost * 0.05;
   // Productivity dip scaled by company size (McKinsey Change 2025)
   const dipParams = PRODUCTIVITY_DIP_PARAMS[companySize] || { months: 3, dipRate: 0.25 };
   const productivityDip = (annualLaborCost / 12) * dipParams.months * dipParams.dipRate;
@@ -536,21 +996,52 @@ export function runCalculations(inputs) {
   // =====================================================================
   const toolReplacementRate = assumptions.toolReplacementRate ?? TOOL_REPLACEMENT_RATE[inputs.processType] ?? 0.40;
 
-  const headcountSavingsGross = displacedFTEs * avgSalary;
-  const efficiencySavingsGross = Math.max(0, (annualLaborCost * automationPotential) - headcountSavingsGross);
-  const errorReductionGross = annualReworkCost * automationPotential;
-  const toolReplacementGross = currentToolCosts * toolReplacementRate;
-  const archetypeRevenueGross = archetypeRevenueImpact;
+  const headcountSavingsGross = usesExplicitRedundancyPlan
+    ? workforceTransition.annualHeadcountSavings
+    : displacedFTEs * avgSalary;
+  // Explicit efficiency plans describe capacity created. Only declared direct
+  // employee redundancies become hard cash savings; the remaining capacity is
+  // returned separately so it is never counted twice in the DCF.
+  const eligibleLaborCost = workforceAnnualHours > 0
+    ? annualLaborCost * Math.min(1, eligibleAnnualHours / workforceAnnualHours)
+    : 0;
+  const efficiencySavingsGross = usesExplicitRedundancyPlan
+    ? 0
+    : Math.max(0, (eligibleLaborCost * totalEfficiencyGainPct) - headcountSavingsGross);
+  const capacityOnlyEfficiencyValue = usesExplicitRedundancyPlan
+    ? workforceTransition.annualCapacityOnlyValue
+    : 0;
+  // In the new explicit plan, total efficiency gain is the final operating
+  // assumption. Do not let the broader automation-potential benchmark imply a
+  // larger rework reduction than the user entered.
+  const reworkReductionRate = usesExplicitRedundancyPlan
+    ? totalEfficiencyGainPct
+    : automationPotential;
+  const coreBenefitsEnabled = !isRetiredCase && !workloadExceedsCapacity;
+  const errorReductionGross = coreBenefitsEnabled
+    ? annualReworkCost * reworkReductionRate
+    : 0;
+  const toolReplacementGross = coreBenefitsEnabled
+    ? currentToolCosts * toolReplacementRate
+    : 0;
+  const contractSavingsGross = coreBenefitsEnabled
+    ? annualContractSpend
+    : 0;
+  // This is a measured customer-support cost claim, not a revenue forecast.
+  // It is only allowed into the core DCF after the Operations validation gate.
+  const directCaseSavingsGross = caseDirectSavingsGross;
 
   // Enhancement savings = what you get Year 1 (no headcount reduction yet)
-  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross;
+  const enhancementGross = efficiencySavingsGross + errorReductionGross + toolReplacementGross
+    + contractSavingsGross + directCaseSavingsGross;
   const enhancementRiskAdjusted = enhancementGross * riskMultiplier;
 
   // =====================================================================
   // ANNUAL SAVINGS (gross metrics for reference)
   // Uses decomposed value breakdown to avoid applying automation % to tool costs
   // =====================================================================
-  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross;
+  const grossAnnualSavings = headcountSavingsGross + efficiencySavingsGross + errorReductionGross
+    + toolReplacementGross + contractSavingsGross + directCaseSavingsGross;
   // Risk multiplier applies only to enhancement savings, not headcount (reviewer fix P1)
   const riskAdjustedSavings = headcountSavingsGross + enhancementRiskAdjusted;
   const netAnnualSavings = riskAdjustedSavings - baseOngoingCost;
@@ -568,6 +1059,8 @@ export function runCalculations(inputs) {
     efficiency: {
       gross: efficiencySavingsGross,
       riskAdjusted: efficiencySavingsGross * riskMultiplier,
+      capacityOnly: capacityOnlyEfficiencyValue,
+      freedUpAnnualHours: usesExplicitRedundancyPlan ? workforceTransition.freedUpAnnualHours : 0,
     },
     errorReduction: {
       gross: errorReductionGross,
@@ -577,12 +1070,28 @@ export function runCalculations(inputs) {
       gross: toolReplacementGross,
       riskAdjusted: toolReplacementGross * riskMultiplier,
     },
-    archetypeRevenue: {
-      gross: archetypeRevenueGross,
-      riskAdjusted: archetypeRevenueGross * riskMultiplier,
+    contractExit: {
+      gross: contractSavingsGross,
+      riskAdjusted: contractSavingsGross * riskMultiplier,
+      annualContractSpend,
+      oneTimeExitCost: contractExitCost,
     },
-    totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross,
-    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross + toolReplacementGross + archetypeRevenueGross) * riskMultiplier,
+    caseDirectSavings: {
+      gross: directCaseSavingsGross,
+      riskAdjusted: directCaseSavingsGross * riskMultiplier,
+      validated: caseDirectSavingsEnabled,
+      label: 'Verified customer support cost avoidance',
+    },
+    // Kept at zero for older renderers that expect this property. Revenue
+    // forecasts are not a supported core-Dcf value stream.
+    archetypeRevenue: {
+      gross: 0,
+      riskAdjusted: 0,
+    },
+    totalGross: headcountSavingsGross + efficiencySavingsGross + errorReductionGross
+      + toolReplacementGross + contractSavingsGross + directCaseSavingsGross,
+    totalRiskAdjusted: headcountSavingsGross + (efficiencySavingsGross + errorReductionGross
+      + toolReplacementGross + contractSavingsGross + directCaseSavingsGross) * riskMultiplier,
     // Per-employee productivity gain in Year 1 (enhancement phase, before any layoffs)
     perEmployeeGain: teamSize > 0
       ? enhancementRiskAdjusted / teamSize
@@ -621,7 +1130,7 @@ export function runCalculations(inputs) {
       const enhancementSavings = enhancementRiskAdjusted * adoptionRamp[yr] * scenarioMultiplier * wageGrowth * driftFactor;
 
       // Headcount savings — phased reduction (cumulative), also subject to drift
-      cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
+      cumulativeReduction += headcountReductionSchedule[yr];
       const headcountSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * scenarioMultiplier * wageGrowth * driftFactor;
 
       // Total gross savings this year
@@ -796,7 +1305,8 @@ export function runCalculations(inputs) {
       year5OngoingCost: ongoingCostsByYear[4],
       totalOngoing5Year: totalOngoing5Year,
       vendorsReplaced,
-      vendorTerminationCost,
+      vendorTerminationCost: effectiveContractExitCost,
+      legacyVendorTerminationCost,
     };
   }
 
@@ -811,17 +1321,15 @@ export function runCalculations(inputs) {
   function sensitivityNPV(modEnhancementRA, modHeadcountRA, modOngoingByYear, modUpfront) {
     const flows = [];
     let cumulativeReduction = 0;
-    let cumulativeNet = -modUpfront;
     for (let yr = 0; yr < DCF_YEARS; yr++) {
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
       const driftFactor = Math.pow(1 - modelDriftRate, yr);
       const eSavings = modEnhancementRA * adoptionRamp[yr] * wageGrowth * driftFactor;
-      cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
+      cumulativeReduction += headcountReductionSchedule[yr];
       const hSavings = modHeadcountRA * cumulativeReduction * wageGrowth * driftFactor;
       const sepCost = separationByYear[yr];
       const ongCost = modOngoingByYear[yr];
       const net = eSavings + hSavings - sepCost - ongCost;
-      cumulativeNet += net;
       flows.push({ netCashFlow: net });
     }
     let npv = -modUpfront;
@@ -844,22 +1352,32 @@ export function runCalculations(inputs) {
 
   // Helper: recompute enhancement/headcount RA from modified current cost
   // Recalculates displaced FTEs when team size or automation changes
-  function valueFromCurrentCost(modCurrentCost, modAutomation, modTeamSize) {
+  function valueFromCurrentCost(modCurrentCost, modAutomation, modTeamSize, modAnnualReworkCost = annualReworkCost) {
     const ap = modAutomation ?? automationPotential;
     const ts = modTeamSize ?? teamSize;
-    const modLaborCost = modCurrentCost - currentToolCosts; // approximate
-    const modReworkCost = modLaborCost * errorRate / (1 + errorRate); // back-derive
-    const modAvgSalary = ts > 0 ? modLaborCost / (ts * (1 + errorRate)) : avgSalary;
+    const modLaborCost = Math.max(
+      0,
+      modCurrentCost - currentToolCosts - annualContractSpend - modAnnualReworkCost
+    );
+    const modAvgSalary = ts > 0 ? modLaborCost / ts : avgSalary;
     // Recalculate displaced FTEs for the modified scenario
     const modRawDisplaced = Math.round(ts * ap * adoptionRate);
     const modMaxDisplaced = Math.floor(ts * MAX_HEADCOUNT_REDUCTION);
-    const modDisplacedFTEs = Math.min(modRawDisplaced, modMaxDisplaced);
-    const modHeadGross = modDisplacedFTEs * modAvgSalary;
-    const modEffGross = Math.max(0, (ts * modAvgSalary) * ap - modHeadGross);
-    const modErrGross = modReworkCost * ap;
+    const modDisplacedFTEs = usesExplicitRedundancyPlan
+      ? displacedFTEs
+      : Math.min(modRawDisplaced, modMaxDisplaced);
+    const modHeadGross = usesExplicitRedundancyPlan
+      ? headcountSavingsGross
+      : modDisplacedFTEs * modAvgSalary;
+    const modEffGross = usesExplicitRedundancyPlan
+      ? 0
+      : Math.max(0, (ts * modAvgSalary) * ap - modHeadGross);
+    const modErrGross = modAnnualReworkCost * (usesExplicitRedundancyPlan
+      ? totalEfficiencyGainPct
+      : ap);
     const modToolGross = currentToolCosts * (assumptions.toolReplacementRate ?? TOOL_REPLACEMENT_RATE[processType] ?? 0.40);
-    const modEnhRA = (modEffGross + modErrGross + modToolGross) * riskMultiplier;
-    const modHeadRA = modHeadGross * riskMultiplier;
+    const modEnhRA = (modEffGross + modErrGross + modToolGross + contractSavingsGross + directCaseSavingsGross) * riskMultiplier;
+    const modHeadRA = modHeadGross;
     return { enhancementRA: modEnhRA, headcountRA: modHeadRA };
   }
 
@@ -872,7 +1390,7 @@ export function runCalculations(inputs) {
   const teamHigh = Math.round(teamSize * 1.20);
   function costForTeam(t) {
     const lab = t * avgSalary;
-    return lab + lab * errorRate + currentToolCosts;
+    return lab + annualReworkCost + currentToolCosts + annualContractSpend;
   }
   const teamLowVal = valueFromCurrentCost(costForTeam(teamLow), undefined, teamLow);
   const teamHighVal = valueFromCurrentCost(costForTeam(teamHigh), undefined, teamHigh);
@@ -882,19 +1400,19 @@ export function runCalculations(inputs) {
   const salHigh = avgSalary * 1.20;
   function costForSalary(s) {
     const lab = teamSize * s;
-    return lab + lab * errorRate + currentToolCosts;
+    return lab + annualReworkCost + currentToolCosts + annualContractSpend;
   }
   const salLowVal = valueFromCurrentCost(costForSalary(salLow));
   const salHighVal = valueFromCurrentCost(costForSalary(salHigh));
 
-  // --- Error rate sensitivity ---
-  const errLow = Math.max(0, errorRate * 0.50);
-  const errHigh = Math.min(0.50, errorRate * 1.50);
-  function costForError(e) {
-    return teamSize * avgSalary + teamSize * avgSalary * e + currentToolCosts;
+  // --- Measured rework cost sensitivity ---
+  const reworkLow = annualReworkCost * 0.50;
+  const reworkHigh = annualReworkCost * 1.50;
+  function costForRework(reworkCost) {
+    return teamSize * avgSalary + reworkCost + currentToolCosts + annualContractSpend;
   }
-  const errLowVal = valueFromCurrentCost(costForError(errLow));
-  const errHighVal = valueFromCurrentCost(costForError(errHigh));
+  const reworkLowVal = valueFromCurrentCost(costForRework(reworkLow), undefined, undefined, reworkLow);
+  const reworkHighVal = valueFromCurrentCost(costForRework(reworkHigh), undefined, undefined, reworkHigh);
 
   // --- Automation potential sensitivity ---
   const autLow = Math.max(0.10, automationPotential - 0.15);
@@ -923,7 +1441,7 @@ export function runCalculations(inputs) {
       const wageGrowth = Math.pow(1 + wageInflationRate, yr);
       const driftFactor = Math.pow(1 - modelDriftRate, yr);
       const eSavings = enhancementRiskAdjusted * adoptionRamp[yr] * wageGrowth * driftFactor;
-      cumulativeReduction += HEADCOUNT_REDUCTION_SCHEDULE[yr];
+      cumulativeReduction += headcountReductionSchedule[yr];
       const hSavings = valueBreakdown.headcount.riskAdjusted * cumulativeReduction * wageGrowth * driftFactor;
       const sepCost = separationByYear[yr];
       const ongCost = ongoingCostsByYear[yr];
@@ -947,7 +1465,7 @@ export function runCalculations(inputs) {
       const wageGrowth = Math.pow(1 + wageInflationRate, yearIndex);
       const driftFactor = Math.pow(1 - modelDriftRate, yearIndex);
       let cRed = 0;
-      for (let y = 0; y <= yearIndex; y++) cRed += HEADCOUNT_REDUCTION_SCHEDULE[y];
+      for (let y = 0; y <= yearIndex; y++) cRed += headcountReductionSchedule[y];
       const eSavings = modEnhancementRA * adoptionRamp[yearIndex] * wageGrowth * driftFactor;
       const hSavings = modHeadcountRA * cRed * wageGrowth * driftFactor;
       const monthlyNet = (eSavings + hSavings - separationByYear[yearIndex] - modOngoingByYear[yearIndex]) / 12;
@@ -979,12 +1497,12 @@ export function runCalculations(inputs) {
       sensitivityNPV(salHighVal.enhancementRA, salHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment),
     ),
     sensitivityRow(
-      'Error / Rework Rate',
-      `${(errorRate * 100).toFixed(0)}%`,
-      `${(errLow * 100).toFixed(0)}% (-50%)`,
-      `${(errHigh * 100).toFixed(0)}% (+50%)`,
-      sensitivityNPV(errLowVal.enhancementRA, errLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment),
-      sensitivityNPV(errHighVal.enhancementRA, errHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment),
+      'Measured Rework Cost',
+      `$${(annualReworkCost / 1000).toFixed(0)}K`,
+      `$${(reworkLow / 1000).toFixed(0)}K (-50%)`,
+      `$${(reworkHigh / 1000).toFixed(0)}K (+50%)`,
+      sensitivityNPV(reworkLowVal.enhancementRA, reworkLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment),
+      sensitivityNPV(reworkHighVal.enhancementRA, reworkHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment),
     ),
     sensitivityRow(
       'Automation Potential',
@@ -1028,9 +1546,9 @@ export function runCalculations(inputs) {
     } else if (i === 1) { // Salary
       row.paybackLow = sensitivityPayback(salLowVal.enhancementRA, salLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
       row.paybackHigh = sensitivityPayback(salHighVal.enhancementRA, salHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
-    } else if (i === 2) { // Error Rate
-      row.paybackLow = sensitivityPayback(errLowVal.enhancementRA, errLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
-      row.paybackHigh = sensitivityPayback(errHighVal.enhancementRA, errHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+    } else if (i === 2) { // Measured rework cost
+      row.paybackLow = sensitivityPayback(reworkLowVal.enhancementRA, reworkLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
+      row.paybackHigh = sensitivityPayback(reworkHighVal.enhancementRA, reworkHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
     } else if (i === 3) { // Automation Potential
       row.paybackLow = sensitivityPayback(autLowVal.enhancementRA, autLowVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
       row.paybackHigh = sensitivityPayback(autHighVal.enhancementRA, autHighVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
@@ -1056,12 +1574,11 @@ export function runCalculations(inputs) {
       // Delayed adoption ramp for double-timeline scenario
       let npv = -upfrontInvestment;
       const delayedRamp = [0.30, 0.60, 0.85, 1.0, 1.0];
-      const flows = [];
       let cumRed = 0;
       for (let yr = 0; yr < DCF_YEARS; yr++) {
         const wg = Math.pow(1 + wageInflationRate, yr);
         const enh = enhancementRiskAdjusted * delayedRamp[yr] * wg;
-        cumRed += HEADCOUNT_REDUCTION_SCHEDULE[yr];
+        cumRed += headcountReductionSchedule[yr];
         const hc = valueBreakdown.headcount.riskAdjusted * cumRed * wg;
         const net = enh + hc - separationByYear[yr] - ongoingCostsByYear[yr];
         npv += net / Math.pow(1 + discountRate, yr + 1);
@@ -1167,7 +1684,9 @@ export function runCalculations(inputs) {
   // R&D TAX CREDIT (informational only — NOT in NPV/ROIC)
   // =====================================================================
   const companyState = inputs.companyState || 'Other / Not Sure';
-  const isUSBased = (teamLocation || '').startsWith('US') || teamLocation === 'Blended';
+  // The optional company-state input, rather than an implementation-team
+  // location, establishes whether an R&D-credit illustration is applicable.
+  const isUSBased = companyState !== 'Other / Not Sure';
   const qualifiedExpenses = realisticImplCost * RD_QUALIFICATION_RATE;
   const federalCredit = isUSBased ? qualifiedExpenses * FEDERAL_RD_CREDIT_RATE : 0;
   const stateRate = STATE_RD_CREDIT_RATES[companyState] || 0;
@@ -1184,40 +1703,15 @@ export function runCalculations(inputs) {
     stateRate,
   };
 
-  // =====================================================================
-  // REVENUE ENABLEMENT (informational — NOT in NPV/ROIC to stay conservative)
-  // Only computed when user provides annualRevenue — no speculative proxies
-  // =====================================================================
-  const isRevenueEligible = assumptions.revenueEligible ?? REVENUE_ELIGIBLE_PROCESSES.includes(processType);
-  const userAnnualRevenue = inputs.annualRevenue || 0;
-  const revenueUpliftData = REVENUE_UPLIFT[industry] || REVENUE_UPLIFT['Other'];
-
-  let revenueEnablement;
-  if (isRevenueEligible && userAnnualRevenue > 0) {
-    const timeToMarketRev = userAnnualRevenue * revenueUpliftData.timeToMarket * REVENUE_RISK_DISCOUNT * riskMultiplier;
-    const customerExpRev = userAnnualRevenue * revenueUpliftData.customerExperience * REVENUE_RISK_DISCOUNT * riskMultiplier;
-    const newCapabilityRev = userAnnualRevenue * revenueUpliftData.newCapability * REVENUE_RISK_DISCOUNT * riskMultiplier;
-    // Revenue displacement risk — chance AI degrades customer experience initially
-    // Apply same REVENUE_RISK_DISCOUNT as uplift so downside uncertainty is symmetric
-    const displacementRisk = userAnnualRevenue * REVENUE_DISPLACEMENT_RISK_RATE * REVENUE_RISK_DISCOUNT * riskMultiplier;
-    const grossRevenue = timeToMarketRev + customerExpRev + newCapabilityRev;
-    revenueEnablement = {
-      eligible: true,
-      revenueBase: userAnnualRevenue,
-      timeToMarket: timeToMarketRev,
-      customerExperience: customerExpRev,
-      newCapability: newCapabilityRev,
-      displacementRisk,
-      totalAnnualRevenue: grossRevenue - displacementRisk,
-      riskDiscount: REVENUE_RISK_DISCOUNT,
-    };
-  } else {
-    revenueEnablement = {
-      eligible: false,
-      processType: processType,
-      projectArchetype: inputs.projectArchetype || null,
-    };
-  }
+  // Revenue enablement was retired as a model value stream. Preserve a clear
+  // inert output for older consumers instead of silently projecting sales.
+  const revenueEnablement = {
+    eligible: false,
+    retired: true,
+    note: 'Revenue forecasts are excluded from this operating-cost model.',
+    processType,
+    projectArchetype: inputs.projectArchetype || null,
+  };
 
   // =====================================================================
   // THRESHOLD / BREAKEVEN ANALYSIS
@@ -1268,7 +1762,7 @@ export function runCalculations(inputs) {
       if (type === 'efficiency') phaseValue += valueBreakdown.efficiency.riskAdjusted;
       if (type === 'errorReduction') phaseValue += valueBreakdown.errorReduction.riskAdjusted;
       if (type === 'toolReplacement') phaseValue += valueBreakdown.toolReplacement.riskAdjusted;
-      if (type === 'archetypeRevenue') phaseValue += valueBreakdown.archetypeRevenue.riskAdjusted;
+      if (type === 'caseDirectSavings') phaseValue += valueBreakdown.caseDirectSavings.riskAdjusted;
     });
     return {
       ...phase,
@@ -1385,40 +1879,31 @@ export function runCalculations(inputs) {
   const cashRealizationPct = inputs.cashRealizationPct ?? CASH_REALIZATION_DEFAULTS.base;
   const costEfficiencyPathway = {
     label: 'Cost Efficiency',
-    description: 'Direct cash savings from labor, error, and tool reduction',
+    description: 'Direct cash savings from explicit labor actions, measurable rework, tools, and contracts',
     annualGross: grossAnnualSavings,
     annualRiskAdjusted: riskAdjustedSavings,
     annualCashRealized: riskAdjustedSavings * cashRealizationPct,
-    annualCapacityOnly: riskAdjustedSavings * (1 - cashRealizationPct),
+    annualCapacityOnly: usesExplicitRedundancyPlan
+      ? capacityOnlyEfficiencyValue
+      : riskAdjustedSavings * (1 - cashRealizationPct),
     cashRealizationPct,
   };
 
   // --- Path B: Capacity Creation ---
-  const annualRevenue = inputs.annualRevenue || 0;
-  const contributionMargin = inputs.contributionMargin ?? 0.30;
-  const cycleTimeBenchmarks = CYCLE_TIME_REDUCTION[industry] || CYCLE_TIME_REDUCTION['Other'];
-  const cycleTimeReductionMonths = inputs.cycleTimeReductionMonths ?? cycleTimeBenchmarks.months;
-
-  const capacityHoursFreed = annualHours * automationPotential * riskMultiplier;
+  const capacityHoursFreed = usesExplicitRedundancyPlan
+    ? workforceTransition.freedUpAnnualHours
+    : eligibleAnnualHours * totalEfficiencyGainPct * riskMultiplier;
   const capacityFTEEquivalent = capacityHoursFreed / 2080;
-
-  // Revenue acceleration: if AI reduces cycle time, revenue arrives sooner
-  const revenueAcceleration = annualRevenue > 0 && cycleTimeReductionMonths > 0
-    ? (annualRevenue * contributionMargin * cycleTimeReductionMonths / 12) * riskMultiplier
-    : 0;
 
   const capacityCreationPathway = {
     label: 'Capacity Creation',
-    description: 'Strategic leverage from freed capacity and accelerated cycles',
+    description: 'Strategic capacity created from verified workload reduction',
     hoursFreed: capacityHoursFreed,
     fteEquivalent: capacityFTEEquivalent,
     hourlyValue: hourlyRate,
     annualCapacityValue: capacityHoursFreed * hourlyRate,
-    revenueAcceleration,
-    cycleTimeReductionMonths,
-    annualRevenue,
-    contributionMargin,
-    totalAnnualValue: (capacityHoursFreed * hourlyRate) + revenueAcceleration,
+    revenueAcceleration: 0,
+    totalAnnualValue: capacityHoursFreed * hourlyRate,
     includeInNPV: inputs.includeCapacityValue ?? false,
   };
 
@@ -1441,21 +1926,19 @@ export function runCalculations(inputs) {
     expectedLossBefore,
     expectedLossAfter,
     annualValueAvoided: annualRiskReductionValue,
-    includeInNPV: inputs.includeRiskReduction ?? false,
+    includeInNPV: Boolean(inputs.includeRiskReduction && inputs.riskValueEvidenceValidated),
   };
 
   // --- Combined V3 Value ---
   // When capacity is included in NPV, add only the non-cash portion to avoid
   // double-counting with costEfficiency (which already includes cash-realized savings).
-  const includeRevAccelInNPV = inputs.includeRevenueAcceleration ?? false;
   const capacityNPVAddon = capacityCreationPathway.includeInNPV
-    ? costEfficiencyPathway.annualCapacityOnly + revenueAcceleration
+    ? costEfficiencyPathway.annualCapacityOnly
     : 0;
   const totalV3AnnualValue =
     costEfficiencyPathway.annualRiskAdjusted
     + capacityNPVAddon
-    + (riskReductionPathway.includeInNPV ? riskReductionPathway.annualValueAvoided : 0)
-    + (includeRevAccelInNPV ? revenueAcceleration : 0);
+    + (riskReductionPathway.includeInNPV ? riskReductionPathway.annualValueAvoided : 0);
 
   const valuePathways = {
     costEfficiency: costEfficiencyPathway,
@@ -1466,8 +1949,7 @@ export function runCalculations(inputs) {
     // Additive NPV impact from V3 pathways (on top of base cost DCF)
     additionalAnnualValue:
       (capacityCreationPathway.includeInNPV ? capacityCreationPathway.totalAnnualValue : 0)
-      + (riskReductionPathway.includeInNPV ? riskReductionPathway.annualValueAvoided : 0)
-      + (includeRevAccelInNPV ? revenueAcceleration : 0),
+      + (riskReductionPathway.includeInNPV ? riskReductionPathway.annualValueAvoided : 0),
   };
 
   // =====================================================================
@@ -1756,7 +2238,7 @@ export function runCalculations(inputs) {
       let lo = 0, hi = baseOngoingCost;
       for (let i = 0; i < 25; i++) {
         const mid = (lo + hi) / 2;
-        const modOngoing = ongoingCostsByYear.map((c, yr) => mid * (c / baseOngoingCost));
+        const modOngoing = ongoingCostsByYear.map(c => mid * (c / baseOngoingCost));
         const npv = sensitivityNPV(enhancementRiskAdjusted, valueBreakdown.headcount.riskAdjusted, modOngoing, upfrontInvestment);
         if (npv >= 0) lo = mid; else hi = mid;
       }
@@ -1794,7 +2276,7 @@ export function runCalculations(inputs) {
       let lo = teamSize, hi = teamSize * 3;
       for (let i = 0; i < 25; i++) {
         const mid = Math.round((lo + hi) / 2);
-        const modCost = mid * avgSalary + mid * avgSalary * errorRate + currentToolCosts;
+        const modCost = mid * avgSalary + annualReworkCost + currentToolCosts + annualContractSpend;
         const modVal = valueFromCurrentCost(modCost, undefined, mid);
         const npv = sensitivityNPV(modVal.enhancementRA, modVal.headcountRA, ongoingCostsByYear, upfrontInvestment);
         if (npv >= 0) hi = mid; else lo = mid;
@@ -1830,6 +2312,7 @@ export function runCalculations(inputs) {
   // INPUT VALIDATION WARNINGS (reviewer fix P2)
   // =====================================================================
   const inputWarnings = [];
+  inputWarnings.push(...caseBumpers);
   const salaryRange = SALARY_RANGES_BY_INDUSTRY[industry] || SALARY_RANGES_BY_INDUSTRY['Other'];
   if (avgSalary < salaryRange.low) {
     inputWarnings.push({
@@ -1853,6 +2336,24 @@ export function runCalculations(inputs) {
       message: `Model-estimated ongoing cost ($${Math.round(computedOngoingCost).toLocaleString()}) differs from default ($${Math.round(ongoingAnnualCost).toLocaleString()}). Using model estimate.`,
     });
   }
+  workforceTransition.warnings.forEach((message) => {
+    inputWarnings.push({
+      field: 'employeesToMakeRedundant',
+      severity: 'warning',
+      message,
+    });
+  });
+  [
+    ...(workforceMix.inputCorrections || []),
+    ...(contractExit.inputCorrections || []),
+    ...(rework.inputCorrections || []),
+  ].forEach((message) => {
+    inputWarnings.push({
+      field: 'modelGuardrail',
+      severity: 'warning',
+      message,
+    });
+  });
 
   // =====================================================================
   // V5.1: BREAK-EVEN UNIT ECONOMICS
@@ -1861,7 +2362,7 @@ export function runCalculations(inputs) {
   // then compute a simplified NPV to find the break-even threshold.
   // =====================================================================
   function calculateBreakEvenUnits() {
-    if (!inputs.archetypeInputs || !inputs.projectArchetype) return null;
+    if (!inputs.archetypeInputs || !inputs.projectArchetype || !coreBenefitsEnabled) return null;
 
     const schema = ARCHETYPE_INPUT_MAP[inputs.projectArchetype];
     if (!schema) return null;
@@ -1872,20 +2373,28 @@ export function runCalculations(inputs) {
     // Quick NPV proxy: rebuild savings from overrides, run through sensitivityNPV
     function quickNPVProxy(overrides) {
       const ap = overrides.automationPotential ?? automationPotential;
-      const er = Math.max(0, Math.min(overrides.errorRate ?? errorRate, 1));
-      const rev = Math.max(0, overrides.revenueImpact || 0);
+      const directCaseSavings = caseDirectSavingsEnabled
+        ? Math.max(0, overrides.caseDirectSavings ?? directCaseSavingsGross)
+        : 0;
 
-      const lab = teamSize * avgSalary;
-      const rw = lab * er;
+      const lab = annualLaborCost;
       const displacedRaw = Math.round(teamSize * ap * adoptionRate);
       const maxDisplaced = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
-      const displaced = Math.min(displacedRaw, maxDisplaced);
-      const headGross = displaced * avgSalary;
-      const effGross = Math.max(0, lab * ap - headGross);
-      const errGross = rw * ap;
+      const displaced = usesExplicitRedundancyPlan
+        ? displacedFTEs
+        : Math.min(displacedRaw, maxDisplaced);
+      const headGross = usesExplicitRedundancyPlan
+        ? headcountSavingsGross
+        : displaced * avgSalary;
+      const effGross = usesExplicitRedundancyPlan
+        ? 0
+        : Math.max(0, lab * ap - headGross);
+      const errGross = annualReworkCost * (usesExplicitRedundancyPlan
+        ? totalEfficiencyGainPct
+        : ap);
       const toolGross = currentToolCosts * (assumptions.toolReplacementRate ?? 0.40);
-      const enhRA = (effGross + errGross + toolGross + rev) * riskMultiplier;
-      const headRA = headGross * riskMultiplier;
+      const enhRA = (effGross + errGross + toolGross + contractSavingsGross + directCaseSavings) * riskMultiplier;
+      const headRA = headGross;
 
       return sensitivityNPV(enhRA, headRA, ongoingCostsByYear, upfrontInvestment);
     }
@@ -1931,14 +2440,16 @@ export function runCalculations(inputs) {
         const formatted = inputDef.type === 'percent'
           ? Math.round(beValue * 1000) / 1000
           : Math.round(beValue);
-        const safeDiv = (a, b) => b !== 0 ? a / b : 0;
+        // Margin %: how far current is from break-even, relative to current value
+        const denom = Math.abs(currentVal) || Math.abs(beValue) || 1;
+        const marginPct = Math.round(((currentVal - beValue) / denom) * 100);
         results.push({
           key: inputDef.key,
           label: inputDef.label,
           type: inputDef.type,
           currentValue: currentVal,
           breakEvenValue: formatted,
-          marginPct: Math.round(safeDiv(currentVal - beValue, Math.abs(beValue) || 1) * 100),
+          marginPct,
           direction: baseNPV >= 0 ? 'floor' : 'target',
         });
       }
@@ -1956,7 +2467,7 @@ export function runCalculations(inputs) {
   // computes NPV at 5 levels around the current value.
   // =====================================================================
   function calculateVolumeSensitivity() {
-    if (!inputs.archetypeInputs || !inputs.projectArchetype) return null;
+    if (!inputs.archetypeInputs || !inputs.projectArchetype || !coreBenefitsEnabled) return null;
     const schema = ARCHETYPE_INPUT_MAP[inputs.projectArchetype];
     if (!schema) return null;
 
@@ -1978,24 +2489,44 @@ export function runCalculations(inputs) {
       const testInputs = { ...inputs.archetypeInputs, [volumeInput.key]: vol };
       const testOverrides = mapArchetypeInputs(inputs.projectArchetype, testInputs) || {};
 
-      // Quick NPV via proxy (same approach as break-even units)
+      // Quick NPV via proxy — now accounts for hoursPerWeek and ongoing cost scaling
       const ap = testOverrides.automationPotential ?? automationPotential;
-      const er = Math.max(0, Math.min(testOverrides.errorRate ?? errorRate, 1));
-      const rev = Math.max(0, testOverrides.revenueImpact || 0);
+      const directCaseSavings = caseDirectSavingsEnabled
+        ? Math.max(0, testOverrides.caseDirectSavings ?? directCaseSavingsGross)
+        : 0;
+      const hpw = testOverrides.caseWorkloadHoursPerWeek ?? hoursPerWeek;
+      const pa = hasCaseInputs
+        ? Math.min(1, hpw / Math.max(1, availableProcessHoursPerWeek))
+        : Math.min(hpw / 40, 1);
+      const headFeasible = pa >= 0.50;
 
-      const lab = teamSize * avgSalary;
-      const rw = lab * er;
-      const displacedRaw = Math.round(teamSize * ap * adoptionRate);
+      const lab = annualLaborCost;
+      const displacedRaw = headFeasible ? Math.round(teamSize * ap * adoptionRate) : 0;
       const maxDisplacedCalc = Math.floor(teamSize * MAX_HEADCOUNT_REDUCTION);
-      const displaced = Math.min(displacedRaw, maxDisplacedCalc);
-      const headGross = displaced * avgSalary;
-      const effGross = Math.max(0, lab * ap - headGross);
-      const errGross = rw * ap;
+      const displaced = usesExplicitRedundancyPlan
+        ? displacedFTEs
+        : Math.min(displacedRaw, maxDisplacedCalc);
+      const headGross = usesExplicitRedundancyPlan
+        ? headcountSavingsGross
+        : displaced * avgSalary;
+      const effGross = usesExplicitRedundancyPlan
+        ? 0
+        : Math.max(0, lab * ap - headGross);
+      const errGross = annualReworkCost * (usesExplicitRedundancyPlan
+        ? totalEfficiencyGainPct
+        : ap);
       const toolGross = currentToolCosts * (assumptions.toolReplacementRate ?? 0.40);
-      const enhRA = (effGross + errGross + toolGross + rev) * riskMultiplier;
-      const headRA = headGross * riskMultiplier;
+      const enhRA = (effGross + errGross + toolGross + contractSavingsGross + directCaseSavings) * riskMultiplier;
+      const headRA = headGross;
 
-      const npv = sensitivityNPV(enhRA, headRA, ongoingCostsByYear, upfrontInvestment);
+      // Scale ongoing costs proportionally to volume (API/LLM costs are volume-sensitive)
+      const volumeRatio = currentVal > 0 ? vol / currentVal : 1;
+      const volumeSensitiveFrac = 0.40; // ~40% of ongoing cost is volume-driven (API/tokens)
+      const adjustedOngoing = ongoingCostsByYear.map(c =>
+        c * (1 - volumeSensitiveFrac + volumeSensitiveFrac * volumeRatio)
+      );
+
+      const npv = sensitivityNPV(enhRA, headRA, adjustedOngoing, upfrontInvestment);
 
       return {
         volume: vol,
@@ -2016,6 +2547,45 @@ export function runCalculations(inputs) {
 
   const _volumeSensitivity = inputs._mcMode === 'fast' ? null : calculateVolumeSensitivity();
 
+  const workloadStatus = isRetiredCase
+    ? 'retired'
+    : workloadExceedsCapacity
+      ? 'blocked'
+      : workloadTooSmallForRedundancy
+        ? 'capacity-only'
+        : hasCaseInputs
+          ? 'ready'
+          : 'not-applicable';
+  const caseEconomics = {
+    hasSupportedArchetype,
+    hasCaseInputs,
+    isRetiredCase,
+    caseWorkloadHoursPerWeek,
+    availableProcessHoursPerWeek,
+    workloadRatio,
+    workloadStatus,
+    workloadBlocked: workloadExceedsCapacity || isRetiredCase,
+    workloadTooSmallForRedundancy,
+    eligibleAnnualHours,
+    eligibleCapacityFTEs: eligibleAnnualHours / 2080,
+    automationPotential,
+    requestedEfficiencyGainPct,
+    effectiveEfficiencyGainPct,
+    efficiencyCeilingPct: caseEfficiencyCeilingPct,
+    caseBuildComplexityMultiplier,
+    supportCostValidated,
+    supportCostCashRealizable,
+    candidateDirectSavingsGross: candidateCaseDirectSavings,
+    maximumDirectSavingsGross: maximumCaseDirectSavings,
+    directSavingsGross: directCaseSavingsGross,
+    directSavingsEnabled: caseDirectSavingsEnabled,
+    directSavingsLabel: 'Verified customer support cost avoidance',
+    riskAvoidanceContext: caseRiskAvoidance,
+    riskAvoidanceIncludedInCoreDcf: false,
+    bumperMessages: caseBumpers,
+    inputCorrections: archetypeInputSanitization.corrections,
+  };
+
   // =====================================================================
   // RETURN
   // =====================================================================
@@ -2025,8 +2595,28 @@ export function runCalculations(inputs) {
       annualLaborCost,
       weeklyHours,
       annualHours,
+      hoursPerWeek,
       annualReworkCost,
+      annualContractSpend,
       totalCurrentCost,
+      workforceMix,
+      directEmployeeCount: workforceMix.directEmployeeCount,
+      employeeFullyBurdenedCost: workforceMix.employeeFullyBurdenedCost,
+      offshoreContractorCount: workforceMix.offshoreContractorCount,
+      contractorFullyBurdenedCost: workforceMix.contractorFullyBurdenedCost,
+      totalHeadcount: teamSize,
+      blendedFullyBurdenedCost: avgSalary,
+      weightedHourlyCost: hourlyRate,
+      totalEfficiencyGainPct,
+      freedUpAnnualHours: workforceTransition.freedUpAnnualHours,
+      freedCapacityFTEs: workforceTransition.freedCapacityFTEs,
+      annualCapacityOnlyValue: capacityOnlyEfficiencyValue,
+      annualErrorCount: rework.annualErrorCount,
+      reworkFraction: rework.reworkFraction,
+      reworkCostPerItem: rework.reworkCostPerItem,
+      costPerProcess: processCost.costPerProcess,
+      monthlyProcessCost: processCost.monthlyProcessCost,
+      annualProcessCost: processCost.annualProcessCost,
     },
     benchmarks: {
       automationPotential,
@@ -2040,6 +2630,12 @@ export function runCalculations(inputs) {
       adjustedImplementationCost: realisticImplCost,
     },
     aiCostModel,
+    workforceTransition,
+    deploymentPlan: aiCostModel.deploymentPlan,
+    contractExit,
+    rework,
+    processCost,
+    caseEconomics,
     oneTimeCosts,
     hiddenCosts,
     upfrontInvestment,

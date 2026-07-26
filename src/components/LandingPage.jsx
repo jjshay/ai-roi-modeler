@@ -25,16 +25,17 @@ export default function LandingPage({ onStart }) {
           transition={{ duration: 0.6 }}
           className="max-w-2xl w-full text-center"
         >
+          <p className="text-gray-400 text-sm uppercase tracking-widest font-medium mb-4">Free AI Investment Analysis</p>
           <h1 className="font-heading text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight mb-6">
-            The AI ROI Calculator
+            Estimate the ROI of Your
             <br />
-            <span className="text-gold">That Doesn't Lie</span>
+            <span className="text-gold">AI Project in 2 Minutes</span>
           </h1>
 
           <p className="text-lg md:text-xl text-gray-300 mb-10 max-w-xl mx-auto leading-relaxed">
-            Built by an M&A executive who's closed $4B+ in deals.
+            Get a risk-adjusted, 5-year financial model with break-even analysis and a board-ready PDF.
             <br className="hidden md:block" />
-            Not by a vendor trying to sell you something.
+            Built by an M&A executive, not a vendor.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-10">

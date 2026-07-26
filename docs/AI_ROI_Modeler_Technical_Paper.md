@@ -13,7 +13,7 @@
 1. [Executive Summary](#1-executive-summary)
 2. [Problem Statement](#2-problem-statement)
 3. [Solution Architecture](#3-solution-architecture)
-4. [The 5 Project Archetypes](#4-the-5-project-archetypes)
+4. [The 4 Project Archetypes](#4-the-4-project-archetypes)
 5. [Calculation Engine -- Core Formulas](#5-calculation-engine----core-formulas)
 6. [Monte Carlo Simulation Engine](#6-monte-carlo-simulation-engine) *(V2)*
 7. [Enhanced Competitive Erosion](#7-enhanced-competitive-erosion) *(V2)*
@@ -48,7 +48,7 @@ The system generates two downloadable artifacts: a presentation-ready Excel work
 - **Browser-side computation.** All calculations run in the client. The server stores and retrieves saved models but performs no computation. This keeps the architecture simple and eliminates server-side scaling concerns for the calculation engine.
 - **Formula-driven Excel.** The Excel model uses real Excel formulas rather than static values. Every calculated cell traces back to an input cell on the Inputs tab, making the model fully auditable.
 - **Risk-adjusted everything.** Every savings projection is multiplied by a blended risk factor derived from organizational readiness and industry success rates. The tool is designed to be an "honest broker" -- it consistently discounts optimistic projections.
-- **5 strategic archetypes.** The original system used 8 flat "process types." We consolidated these into 5 project archetypes that map to how organizations actually think about AI investments. Backward compatibility with old process-type data is preserved.
+- **4 strategic archetypes.** The original system used 8 flat "process types." We consolidated these into 4 project archetypes that map to how organizations actually think about AI investments. Backward compatibility with old process-type data is preserved.
 - **DCF over simpler models.** We chose discounted cash flow analysis over simpler payback-only models because DCF accounts for the time value of money, which matters over a 5-year horizon.
 - **Monte Carlo with fast mode.** The Monte Carlo engine runs 500 iterations of the full DCF engine by setting a `_mcMode: 'fast'` flag that causes the calculation engine to return after scenario results, skipping expensive post-processing (sensitivity, peer comparison, gates). This reduces per-iteration time from ~10ms to ~1ms, keeping total simulation time under 500ms.
 - **Revenue-based competitive erosion.** When the user provides annual revenue, competitive erosion uses industry-specific margin compression rates and AI adoption rates rather than the simpler cost-based penalty. This produces more realistic inaction cost projections for revenue-generating organizations.
@@ -212,7 +212,7 @@ ai-roi-modeler/
       calculations.js                # Core calculation engine (~1,500 lines)
       benchmarks.js                  # All benchmark constants + sources (~930 lines)
       monteCarlo.js                  # Monte Carlo simulation engine (V2)
-      archetypes.js                  # 5 project archetypes + defaults (~166 lines)
+      archetypes.js                  # 4 project archetypes + defaults (~166 lines)
       recommendations.js             # Verdict engine (STRONG/MODERATE/CAUTIOUS/WEAK)
       __tests__/
         calculations.test.js         # 147 tests on core calculations
@@ -221,17 +221,14 @@ ai-roi-modeler/
         monteCarlo.test.js           # 11 tests on Monte Carlo engine (V2)
         testFixtures.js              # Standard input profiles for testing
     components/
-      StepWizard.jsx                 # 6-step wizard controller
+        StepWizard.jsx                 # 2-stage wizard controller
       ProgressBar.jsx                # Visual progress indicator
       LandingPage.jsx                # Marketing landing page
       AnimatedCounter.jsx            # Number animation component
       steps/
-        Step1_CompanyContext.jsx      # Industry, size, location, role
-        Step2_RiskReadiness.jsx       # Change readiness, data readiness, sponsor
-        Step3_ProcessDetails.jsx      # Archetype, team size, hours, error rate
-        Step4_ReviewAssumptions.jsx   # Editable archetype defaults
-        Step4_CurrentCosts.jsx        # Salary, tool costs, vendor info
-        Step5_AIInvestment.jsx        # Budget, timeline, ongoing cost
+        Step1_CompanyContext.jsx      # Industry, size, readiness, sponsor, transition plan
+        Step3_ProcessDetails.jsx      # Archetype, case drivers, workforce mix, contracts
+        CostTransitionPlan.jsx        # Efficiency, deployment pace, rework, AI cost buckets
       inputs/                        # Reusable input components
         CardSelector.jsx
         CurrencyInput.jsx
@@ -250,7 +247,6 @@ ai-roi-modeler/
         ScalabilityPremium.jsx       # 2x/3x scaling comparison
         ConfidenceIntervals.jsx      # NPV/ROIC/payback ranges
         PeerComparison.jsx           # Industry peer benchmarking
-        RevenueEnablement.jsx        # Revenue uplift (informational)
         QualitativeBenefits.jsx      # Non-quantified benefits
         BottomLine.jsx               # Final recommendation
     excel/
@@ -291,11 +287,11 @@ The data flow follows a unidirectional pattern:
 
 ---
 
-## 4. The 5 Project Archetypes
+## 4. The 4 Project Archetypes
 
 This section documents the archetype system that replaced the original flat process-type selector, explains the design rationale, and details how default assumptions are derived.
 
-### Why We Moved from 8 Process Types to 5 Archetypes
+### Why We Moved from 8 Process Types to 4 Archetypes
 
 The original system presented users with 8 process types:
 
@@ -310,17 +306,16 @@ The original system presented users with 8 process types:
 
 Usability testing revealed two problems. First, users frequently could not map their AI initiative to a single process type. A project to "automate our back-office operations" might span Document Processing, Workflow Automation, and Data Analysis. Second, the process types were implementation-oriented (describing *what* AI does) rather than strategy-oriented (describing *why* the organization is investing).
 
-The 5 archetypes reframe the question around business purpose:
+The 4 archetypes reframe the question around business purpose:
 
 | Archetype | ID | Tags | Source Process Types |
 |-----------|----|------|---------------------|
 | Internal Process Automation | `internal-process-automation` | Internal, Operations, Data | Workflow Automation, Document Processing |
-| Customer-Facing AI | `customer-facing-ai` | External, Revenue | Customer Communication, Content Creation |
-| Data & Analytics Automation | `data-analytics-automation` | Internal, Data | Data Analysis & Reporting, Research & Intelligence |
-| Revenue & Growth AI | `revenue-growth-ai` | External, Revenue | Customer Communication, Content Creation, Research & Intelligence |
-| Risk & Compliance AI | `risk-compliance-ai` | Internal, Operations, Data | Quality & Compliance, Document Processing |
+| Customer Service | `customer-facing-ai` | External, Customer Service | Customer Communication |
+| Data, Analytics & FP&A | `data-analytics-automation` | Internal, Data | Data Analysis & Reporting, Research & Intelligence, Document Processing |
+| Risk, Compliance & Legal AI | `risk-compliance-legal-ai` | Internal, Operations, Data | Quality & Compliance, Document Processing, Research & Intelligence |
 
-Each archetype maps to 2-3 source process types. The default assumptions for an archetype are computed by averaging the benchmark values across its source process types for the selected industry.
+Each archetype maps to one or more source process types. The baseline defaults are computed from those source process types for the selected industry; the case-specific operating inputs then drive the workload and calculation path.
 
 ### How Defaults Are Derived
 
@@ -343,8 +338,9 @@ function buildDefaults(archetype, industry) {
     avgFromProcessTypes(TOOL_REPLACEMENT_RATE, pts, 0.40).toFixed(2)
   );
   const adoptionRate = 0.70;
-  const revenueEligible = ['customer-facing-ai', 'revenue-growth-ai']
-    .includes(archetype.id);
+  // Reserved for historical saved-model compatibility. Commercial revenue uplift
+  // is not a selectable use case or a core DCF value stream.
+  const revenueEligible = false;
 
   return {
     automationPotential,
@@ -387,7 +383,7 @@ Every archetype generates an `assumptions` object with these fields:
 | `apiCostPer1kRequests` | $ | Cost per 1,000 API inference calls |
 | `requestsPerPersonHour` | int | Expected AI API requests per person per hour |
 | `toolReplacementRate` | 0-1 | Fraction of current tool costs replaced by AI |
-| `revenueEligible` | bool | Whether this archetype can generate revenue uplift |
+| `revenueEligible` | bool | Legacy compatibility flag; it is false for supported cases and cannot activate commercial revenue uplift |
 
 The Risk & Compliance archetype adds one additional field:
 
@@ -395,7 +391,7 @@ The Risk & Compliance archetype adds one additional field:
 |-------|------|-------------|
 | `errorReductionPotential` | 0-1 | Set to `min(automationPotential + 0.10, 0.75)` |
 
-These defaults are pre-computed at module load time for all 50 combinations (5 archetypes x 10 industries) and stored in the `ARCHETYPE_DEFAULTS` lookup table. They are presented to the user on the "Review Assumptions" step as editable values.
+These defaults are pre-computed at module load time for all 40 combinations (4 archetypes x 10 industries) and stored in the `ARCHETYPE_DEFAULTS` lookup table. The web and Excel flows then show each case as Inputs → Assumptions → Calculation → Footnotes.
 
 ### Backward Compatibility
 
@@ -563,9 +559,9 @@ The 75% cap (`MAX_HEADCOUNT_REDUCTION = 0.75`) ensures the model never projects 
 
 ### 5.4 Implementation Cost
 
-Implementation cost is built bottom-up from staffing requirements, then reconciled with the user's stated budget.
+Implementation cost is built from the delivery staffing envelope, the implementation timeline, and the workforce rate the user entered for the affected process. It is then reconciled with the user's stated budget.
 
-**AI team sizing:**
+**Delivery staffing envelope:**
 
 ```javascript
 const scopeMinEngineers = Math.max(1, Math.ceil(teamSize / 12));
@@ -596,19 +592,38 @@ const adjustedTimeline = Math.ceil(
 
 Low data readiness extends timelines by up to 40%. Lack of executive sponsor adds 25%. Large enterprise size multiplier is 1.6x.
 
+**Entered workforce mix and deployment rate:**
+
+The model does not collect an implementation-team location and does not look up a geographic AI-engineer salary. Instead, the user enters the current process workforce as direct employees and offshore contractors, each with a fully burdened annual cost. The model calculates the weighted blended cost and uses it as the transparent delivery-planning rate. Older saved models can use their entered aggregate workforce cost as a compatibility fallback.
+
+```javascript
+const workforceMix = calculateWorkforceMix(inputs);
+const deploymentFullyBurdenedRate = workforceMix.hasWorkforceMix
+  ? workforceMix.blendedFullyBurdenedCost
+  : inputs.avgSalary; // legacy saved-model fallback only
+```
+
+This rate is a planning input for deployment labor, not a claim that the delivery team has the same composition as the process workforce. It is visible to the user and can be replaced with HR, finance, or vendor data.
+
 **Cost components:**
 
 ```
-implEngineeringCost = engineers x aiSalary x timelineYears
-implPMCost          = PMs x (aiSalary x 0.85) x timelineYears
+baselineDeploymentLabor = baseline delivery heads x deployment rate x timelineYears
+pacedDeploymentLabor    = baseline deployment labor x delivery-pace cost multiplier
+implEngineeringCost     = paced deployment labor x engineering staffing share
+implPMCost              = paced deployment labor x PM staffing share
 implInfraCost       = (engineering + PM) x 0.12
 implTrainingCost    = (engineering + PM) x 0.08
 computedImplCost    = engineering + PM + infra + training
 ```
 
 ```javascript
-const implEngineeringCost = aiImplEngineers * aiSalary * implTimelineYears;
-const implPMCost = aiImplPMs * (aiSalary * 0.85) * implTimelineYears;
+const implementationStaffingTotal = Math.max(1, aiImplEngineers + aiImplPMs);
+const pacedDeploymentLaborCost = deploymentPlan.estimatedDeploymentLaborCost;
+const implEngineeringCost = pacedDeploymentLaborCost
+  * (aiImplEngineers / implementationStaffingTotal);
+const implPMCost = pacedDeploymentLaborCost
+  * (aiImplPMs / implementationStaffingTotal);
 const implInfraCost = (implEngineeringCost + implPMCost) * 0.12;
 const implTrainingCost = (implEngineeringCost + implPMCost) * 0.08;
 const computedImplCost = implEngineeringCost + implPMCost
@@ -971,13 +986,9 @@ Beyond the core DCF (which captures cost savings), the calculation engine comput
 ```javascript
 const capacityHoursFreed = annualHours * automationPotential * riskMultiplier;
 const capacityFTEEquivalent = capacityHoursFreed / 2080;
-const revenueAcceleration = annualRevenue > 0 && cycleTimeReductionMonths > 0
-  ? (annualRevenue * contributionMargin
-     * cycleTimeReductionMonths / 12) * riskMultiplier
-  : 0;
 ```
 
-Capacity creation includes freed hours (valued at hourly rate), FTE equivalents, and revenue acceleration from reduced cycle times. Users can optionally include this in the NPV calculation, but it is excluded by default to maintain conservatism.
+Capacity creation includes freed hours (valued at hourly rate) and FTE equivalents. It is shown as operating-planning context and excluded from the core DCF unless a separately evidenced cash action is selected.
 
 **Path C: Risk Reduction (informational by default).** This pathway quantifies the value of reduced regulatory/compliance risk:
 
@@ -1210,7 +1221,7 @@ Source: BLS JOLTS turnover data 2025, McKinsey workforce restructuring data 2025
 
 ## 9. User Interface & Wizard Flow
 
-This section describes the 6-step wizard that collects user inputs, the validation logic, and the state management approach.
+This section describes the two-stage wizard that collects user inputs, the validation logic, and the state management approach.
 
 ### State Management
 
@@ -1218,53 +1229,50 @@ All form data is stored in a single `useState` hook in `App.jsx`:
 
 ```javascript
 const DEFAULT_FORM_DATA = {
-  // Step 1: Company Context
+  // Company context
   industry: '',
   companySize: '',
   role: '',
-  teamLocation: '',
-  // Step 2: Risk & Readiness
   changeReadiness: 3,
   dataReadiness: 3,
-  execSponsor: true,
-  // Step 3: Project Archetype & Team Details
+  execSponsor: null,
+  // Project economics and workforce doing the process
   processType: '',
   projectArchetype: '',
   assumptions: {},
-  teamSize: 10,
-  hoursPerWeek: 20,
-  errorRate: 0.10,
-  // Step 4: Current Costs
-  avgSalary: 100000,
-  currentToolCosts: 0,
-  vendorsReplaced: 0,
-  vendorTerminationCost: 0,
-  // Step 5: AI Investment
+  archetypeInputs: {},
+  directEmployeeCount: 10,
+  employeeFullyBurdenedCost: 125000,
+  offshoreContractorCount: 0,
+  contractorFullyBurdenedCost: 65000,
+  hoursPerWeek: 40,
+  existingContractCount: 0,
+  annualCostPerContract: 0,
+  contractNoticePeriodMonths: 3,
+  // Transition and deployment plan
+  totalEfficiencyGainPct: 10,
+  employeesToRetrain: 0,
+  employeesToMakeRedundant: 0,
+  deliveryPace: 'standard',
+  errorCountEmployees: 0,
+  errorCountContracts: 0,
+  fractionNeedingRework: 0.5,
+  estimatedReworkCostPerItem: 0,
   implementationBudget: null,
   expectedTimeline: null,
   ongoingAnnualCost: null,
-  // Optional
-  companyState: 'Other / Not Sure',
 };
 ```
 
 The `formData` object and its setter are passed to `StepWizard` as props. Each step component receives `formData` and an `updateField` callback.
 
-### The 6-Step Wizard
+### The Two-Stage Wizard
 
-The wizard is controlled by `StepWizard.jsx`, which manages `currentStep` state and renders the appropriate step component with slide animation (Framer Motion):
+The wizard is controlled by `StepWizard.jsx`, which manages `currentStep` state and renders the appropriate step component with slide animation (Framer Motion). The workflow intentionally starts with the operating case rather than an implementation-team staffing profile.
 
-**Step 1: Company Context.** Collects industry (10 options), company size (5 options), user's role (free text), and team location (8 options). All four fields are required.
+**Step 1: Project, operating drivers, and workforce mix.** Collects the supported project archetype, its case-specific operating drivers, direct employee count and fully burdened annual cost, offshore contractor count and fully burdened annual cost, hours per person on the process, and existing contracts. The model calculates a blended workforce cost, total ongoing headcount cost, workload coverage, and the one-time contract exit cost. It does not ask where an AI implementation team is located.
 
-**Step 2: Risk & Readiness.** Collects change readiness (1-5 star rating), data readiness (1-5 star rating), and executive sponsor (yes/no toggle). Change and data readiness are required. This step was moved earlier in the flow (from Step 4 in the original design) because readiness values drive the auto-calculated budget and timeline suggestions shown in later steps.
-
-**Step 3: Project Archetype & Team Details.** Collects project archetype (5 card options), team size (numeric), hours per week (numeric), and error/rework rate (slider, 0-50%). When the user selects an archetype, the `assumptions` object is populated with defaults for their industry. All four fields are required.
-
-**Step 4: Review Assumptions.** Displays the computed defaults from the archetype + industry combination. The user can override any value: automation potential, API cost, requests per hour, tool replacement rate, and revenue eligibility. No fields are required (all have defaults).
-
-**Step 5: Current Costs.** Collects average fully-loaded salary (currency input), current annual tool costs (currency input), number of vendors being replaced, and vendor termination costs. Only salary is required.
-
-**Step 6: AI Investment.** Collects implementation budget, expected timeline (months), and ongoing annual cost. All three have auto-suggested defaults computed from the values entered in earlier steps. None are required (null values trigger auto-calculation in the engine).
+**Step 2: Company context and transition plan.** Collects industry, company size, change readiness, data readiness, and executive sponsorship. It then shows the defensible efficiency ceiling, freed capacity, delivery pace, workforce transition choices, measured rework inputs, and the build/access/consumption/run AI cost view. Efficiency savings are blocked when the case workload does not reconcile to the workforce capacity entered in Step 1.
 
 ### Form Validation
 
@@ -1272,16 +1280,12 @@ Each step has a set of required fields defined in the `REQUIRED_FIELDS` object:
 
 ```javascript
 const REQUIRED_FIELDS = {
-  1: ['industry', 'companySize', 'role', 'teamLocation'],
-  2: ['changeReadiness', 'dataReadiness'],
-  3: ['projectArchetype', 'teamSize', 'hoursPerWeek', 'errorRate'],
-  4: [], // assumptions have defaults
-  5: ['avgSalary'],
-  6: [], // AI investment has auto-suggested defaults
+  1: ['projectArchetype'],
+  2: ['industry', 'companySize', 'changeReadiness', 'dataReadiness', 'execSponsor'],
 };
 ```
 
-The "Next" button is disabled until all required fields for the current step have non-empty, non-zero values. Enter key advances to the next step when validation passes.
+The action button is disabled until required fields and the local flow are complete. The project flow also requires a complete workforce mix and refuses to advance when a workload/capacity guardrail has blocked savings.
 
 ### Screen State Machine
 
@@ -1341,7 +1345,7 @@ Every cell in the workbook is either an input (blue), a formula (green), or a ke
 
 Contains all user-editable values organized into sections: Company Context, Risk & Readiness, Project Details, Current Costs, and AI Investment. Key features:
 
-- Dropdown validation lists for industry, company size, process type, and location (sourced from the Lookups tab)
+- Input validation for industry, company size, case-specific operating drivers, workforce mix, contracts, and usage meters
 - Currency-formatted cells for dollar amounts
 - Percentage-formatted cells for rates
 - Star rating values (1-5) for readiness scores
@@ -1409,10 +1413,10 @@ Contains four sections:
 Contains all benchmark reference tables used by VLOOKUP formulas throughout the workbook:
 
 - Automation potential matrix (10 industries x 8 process types)
-- Industry benchmarks (success rates, competitive penalties, revenue uplift)
+- Industry benchmarks (success rates, competitive penalties, and cost-of-inaction context)
 - Readiness multipliers
 - Company size master table (11 columns of size-specific parameters)
-- AI team salary by location
+- Entered workforce mix and the calculated blended deployment-planning rate (no geographic salary lookup)
 - Process type parameters (API cost, requests/hour, tool replacement rate)
 - State R&D credit rates
 - Model constants
@@ -1440,7 +1444,7 @@ The original Excel model had 11 tabs. The redesign reduced this to 6 by eliminat
 - **Guide tab:** Replaced by the color legend and inline notes
 - **Dashboard tab:** Merged into Summary
 - **Opportunity Cost tab:** Removed from Excel (still shown in web UI and PDF)
-- **Revenue & Scale tab:** Revenue enablement is informational only and not in the DCF, so it was removed to avoid implying it affects NPV
+- **Commercial-growth tab:** Legacy top-line enablement was informational only and not in the DCF, so it was removed to avoid implying it affects NPV
 - **Sources tab:** Source citations are in the PDF report and Lookups tab notes
 
 The goal was to produce a workbook that a CFO could review in a single sitting without navigating 11 tabs.
@@ -1730,7 +1734,7 @@ The model cites 31 research sources, all documented in the `BENCHMARK_SOURCES` a
 | 15 | SHRM 2025 | Total separation cost (1.0x-1.5x annual salary) |
 | 16 | Forrester 2024 | Tool replacement rates (40-65%), legacy maintenance creep |
 | 17 | BLS 2025 | Wage inflation (4.0% annually) |
-| 18 | BCG 2025 | Revenue uplift (5-15%), competitive penalty |
+| 18 | BCG 2025 | Competitive penalty / late-adopter margin erosion; legacy commercial-context benchmark |
 | 20 | a16z 2024 | AI cost curves (sub-linear scaling), value realization phases |
 | 22 | Forrester 2025 | Vendor lock-in costs (30-60% of implementation) |
 | 26 | Damodaran 2025 | WACC by company lifecycle (8-18%) |
@@ -1768,20 +1772,16 @@ Values range from 0.20 (Government / Content Creation) to 0.65 (Technology / Wor
 
 Source: Damodaran 2025 -- WACC ranges from 8% for large-cap mature companies to 18%+ for early-stage startups.
 
-**AI Team Salary by Location:**
+**Entered Workforce Mix & Deployment Rate:**
 
-| Location | Fully-Loaded Annual Cost |
-|----------|------------------------|
-| US - Major Tech Hub | $215,000 |
-| US - Other | $155,000 |
-| UK / Western Europe | $150,000 |
-| Canada / Australia | $140,000 |
-| Remote / Distributed | $145,000 |
-| Eastern Europe | $80,000 |
-| Latin America | $55,000 |
-| India / South Asia | $40,000 |
+| Input | Entered By | How the Model Uses It |
+|-------|------------|-----------------------|
+| Direct employees | User | Count and fully burdened annual cost establish the internal labor baseline. |
+| Offshore contractors | User | Count and fully burdened annual cost are added to the workforce baseline. |
+| Blended fully burdened cost | Model | Weighted average of the two entered costs; used as the transparent deployment-planning rate. |
+| Hours per person on the process | User | Reconciles workforce capacity to the workload implied by the selected case. |
 
-Includes a 1.23-1.60x multiplier over base salary for benefits, taxes, and overhead.
+There is no AI-team-location question and no geographic salary table in the active model. The deployment rate is a user-visible planning proxy derived from the entered mix; it should be replaced with HR, finance, or vendor data when available.
 
 **Return Ceilings:**
 
@@ -1802,7 +1802,7 @@ The original automation potential matrix used values ranging from 30% to 75%. Th
 
 **Separation cost multipliers** are derived from SHRM's 2025 total cost of separation analysis. The multiplier represents total separation cost as a fraction of annual salary, inclusive of severance pay (55%), benefits continuation / COBRA (15%), outplacement services (12%), administrative processing (10%), and legal review (8%). The multiplier ranges from 0.70x for startups (less formal packages) to 1.50x for large enterprises (more generous packages, stricter legal requirements). Bloomberg's 2024 analysis of Russell 3,000 companies corroborates average severance of approximately $40,000 per employee with a 72% increase in severance generosity from 2020 to 2025.
 
-**AI team salaries** represent fully-loaded annual costs (salary plus benefits, payroll taxes, and overhead). The loading factor ranges from 1.23x (US tech hubs) to 1.60x (India/South Asia). These are based on Glassdoor 2026 salary data for AI/ML engineers, Alcor BPO 2025 for offshore locations, and cross-referenced with Motion Recruitment 2026 and Qubit Labs 2026 for European and Latin American markets.
+**Workforce mix and deployment rate** are user-entered planning inputs rather than a benchmark. The model calculates the blended fully burdened rate from direct employees and offshore contractors, then uses that visible rate for delivery planning. This removes the unsupported assumption that a project should be priced from an inferred implementation-team location.
 
 **API cost benchmarks** are based on 2025-2026 enterprise pricing for major LLM providers: GPT-4o ($5/$15 per 1M tokens), Claude Opus 4.5 ($5/$25 per 1M tokens), and Gemini 2.5 Pro ($1.25/$10 per 1M tokens). Costs are converted to per-1,000-requests assuming typical token counts per request for each process type (e.g., document processing averages 4,000 tokens per request, customer communication averages 1,000 tokens).
 
@@ -1812,7 +1812,7 @@ The original automation potential matrix used values ranging from 30% to 75%. Th
 
 - All benchmark values are static snapshots. They are not dynamically updated from live data sources. As AI capabilities rapidly evolve, these values will become outdated.
 - The automation potential matrix uses a single value per industry-process combination. In reality, automation potential varies significantly within an industry depending on the specific organization's data quality, process maturity, and use case complexity.
-- Salary benchmarks represent fully-loaded costs, but the loading factor varies by geography and benefit structure. The model uses approximate multipliers.
+- The entered workforce mix is a planning proxy for deployment labor, not evidence of the actual delivery team's compensation. Validate the rate with HR, finance, or vendor data for an investment decision.
 - The 75% headcount reduction cap is a policy decision, not an empirical finding. Some processes may be fully automatable; others may resist automation beyond 30%. The cap prevents extreme projections but may under- or over-state reality for specific cases.
 
 ---
@@ -1848,9 +1848,9 @@ Six standard input profiles are defined in `testFixtures.js`:
 
 **GOVERNMENT_INPUTS:** Large enterprise government (50 people, $75K salary) with the worst-case readiness profile (changeReadiness=1, dataReadiness=1, no exec sponsor). Tests the most conservative scenario the model can produce.
 
-**NON_US_INPUTS:** UK/Western Europe team. Tests that R&D tax credits are correctly excluded for non-US locations.
+**NON_US_INPUTS:** No qualifying company state supplied. Tests that the optional R&D-credit illustration is correctly excluded when a qualifying state is not selected.
 
-**REVENUE_ELIGIBLE_INPUTS:** Customer Communication process type with $10M annual revenue. Tests revenue enablement eligibility logic.
+**REVENUE_ELIGIBLE_INPUTS:** Legacy Customer Communication profile with $10M annual revenue. Tests that historical commercial fields remain blocked from the retired revenue pathway.
 
 ### Key Test Categories
 
@@ -1864,11 +1864,11 @@ Six standard input profiles are defined in `testFixtures.js`:
 
 **Probability-Weighted Expected Value (3 tests).** Verifies expectedNPV and expectedROIC match the weighted average of scenarios, and that weights sum to 1.0.
 
-**AI Cost Model (5 tests).** Verifies location-specific salary, that realistic implementation cost >= user budget, that ongoing cost >= user ongoing cost, that implementation team respects company-size caps, and that retraining/tech debt/insurance are included.
+**AI Cost Model (5 tests).** Verifies the entered workforce mix drives the deployment rate, that realistic implementation cost >= user budget, that ongoing cost >= user ongoing cost, that delivery staffing respects company-size caps, and that retraining/tech debt/insurance are included.
 
 **Sensitivity Analysis (3 tests).** Verifies 3 basic sensitivity scenarios exist, 6 extended sensitivity rows, and that each row has npvLow and npvHigh.
 
-**Archetype & Assumptions (10 tests).** Verifies that assumptions.automationPotential overrides benchmark lookup, that assumptions.toolReplacementRate overrides, that revenueEligible controls revenue pathway, that backward compatibility works (old processType-only inputs with no assumptions), and that all 5 archetypes produce valid results. A representative test:
+**Archetype & Assumptions (10 tests).** Verifies that assumptions.automationPotential overrides benchmark lookup, that assumptions.toolReplacementRate overrides, that customer-economics context remains separate from core cash flow, that backward compatibility works (old processType-only inputs with no assumptions), and that all 4 archetypes produce valid results. A representative test:
 
 ```javascript
 it('backward compat: old processType-only inputs still work', () => {
@@ -1882,7 +1882,6 @@ it('backward compat: old processType-only inputs still work', () => {
     dataReadiness: 3, execSponsor: true,
     expectedTimeline: 6, implementationBudget: 200000,
     ongoingAnnualCost: 50000,
-    teamLocation: 'US - Major Tech Hub',
     companyState: 'California',
   };
   const r = runCalculations(oldStyle);
@@ -1907,7 +1906,7 @@ This test is critical because it proves that models saved before the archetype m
 - Cost efficiency pathway ties to risk-adjusted savings
 - Capacity creation pathway computes freed hours correctly (`annualHours x automationPotential x riskMultiplier`)
 - Risk reduction pathway uses industry-specific regulatory event benchmarks
-- Revenue acceleration is zero when no annual revenue is provided, positive when it is
+- Retired commercial-revenue fields remain excluded regardless of annual revenue
 - costOnlyAnnual exactly matches the cost efficiency pathway's risk-adjusted value
 
 **Scenario Ordering Invariants (4 tests).** Verifies mathematical ordering that must always hold:
@@ -1962,7 +1961,7 @@ This section provides an honest assessment of the system's capabilities and limi
 
 **Risk-adjusts all projections.** Every savings figure is multiplied by a blended risk factor. The tool never presents an unadjusted "best case" as the primary output. The base case already includes risk discounting.
 
-**Handles 10 industries, 5 company sizes, 5 archetypes.** The combination of 10 industries, 5 company sizes, and 5 project archetypes provides 250 distinct default profiles, each with industry-specific automation potential, success rates, cost parameters, and peer benchmarks.
+**Handles 10 industries, 5 company sizes, 4 archetypes.** The combination of 10 industries, 5 company sizes, and 4 project archetypes provides 200 distinct default profiles, each with industry-specific automation potential, success rates, cost parameters, and peer benchmarks.
 
 **Generates live Excel models that recalculate when inputs change.** Unlike PDF reports or static spreadsheets, the Excel model uses real formulas. Users can change any input (team size, salary, automation potential, etc.) and see all downstream calculations update immediately.
 
@@ -1992,14 +1991,7 @@ This section provides an honest assessment of the system's capabilities and limi
 
 **Does NOT guarantee results.** All projections are estimates based on industry benchmarks and user-provided inputs. Actual results will vary. The disclaimer on every PDF page states: "For Directional Guidance Only -- Not Financial or Investment Advice."
 
-**Revenue enablement is informational only.** Revenue uplift estimates (time to market, customer experience, new capabilities) are shown but deliberately excluded from NPV and ROIC to maintain conservative projections. Including speculative revenue in the DCF would undermine credibility with finance teams. The code explicitly documents this decision:
-
-```javascript
-// REVENUE ENABLEMENT (informational - NOT in NPV/ROIC to stay conservative)
-// Only computed when user provides annualRevenue - no speculative proxies
-```
-
-Revenue enablement is only calculated when (a) the archetype is customer-facing or revenue-growth, and (b) the user has provided their annual revenue. The model will not speculate about revenue when no revenue figure is provided. Even when calculated, revenue uplift is further discounted by a 50% "revenue risk discount" on top of the normal risk adjustment, reflecting the highly speculative nature of revenue projections from AI investments.
+**Does NOT model revenue-generating AI as a selectable case or include speculative revenue uplift in NPV and ROIC.** The retired Revenue & Growth AI category cannot be selected or reactivated by legacy saved inputs. Annual company revenue may still inform the separate cost-of-inaction context, but it is not treated as an AI benefit in the core DCF.
 
 **Does NOT model custom AI architectures or specific vendor pricing.** API costs use blended averages across major providers (GPT-4o, Claude, Gemini). Actual costs depend on model selection, token volumes, and negotiated enterprise pricing.
 
@@ -2054,15 +2046,15 @@ Discounted cash flow analysis was chosen over simpler metrics (simple ROI, payba
 
 The trade-off: DCF requires more inputs (discount rate, timeline, cost escalation assumptions) and is harder for non-financial users to understand. The model mitigates this by auto-calculating most of these parameters and providing executive-friendly summary metrics alongside the DCF details.
 
-### Why 5 Archetypes (Not 3 or 7)
+### Why 4 Archetypes (Not 3 or 7)
 
-Five archetypes balance specificity with usability:
+Four archetypes balance specificity with usability:
 
 - **3 archetypes** (e.g., "Internal," "External," "Risk") would be too broad. The default assumptions would be too generic to be useful.
 - **7+ archetypes** would reintroduce the usability problem we observed with 8 process types: user confusion about which category applies.
-- **5 archetypes** cover the major strategic categories (operations, customer, analytics, revenue, compliance) without forcing users to over-specify.
+- **4 archetypes** cover the major strategic categories (operations, customer service, analytics, and risk/compliance) without forcing users to over-specify.
 
-Each archetype maps to 2-3 process types, providing enough specificity for meaningful benchmark defaults while remaining comprehensible to non-technical users.
+Each archetype maps to one or more process types, providing enough specificity for meaningful starting defaults while remaining comprehensible to non-technical users.
 
 ### Why Risk-Adjust Everything (The "Honest Broker" Approach)
 

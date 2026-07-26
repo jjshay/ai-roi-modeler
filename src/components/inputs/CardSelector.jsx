@@ -74,10 +74,31 @@ export default function CardSelector({
         })}
       </div>
 
-      {hoveredOption?.example && (
-        <p className="rounded-lg bg-navy/5 px-3 py-2 text-xs italic text-navy/70 transition-all" aria-live="polite">
-          {hoveredOption.example}
-        </p>
+      {/* Hover tooltip: shows description, example, and tags */}
+      {hoveredOption && (
+        <div className="rounded-xl bg-navy/5 border border-navy/10 px-4 py-3 space-y-2 transition-all" aria-live="polite">
+          <div className="flex items-center gap-2">
+            {hoveredOption.icon && (
+              <span className="text-xl leading-none">{hoveredOption.icon}</span>
+            )}
+            <span className="text-sm font-bold text-navy">{hoveredOption.title}</span>
+          </div>
+          {hoveredOption.description && (
+            <p className="text-xs text-navy/70 leading-relaxed">{hoveredOption.description}</p>
+          )}
+          {hoveredOption.example && (
+            <p className="text-xs italic text-navy/50 leading-relaxed">{hoveredOption.example}</p>
+          )}
+          {hoveredOption.tags && hoveredOption.tags.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap">
+              {hoveredOption.tags.map((tag) => (
+                <span key={tag} className="rounded-full bg-navy/10 px-2 py-0.5 text-[10px] font-medium text-navy/60">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {helperText && (

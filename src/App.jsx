@@ -3,15 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import LandingPage from './components/LandingPage';
 import StepWizard from './components/StepWizard';
 import LiveCalculation from './components/results/LiveCalculation';
+import { isRetiredArchetype } from './logic/archetypes';
 
 const DEFAULT_FORM_DATA = {
   // Step 1: Company Context
   industry: '',
   companySize: '',
   role: '',
-  teamLocation: '',
-  contractorPct: 0.30,
-  blendedAISalary: null,
   // Step 2: Risk & Readiness (moved earlier - drives cost estimates)
   changeReadiness: 3,
   dataReadiness: 3,
@@ -20,12 +18,50 @@ const DEFAULT_FORM_DATA = {
   processType: '',              // kept for backward compat
   projectArchetype: '',         // archetype id string
   assumptions: {},              // populated from archetype defaults, user-editable
-  archetypeInputs: {},          // archetype-specific input values (8 per archetype)
+  archetypeInputs: {},          // short, case-specific operating inputs
+  // Current workforce doing the process. These are the source inputs for
+  // the blended workforce cost used throughout the model.
+  directEmployeeCount: 10,
+  employeeFullyBurdenedCost: 125000,
+  offshoreContractorCount: 0,
+  contractorFullyBurdenedCost: 65000,
+  hoursPerWeek: 40,
+  // Legacy aggregate fields are retained for older shared models.
   teamSize: 10,
-  hoursPerWeek: 20,
-  errorRate: 0.10,
-  // Step 4: Current Costs
   avgSalary: 100000,
+  // Existing contracts that could be retired after implementation.
+  existingContractCount: 0,
+  annualCostPerContract: 0,
+  contractNoticePeriodMonths: 3,
+  // Project-impact plan.
+  totalEfficiencyGainPct: 10,
+  employeesToRetrain: 0,
+  employeesToMakeRedundant: 0,
+  deliveryPace: 'standard',
+  projectInputsComplete: false,
+  costTransitionComplete: false,
+  // Retired scenarios are retained only as historical data. A user must choose
+  // a supported use case before the model can be run.
+  legacyRetiredProjectArchetype: null,
+  legacyRetiredArchetypeInputs: null,
+  legacyRetiredAssumptions: null,
+  // Optional usage meters. When blank, the model derives volume from the
+  // selected archetype instead of treating headcount as the usage proxy.
+  aiLicensedUsers: null,
+  monthlyAiRequests: null,
+  avgInputTokensPerRequest: null,
+  avgOutputTokensPerRequest: null,
+  monthlyAgentWorkflows: null,
+  documentsPerMonth: null,
+  dataStoredGb: null,
+  connectedApplications: null,
+  // Measured rework baseline (annual counts; replaces a blanket error-rate assumption).
+  errorCountEmployees: 0,
+  errorCountContracts: 0,
+  annualErrorCount: 0,
+  fractionNeedingRework: 0.5,
+  estimatedReworkCostPerItem: 0,
+  // Step 4: Current Costs
   currentToolCosts: 0,
   vendorsReplaced: 0,
   vendorTerminationCost: 0,
@@ -38,6 +74,7 @@ const DEFAULT_FORM_DATA = {
   // V3: Advanced Value Modeling (optional)
   cashRealizationPct: null, // defaults to 0.40 in calculations
   annualRevenue: 0,
+  revenueUpliftPct: null, // null = industry benchmark; integer 1-30
   contributionMargin: null, // defaults to 0.30
   cycleTimeReductionMonths: null, // defaults from industry benchmarks
   includeCapacityValue: false,
@@ -51,7 +88,7 @@ const DEFAULT_FORM_DATA = {
 };
 
 const ANALYSIS_STEPS = [
-  'Calibrating industry benchmarks',
+  'Applying model assumptions',
   'Running 5-year DCF projections',
   'Modeling three scenarios',
   'Calculating value pathways',
@@ -182,8 +219,38 @@ function encodeFormData(data) {
 function decodeFormData(hash) {
   try {
     const parsed = JSON.parse(atob(hash));
-    return { ...DEFAULT_FORM_DATA, ...parsed };
+    return prepareRestoredFormData(parsed);
   } catch { return null; }
+}
+
+/**
+ * Keep a retired case explicit after restoring a share link.  In particular,
+ * do not reinterpret legacy sales/pipeline values as customer-support inputs:
+ * those have different workload, cost, and evidence requirements.
+ */
+function prepareRestoredFormData(data = {}) {
+  // Retire the old implementation-location fields when a legacy share link
+  // is restored. Deployment cost is now always tied to the entered direct
+  // employee / contractor workforce mix.
+  const {
+    teamLocation: _retiredTeamLocation,
+    contractorPct: _retiredContractorPct,
+    blendedAISalary: _retiredBlendedAISalary,
+    ...supportedData
+  } = data;
+  const restored = { ...DEFAULT_FORM_DATA, ...supportedData };
+  if (!isRetiredArchetype(restored.projectArchetype)) return restored;
+
+  return {
+    ...restored,
+    legacyRetiredProjectArchetype: restored.legacyRetiredProjectArchetype || restored.projectArchetype,
+    legacyRetiredArchetypeInputs: restored.legacyRetiredArchetypeInputs || restored.archetypeInputs || {},
+    legacyRetiredAssumptions: restored.legacyRetiredAssumptions || restored.assumptions || {},
+    // Keep the retired id visible to the wizard so it can explain the change,
+    // but invalidate both completion gates to prevent an unreviewed result.
+    projectInputsComplete: false,
+    costTransitionComplete: false,
+  };
 }
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -231,9 +298,10 @@ export default function App() {
 
     if (shareMatch) {
       loadSharedModel(shareMatch[1]).then((loaded) => {
-        if (loaded && loaded.industry) {
-          setFormData({ ...DEFAULT_FORM_DATA, ...loaded });
-          setScreen('results');
+        if (loaded && (loaded.industry || loaded.projectArchetype)) {
+          const restored = prepareRestoredFormData(loaded);
+          setFormData(restored);
+          setScreen(isRetiredArchetype(restored.projectArchetype) ? 'wizard' : 'results');
         }
       });
       return;
@@ -243,9 +311,9 @@ export default function App() {
     const hash = window.location.hash.slice(1);
     if (hash) {
       const restored = decodeFormData(hash);
-      if (restored && restored.industry) {
+      if (restored && (restored.industry || restored.projectArchetype)) {
         setFormData(restored);
-        setScreen('results');
+        setScreen(isRetiredArchetype(restored.projectArchetype) ? 'wizard' : 'results');
       }
     }
   }, []);
@@ -255,15 +323,15 @@ export default function App() {
   const handleAnalysisComplete = useCallback(() => setScreen('results'), []);
   const handleDownload = useCallback(
     async (results, recommendation, mcResults) => {
-      const { default: generateReport } = await import('./pdf/generateReport');
-      generateReport(formData, results, recommendation, mcResults);
+      const { default: generateExecutiveReport } = await import('./pptx/generateExecutiveReport');
+      await generateExecutiveReport(formData, results, recommendation, mcResults);
     },
     [formData]
   );
 
   const handleDownloadExcel = useCallback(async (mcResults, results) => {
     const { generateExcelModel } = await import('./excel/generateExcelModel');
-    generateExcelModel(formData, mcResults, results);
+    await generateExcelModel(formData, mcResults, results);
   }, [formData]);
 
   const handleEditInputs = useCallback(() => setScreen('wizard'), []);
@@ -298,6 +366,7 @@ export default function App() {
         formData={formData}
         setFormData={setFormData}
         onComplete={handleWizardComplete}
+        onBack={() => setScreen('landing')}
       />
     );
   }

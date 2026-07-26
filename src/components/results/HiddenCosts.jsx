@@ -13,14 +13,23 @@ const oneTimeLabels = {
   legalComplianceCost: 'Legal, compliance & employment law',
   securityAuditCost: 'Security, privacy & third-party audit',
   contingencyReserve: 'Contingency reserve (20%)',
-  vendorTerminationCost: 'Vendor contract termination',
 };
 
 export default function HiddenCosts({ hiddenCosts, oneTimeCosts, vendorLockIn, rdTaxCredit, delay = 0 }) {
   const hiddenItems = Object.entries(hiddenLabels).filter(([key]) => hiddenCosts[key] > 0);
   const oneTimeItems = oneTimeCosts
-    ? Object.entries(oneTimeLabels).filter(([key]) => oneTimeCosts[key] > 0)
+    ? [
+      ...Object.entries(oneTimeLabels).filter(([key]) => oneTimeCosts[key] > 0),
+      ...(oneTimeCosts.effectiveContractExitCost > 0
+        ? [['effectiveContractExitCost', 'Contract cancellation / termination']]
+        : []),
+    ]
     : [];
+  const separationSchedule = oneTimeCosts?.separationPhasing || [];
+  const separationYears = separationSchedule
+    .map((pct, index) => (pct > 0 ? `Year ${index + 1}` : null))
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <div className="space-y-4">
@@ -33,12 +42,12 @@ export default function HiddenCosts({ hiddenCosts, oneTimeCosts, vendorLockIn, r
           className="bg-red-50 border border-red-200 rounded-xl p-5"
         >
           <h4 className="font-heading font-bold text-navy flex items-center gap-2 mb-2">
-            Workforce Transition Costs (Phased Over Years 2-5)
+            Workforce Transition Costs (Phased)
           </h4>
           <p className="text-gray-500 text-xs mb-3">
             {oneTimeCosts.displacedFTEs} of {oneTimeCosts.displacedFTEs + oneTimeCosts.retainedFTEs} roles
-            phased out over 4 years ({oneTimeCosts.retainedFTEs} retained — {formatPercent(1 - oneTimeCosts.maxHeadcountReduction)} always human).
-            FY 1 is enhancement only — no one is let go Day 1. [15][21]
+            are included in the transition plan. Costs are phased across {separationYears || 'the schedule below'};
+            see the schedule before treating these as one-time upfront cash. [W1][W2]
           </p>
 
           {/* Separation cost breakdown */}

@@ -71,7 +71,7 @@ export default function PeerComparison({ peerComparison, industry, companySize, 
       </div>
 
       <p className="text-gray-400 text-xs mt-3 text-center">
-        Based on aggregate industry benchmarks [1][2][5]
+        Illustrative peer-planning range [M1] — validate against company-approved comparators. Source context is in the exported Sources &amp; Footnotes tab.
       </p>
     </motion.div>
   );

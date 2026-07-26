@@ -45,6 +45,10 @@ All benchmarks are sourced from 26 industry references including McKinsey, Deloi
 npm install
 npm run dev
 
+# Frontend API target
+cp .env.example .env.local
+# set VITE_API_URL to the Railway API public domain
+
 # API (requires DATABASE_URL)
 cd api
 npm install

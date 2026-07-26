@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 *.xlsx
 .vercel
+.playwright-cli
 .env
 api/dist
 api/node_modules

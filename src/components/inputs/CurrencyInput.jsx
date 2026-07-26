@@ -7,6 +7,7 @@ export default function CurrencyInput({
   presets = [],
   helperText,
   defaultValue,
+  max,
 }) {
   const id = useId();
   const [isCustom, setIsCustom] = useState(
@@ -36,7 +37,7 @@ export default function CurrencyInput({
   const handleInputChange = (e) => {
     const raw = e.target.value.replace(/[^0-9]/g, '');
     const parsed = raw === '' ? (defaultValue ?? 0) : parseInt(raw, 10);
-    onChange(parsed);
+    onChange(max != null ? Math.min(parsed, max) : parsed);
   };
 
   const isPresetSelected = (preset) => !isCustom && value === preset;

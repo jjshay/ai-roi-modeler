@@ -93,11 +93,11 @@ describe('Edge cases: extreme input values', () => {
     { name: 'Lowest readiness (1,1)', inputs: { teamSize: 10, changeReadiness: 1, dataReadiness: 1 } },
     { name: 'Highest readiness (5,5)', inputs: { teamSize: 10, changeReadiness: 5, dataReadiness: 5 } },
     { name: 'No exec sponsor', inputs: { teamSize: 10, execSponsor: false } },
-    { name: 'Revenue $50M', inputs: { teamSize: 10, annualRevenue: 50000000, contributionMargin: 0.30 } },
-    { name: 'Zero revenue', inputs: { teamSize: 10, annualRevenue: 0 } },
+    { name: 'Legacy annual revenue present', inputs: { teamSize: 10, annualRevenue: 50000000, contributionMargin: 0.30 } },
+    { name: 'No legacy annual revenue', inputs: { teamSize: 10, annualRevenue: 0 } },
     { name: 'Agentic workflow', inputs: { teamSize: 10, isAgenticWorkflow: true } },
-    { name: 'All value toggles ON', inputs: { teamSize: 10, includeCapacityValue: true, includeRiskReduction: true, includeRevenueAcceleration: true, annualRevenue: 10000000 } },
-    { name: 'All value toggles OFF', inputs: { teamSize: 10, includeCapacityValue: false, includeRiskReduction: false, includeRevenueAcceleration: false } },
+    { name: 'All supported context toggles ON', inputs: { teamSize: 10, includeCapacityValue: true, includeRiskReduction: true, riskValueEvidenceValidated: true } },
+    { name: 'All supported context toggles OFF', inputs: { teamSize: 10, includeCapacityValue: false, includeRiskReduction: false } },
     { name: 'Very short timeline (1mo)', inputs: { teamSize: 10, expectedTimeline: 1 } },
     { name: 'Very long timeline (36mo)', inputs: { teamSize: 10, expectedTimeline: 36 } },
     { name: 'Startup size', inputs: { teamSize: 5, companySize: 'Startup (1-50)' } },
@@ -105,7 +105,7 @@ describe('Edge cases: extreme input values', () => {
   ];
 
   for (const ec of edgeCases) {
-    for (const arch of ['internal-process-automation', 'customer-facing-ai', 'revenue-growth-ai', 'knowledge-management-ai']) {
+    for (const { id: arch } of PROJECT_ARCHETYPES) {
       it(`${ec.name} × ${arch}`, () => {
         const result = runCalculations({
           avgSalary: 100000, hoursPerWeek: 20, errorRate: 0.10,
@@ -177,11 +177,11 @@ describe('Full pipeline: archetype × company size', () => {
 });
 
 // ============================================================
-// 6. Revenue for every archetype (displacement bug regression)
+// 6. Retired revenue inputs for every archetype
 // ============================================================
-describe('Revenue: every archetype with $50M revenue', () => {
+describe('Retired revenue inputs: every archetype', () => {
   for (const arch of PROJECT_ARCHETYPES) {
-    it(`${arch.id}: net revenue not excessively negative`, () => {
+    it(`${arch.id}: old revenue fields cannot create a forecast`, () => {
       const result = runCalculations({
         teamSize: 20, avgSalary: 150000, hoursPerWeek: 30, errorRate: 0.10,
         industry: 'Technology / Software', processType: arch.sourceProcessTypes[0],
@@ -191,22 +191,18 @@ describe('Revenue: every archetype with $50M revenue', () => {
         changeReadiness: 3, dataReadiness: 3, execSponsor: true,
       });
       expect(result.revenueEnablement).toBeDefined();
-      if (result.revenueEnablement.eligible) {
-        expect(result.revenueEnablement.totalAnnualRevenue).toSatisfy(v => typeof v === 'number' && isFinite(v));
-        const gross = result.revenueEnablement.timeToMarket + result.revenueEnablement.customerExperience + result.revenueEnablement.newCapability;
-        // totalAnnualRevenue = gross - displacement; should not be deeply negative
-        expect(result.revenueEnablement.totalAnnualRevenue).toBeGreaterThanOrEqual(-gross * 2);
-      }
+      expect(result.revenueEnablement.eligible).toBe(false);
+      expect(result.valuePathways.capacityCreation.revenueAcceleration).toBe(0);
     });
   }
 });
 
 // ============================================================
-// 7. Revenue for every industry (displacement bug regression)
+// 7. Retired revenue inputs for every industry
 // ============================================================
-describe('Revenue: every industry with revenue enabled', () => {
+describe('Retired revenue inputs: every industry', () => {
   for (const ind of INDUSTRIES) {
-    it(`${ind}: net revenue not excessively negative`, () => {
+    it(`${ind}: old revenue fields cannot create a forecast`, () => {
       const result = runCalculations({
         teamSize: 20, avgSalary: 150000, hoursPerWeek: 30, errorRate: 0.10,
         industry: ind, processType: 'Customer Communication',
@@ -215,11 +211,8 @@ describe('Revenue: every industry with revenue enabled', () => {
         includeRevenueAcceleration: true,
         changeReadiness: 3, dataReadiness: 3, execSponsor: true,
       });
-      if (result.revenueEnablement.eligible) {
-        expect(result.revenueEnablement.totalAnnualRevenue).toSatisfy(v => typeof v === 'number' && isFinite(v));
-        const gross = result.revenueEnablement.timeToMarket + result.revenueEnablement.customerExperience + result.revenueEnablement.newCapability;
-        expect(result.revenueEnablement.totalAnnualRevenue).toBeGreaterThanOrEqual(-gross * 2);
-      }
+      expect(result.revenueEnablement.eligible).toBe(false);
+      expect(result.valuePathways.capacityCreation.revenueAcceleration).toBe(0);
     });
   }
 });

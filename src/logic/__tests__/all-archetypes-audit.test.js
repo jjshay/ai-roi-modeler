@@ -4,7 +4,7 @@ import { PROJECT_ARCHETYPES, getArchetypeDefaults } from '../archetypes';
 import { getArchetypeInputDefaults, mapArchetypeInputs } from '../archetypeInputs';
 
 /**
- * Full end-to-end audit: run all 6 archetypes through the DCF engine
+ * Full end-to-end audit: run all 4 supported archetypes through the DCF engine
  * with realistic mid-market inputs and verify every output is valid.
  */
 
@@ -13,7 +13,6 @@ const BASE = {
   industry: 'Technology / Software',
   companySize: 'Mid-Market (501-5,000)',
   role: 'Director',
-  teamLocation: 'US - Major Tech Hub',
   changeReadiness: 3,
   dataReadiness: 3,
   execSponsor: true,
@@ -29,11 +28,8 @@ const BASE = {
   ongoingAnnualCost: 60000,
   companyState: 'California',
   cashRealizationPct: 0.40,
-  annualRevenue: 50000000,
-  contributionMargin: 0.35,
   includeCapacityValue: false,
   includeRiskReduction: false,
-  includeRevenueAcceleration: false,
   retainedTalentPremiumRate: 0.10,
   isAgenticWorkflow: false,
 };
@@ -43,9 +39,6 @@ function makeInputs(archetypeId, industry = 'Technology / Software') {
   const archetypeInputs = getArchetypeInputDefaults(archetypeId);
   const mapped = mapArchetypeInputs(archetypeId, archetypeInputs);
 
-  // For revenue-eligible archetypes, enable revenue flags
-  const isRevenue = archDefaults?.revenueEligible;
-
   return {
     ...BASE,
     industry,
@@ -54,14 +47,12 @@ function makeInputs(archetypeId, industry = 'Technology / Software') {
     assumptions: archDefaults || {},
     archetypeInputs,
     // Override from archetype-computed values
-    hoursPerWeek: mapped.hoursPerWeek ?? BASE.hoursPerWeek,
+    hoursPerWeek: BASE.hoursPerWeek,
     errorRate: mapped.errorRate ?? BASE.errorRate,
-    // Revenue flags
-    includeRevenueAcceleration: isRevenue,
   };
 }
 
-// All 6 archetype IDs
+// All 4 supported archetype IDs
 const ALL_ARCHETYPES = PROJECT_ARCHETYPES.map(a => a.id);
 
 // 3 representative industries to cross-test
@@ -71,7 +62,7 @@ const TEST_INDUSTRIES = [
   'Healthcare / Life Sciences',
 ];
 
-describe('All 6 Archetypes: end-to-end model validation', () => {
+describe('All 4 Archetypes: end-to-end model validation', () => {
   for (const archetypeId of ALL_ARCHETYPES) {
     const archetype = PROJECT_ARCHETYPES.find(a => a.id === archetypeId);
 
@@ -234,7 +225,7 @@ describe('All 6 Archetypes: end-to-end model validation', () => {
 
 // Summary table test — runs all and prints a formatted table
 describe('Archetype Summary Table', () => {
-  it('all 6 archetypes produce valid results (summary)', () => {
+  it('all 4 supported archetypes produce valid results (summary)', () => {
     const rows = [];
 
     for (const archetypeId of ALL_ARCHETYPES) {
@@ -267,7 +258,7 @@ describe('Archetype Summary Table', () => {
     }
 
     // Print summary table
-    console.log('\n=== ALL 6 ARCHETYPES: MODEL OUTPUT SUMMARY ===');
+    console.log('\n=== ALL 4 ARCHETYPES: MODEL OUTPUT SUMMARY ===');
     console.log('─'.repeat(140));
     console.log(
       'Archetype'.padEnd(38) +

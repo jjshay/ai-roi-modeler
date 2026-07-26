@@ -1,16 +1,69 @@
 import { motion } from 'framer-motion';
 import { formatCurrency } from '../../utils/formatters';
 
-const categories = [
+const coreCategories = [
   { key: 'headcount', label: 'Headcount Optimization', color: 'bg-blue-500' },
   { key: 'efficiency', label: 'Efficiency Gains', color: 'bg-emerald-500' },
   { key: 'errorReduction', label: 'Error Reduction', color: 'bg-amber-500' },
   { key: 'toolReplacement', label: 'Tool Replacement', color: 'bg-purple-500' },
-  { key: 'archetypeRevenue', label: 'Revenue Impact', color: 'bg-rose-500' },
 ];
 
-export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
-  const total = valueBreakdown.totalRiskAdjusted || 1;
+const asAmount = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+
+function hasValue(bucket) {
+  return asAmount(bucket?.gross) > 0 || asAmount(bucket?.riskAdjusted) > 0;
+}
+
+/**
+ * Returns only cash/cost-based model value categories. Legacy archetypeRevenue
+ * is intentionally excluded: it represented a forecast rather than a measured
+ * operating value stream.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function getValueBreakdownCategories(valueBreakdown = {}) {
+  const categories = [...coreCategories];
+
+  if (hasValue(valueBreakdown.contractExit)) {
+    categories.push({
+      key: 'contractExit',
+      label: 'Existing contract savings',
+      color: 'bg-indigo-500',
+    });
+  }
+
+  if (hasValue(valueBreakdown.caseDirectSavings)) {
+    const suppliedLabel = typeof valueBreakdown.caseDirectSavings?.label === 'string'
+      ? valueBreakdown.caseDirectSavings.label.trim()
+      : '';
+    categories.push({
+      key: 'caseDirectSavings',
+      // Never allow a legacy revenue label to re-enter the financial output.
+      label: suppliedLabel && !/revenue/i.test(suppliedLabel)
+        ? suppliedLabel
+        : 'Verified customer support cost avoidance',
+      color: 'bg-cyan-600',
+    });
+  }
+
+  return categories;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function getValueBreakdownTotals(valueBreakdown = {}) {
+  return getValueBreakdownCategories(valueBreakdown).reduce((totals, { key }) => {
+    const bucket = valueBreakdown[key] || {};
+    return {
+      gross: totals.gross + asAmount(bucket.gross),
+      riskAdjusted: totals.riskAdjusted + asAmount(bucket.riskAdjusted),
+    };
+  }, { gross: 0, riskAdjusted: 0 });
+}
+
+export default function ValueBreakdown({ valueBreakdown = {}, delay = 0 }) {
+  const categories = getValueBreakdownCategories(valueBreakdown);
+  const totals = getValueBreakdownTotals(valueBreakdown);
+  const total = totals.riskAdjusted || 1;
+  const ongoingAiCostYear1 = asAmount(valueBreakdown.ongoingAiCostYear1);
 
   return (
     <motion.div
@@ -40,7 +93,7 @@ export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
       {/* Stacked bar */}
       <div className="flex h-6 rounded-full overflow-hidden mb-4">
         {categories.map(({ key, color }) => {
-          const pct = total > 0 ? (valueBreakdown[key].riskAdjusted / total) * 100 : 0;
+          const pct = total > 0 ? (asAmount(valueBreakdown[key]?.riskAdjusted) / total) * 100 : 0;
           if (pct < 1) return null;
           return (
             <div
@@ -55,8 +108,9 @@ export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
       {/* Category rows */}
       <div className="space-y-3">
         {categories.map(({ key, label, color }, i) => {
-          const val = valueBreakdown[key];
-          const pct = total > 0 ? (val.riskAdjusted / total) * 100 : 0;
+          const val = valueBreakdown[key] || {};
+          const riskAdjusted = asAmount(val.riskAdjusted);
+          const pct = total > 0 ? (riskAdjusted / total) * 100 : 0;
           return (
             <motion.div
               key={key}
@@ -75,7 +129,7 @@ export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
               <div className="flex items-center gap-3">
                 <span className="text-gray-400 text-xs">{pct.toFixed(0)}%</span>
                 <span className="font-mono font-semibold text-navy min-w-[100px] text-right">
-                  {formatCurrency(val.riskAdjusted)}
+                  {formatCurrency(riskAdjusted)}
                 </span>
               </div>
             </motion.div>
@@ -85,23 +139,23 @@ export default function ValueBreakdown({ valueBreakdown, delay = 0 }) {
 
       <div className="border-t border-gray-200 mt-4 pt-3 space-y-2">
         <div className="flex justify-between items-center">
-          <span className="text-gray-600 text-sm font-medium">Total Gross Value (at full adoption)</span>
+          <span className="text-gray-600 text-sm font-medium">Total Risk-Adjusted Value (at full adoption)</span>
           <span className="font-mono font-bold text-lg text-navy">
-            {formatCurrency(valueBreakdown.totalRiskAdjusted)}
+            {formatCurrency(totals.riskAdjusted)}
           </span>
         </div>
         <div className="flex justify-between items-center">
           <span className="text-gray-500 text-sm">Less: FY 1 AI operating cost</span>
           <span className="font-mono font-semibold text-red-600">
-            -{formatCurrency(valueBreakdown.ongoingAiCostYear1)}
+            -{formatCurrency(ongoingAiCostYear1)}
           </span>
         </div>
         <div className="flex justify-between items-center border-t border-gray-100 pt-2">
           <span className="text-gray-700 text-sm font-semibold">Net Annual Value (at full adoption)</span>
           <span className={`font-mono font-bold text-lg ${
-            valueBreakdown.totalRiskAdjusted - valueBreakdown.ongoingAiCostYear1 >= 0 ? 'text-emerald-700' : 'text-red-600'
+            totals.riskAdjusted - ongoingAiCostYear1 >= 0 ? 'text-emerald-700' : 'text-red-600'
           }`}>
-            {formatCurrency(valueBreakdown.totalRiskAdjusted - valueBreakdown.ongoingAiCostYear1)}
+            {formatCurrency(totals.riskAdjusted - ongoingAiCostYear1)}
           </span>
         </div>
       </div>

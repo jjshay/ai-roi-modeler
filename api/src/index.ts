@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { nanoid } from 'nanoid';
-import { sql, initDatabase } from './db.js';
+import { sql, initDatabase, databaseInitError, databaseReady } from './db.js';
 
 const app = new Hono();
 
@@ -41,6 +41,18 @@ function rateLimit(ip: string): boolean {
   return entry.count > RATE_LIMIT;
 }
 
+function normalizeFormData(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 // Apply rate limiting to all POST endpoints
 app.use('/api/*', async (c, next) => {
   if (c.req.method === 'POST') {
@@ -53,7 +65,12 @@ app.use('/api/*', async (c, next) => {
 });
 
 // Health check
-app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
+app.get('/health', (c) => c.json({
+  status: 'ok',
+  database: databaseReady ? 'ready' : 'not_ready',
+  databaseError: databaseReady ? null : databaseInitError,
+  timestamp: new Date().toISOString(),
+}));
 
 // POST /api/models — Save a new model
 app.post('/api/models', async (c) => {
@@ -71,7 +88,7 @@ app.post('/api/models', async (c) => {
       INSERT INTO models (share_token, form_data, industry, company_size, process_type, project_archetype)
       VALUES (
         ${shareToken},
-        ${JSON.stringify(formData)},
+        ${sql.json(formData)},
         ${formData.industry || null},
         ${formData.companySize || null},
         ${formData.processType || null},
@@ -108,7 +125,7 @@ app.get('/api/models/:id', async (c) => {
     return c.json({
       id: row.id,
       shareToken: row.share_token,
-      formData: row.form_data,
+      formData: normalizeFormData(row.form_data),
       industry: row.industry,
       companySize: row.company_size,
       processType: row.process_type,
@@ -135,7 +152,7 @@ app.put('/api/models/:id', async (c) => {
 
     const [row] = await sql`
       UPDATE models
-      SET form_data = ${JSON.stringify(formData)},
+      SET form_data = ${sql.json(formData)},
           industry = ${formData.industry || null},
           company_size = ${formData.companySize || null},
           process_type = ${formData.processType || null},
@@ -197,7 +214,7 @@ app.get('/api/share/:token', async (c) => {
     return c.json({
       id: row.id,
       shareToken: row.share_token,
-      formData: row.form_data,
+      formData: normalizeFormData(row.form_data),
       industry: row.industry,
       companySize: row.company_size,
       processType: row.process_type,

@@ -244,25 +244,19 @@ describe('Tier Section Visibility', () => {
 });
 
 // ============================================================
-// 7. REVENUE-ENABLED: archetype x industry with revenue
+// 7. RETIRED REVENUE INPUTS: old values cannot create a new value stream
 // ============================================================
-describe('Revenue-Enabled scenarios', () => {
-  const revenueArchetypes = ['revenue-growth-ai', 'customer-facing-ai'];
-
-  for (const archId of revenueArchetypes) {
-    it(`${archId}: revenue acceleration with annualRevenue`, () => {
-      const inputs = makeWithArchetype(archId, {
-        annualRevenue: 10_000_000,
-        includeRevenueAcceleration: true,
-        contributionMargin: 0.30,
-      });
-      const r = runCalculations(inputs);
-
-      expect(Number.isFinite(r.scenarios.base.npv)).toBe(true);
-      // Revenue archetypes produce finite results with revenue enabled
-      expect(Number.isFinite(r.scenarios.optimistic.npv)).toBe(true);
-    });
-  }
+describe('Retired revenue inputs', () => {
+  it('does not add a revenue forecast when old inputs are supplied', () => {
+    const r = runCalculations(makeWithArchetype('customer-facing-ai', {
+      annualRevenue: 10_000_000,
+      includeRevenueAcceleration: true,
+      contributionMargin: 0.30,
+    }));
+    expect(Number.isFinite(r.scenarios.base.npv)).toBe(true);
+    expect(r.revenueEnablement.eligible).toBe(false);
+    expect(r.valuePathways.capacityCreation.revenueAcceleration).toBe(0);
+  });
 });
 
 // ============================================================

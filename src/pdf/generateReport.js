@@ -7,7 +7,6 @@ import {
   DATA_TIMELINE_MULTIPLIER,
   DATA_COST_MULTIPLIER,
   SIZE_MULTIPLIER,
-  AI_TEAM_SALARY,
   API_COST_PER_1K_REQUESTS,
   REQUESTS_PER_PERSON_HOUR,
   MAX_IMPL_TEAM,
@@ -28,6 +27,7 @@ import {
   AI_MATURITY_PREMIUM,
 } from '../logic/benchmarks';
 import { getArchetypeById } from '../logic/archetypes';
+import { ARCHETYPE_INPUT_MAP } from '../logic/archetypeInputs';
 import { getRiskMitigations } from '../logic/recommendations';
 import { getOutputTier, PDF_PAGES } from '../utils/outputTier';
 
@@ -79,6 +79,110 @@ function safePayback(months) {
   const maxMonths = DCF_YEARS * 12;
   if (months == null || months > maxMonths) return `>${maxMonths} months`;
   return `Month ${months}`;
+}
+
+function getDeploymentPlanSummary(formData = {}, results = {}) {
+  const plan = results.deploymentPlan || results.aiCostModel?.deploymentPlan || {};
+  const pace = plan.deliveryPace || formData.deliveryPace || 'standard';
+  const fallback = {
+    accelerated: { staffingMultiplier: 1.20, durationMultiplier: 0.80 },
+    standard: { staffingMultiplier: 1, durationMultiplier: 1 },
+    extended: { staffingMultiplier: 0.80, durationMultiplier: 1.25 },
+  }[pace] || { staffingMultiplier: 1, durationMultiplier: 1 };
+
+  return {
+    pace,
+    label: {
+      accelerated: 'Accelerated',
+      standard: 'Standard',
+      extended: 'Extended',
+    }[pace] || 'Standard',
+    staffingMultiplier: Number.isFinite(plan.staffingMultiplier)
+      ? plan.staffingMultiplier
+      : fallback.staffingMultiplier,
+    durationMultiplier: Number.isFinite(plan.durationMultiplier)
+      ? plan.durationMultiplier
+      : fallback.durationMultiplier,
+    estimatedDeploymentLaborCost: Number.isFinite(plan.estimatedDeploymentLaborCost)
+      ? plan.estimatedDeploymentLaborCost
+      : null,
+  };
+}
+
+function getWorkforceMixSummary(formData = {}, results = {}) {
+  const currentState = results.currentState || {};
+  const mix = currentState.workforceMix || {};
+  const directEmployeeCount = Number.isFinite(mix.directEmployeeCount)
+    ? mix.directEmployeeCount
+    : (formData.directEmployeeCount || 0);
+  const contractorCount = Number.isFinite(mix.offshoreContractorCount)
+    ? mix.offshoreContractorCount
+    : (formData.offshoreContractorCount || 0);
+  const hasWorkforceMix = Boolean(mix.hasWorkforceMix);
+  const totalHeadcount = Number.isFinite(currentState.totalHeadcount)
+    ? currentState.totalHeadcount
+    : (formData.teamSize || 0);
+  const weightedFullyBurdenedCost = Number.isFinite(currentState.blendedFullyBurdenedCost)
+    ? currentState.blendedFullyBurdenedCost
+    : (formData.avgSalary || 0);
+
+  return {
+    directEmployeeCount,
+    contractorCount,
+    hasWorkforceMix,
+    totalHeadcount,
+    weightedFullyBurdenedCost,
+    label: hasWorkforceMix
+      ? `${directEmployeeCount} direct employee${directEmployeeCount === 1 ? '' : 's'} + ${contractorCount} contractor${contractorCount === 1 ? '' : 's'}`
+      : `${totalHeadcount} people (aggregate workforce; validate the employee/contractor mix)`,
+  };
+}
+
+/**
+ * Compact, case-specific content for the PDF.  Every selected case uses the
+ * same reading order: user inputs, model assumption, calculation treatment,
+ * and a plain-language footnote.  This avoids displaying a generic glossary
+ * that does not apply to the analysis in front of the reader.
+ */
+function getSelectedCaseReportSummary(formData = {}) {
+  const archetype = getArchetypeById(formData.projectArchetype);
+  const schema = ARCHETYPE_INPUT_MAP[formData.projectArchetype];
+  const submittedInputs = formData.archetypeInputs || {};
+
+  if (!schema) {
+    return {
+      label: archetype?.label || formData.processType || 'Selected AI use case',
+      inputSummary: 'Select one of the four supported AI use cases to show its operating inputs.',
+      caseGuide: {
+        assumption: 'No case-specific assumption is available until a supported use case is selected.',
+        calculation: 'No case-specific calculation is available until a supported use case is selected.',
+        footnote: 'Retired AI use cases are not mapped into the financial model.',
+      },
+    };
+  }
+
+  const inputSummary = schema.inputs.map((input) => {
+    const rawValue = submittedInputs[input.key] ?? input.default;
+    const parsedValue = Number(rawValue);
+    const value = Number.isFinite(parsedValue) ? parsedValue : input.default;
+    let formatted = value.toLocaleString();
+
+    if (input.type === 'percent') formatted = formatPercent(value);
+    else if (input.format?.startsWith('$')) formatted = formatCurrency(value);
+    else if (input.format?.includes('0.0')) formatted = value.toFixed(1);
+
+    return `${input.label}: ${formatted}`;
+  }).join('; ');
+
+  return {
+    label: archetype?.label || 'Selected AI use case',
+    inputSummary,
+    caseGuide: schema.caseGuide || {
+      assumption: 'Shared workforce, contract, and AI cost inputs are reviewed separately from the operating case.',
+      calculation: 'The model maps the selected operating inputs to workload and an efficiency ceiling before cash flow is calculated.',
+      footnote: 'Only validated cash actions enter the core DCF.',
+    },
+  };
 }
 
 function addGoldTopLine(doc) {
@@ -431,51 +535,52 @@ function page2_TableOfContents(doc, includedPages) {
   doc.rect(MARGIN, y, 50, 1.5, 'F');
   y += 16;
 
-  // Master TOC entry list — page numbers are auto-assigned based on which pages are included
-  const allTocEntries = [
-    { title: 'Executive Summary', key: 'executiveSummary' },
-    { title: 'Current State Analysis', key: 'currentState' },
-    { title: 'Value Creation Breakdown', key: 'valueBreakdown' },
-    { title: 'Value Creation Pathways (V3)', key: 'valuePathways' },
-    { title: 'Capital Efficiency & Deployment Gates (V3)', key: 'capitalEfficiencyGates' },
-    { title: 'AI Investment Analysis & Cost Model', key: 'investmentAnalysis' },
-    { title: 'Three-Scenario Projections & Hurdle Rate Analysis', key: 'scenarioProjections' },
-    { title: 'Risk Assessment', key: 'riskAssessment' },
-    { title: 'Sensitivity Analysis', key: 'sensitivityAnalysis' },
-    { title: 'Variable Sensitivity Analysis (Extended)', key: 'extendedSensitivity' },
-    { title: 'Monte Carlo Simulation', key: 'monteCarlo' },
-    { title: 'Opportunity Cost & Scalability', key: 'opportunityCost' },
-    { title: 'Industry Peer Comparison & Confidence Intervals', key: 'peerComparison' },
-    { title: 'Recommendations & Next Steps', key: 'recommendations' },
-    { title: 'Qualitative Benefits', key: 'qualitativeBenefits' },
-    { title: 'Case Study: Mid-Market Financial Services', key: 'caseStudy' },
-    { title: 'Capital Allocation: AI vs. Alternatives', key: 'workforceAlternatives' },
-    { title: 'Break-Even Unit Economics', key: 'breakEvenUnits' },
-    { title: 'AI Cost Model & Technical Assumptions', key: 'consultingAssumptions' },
-    { title: 'AI Maturity Premium', key: 'maturityPremium' },
-    { title: 'Input Assumptions & Model Parameters', key: 'inputAssumptions' },
-    { title: 'Appendix A: Calculation Walkthrough & DCF Model', key: 'appendixMethodology' },
-    { title: 'Appendix B: Source References & Benchmarks', key: 'appendixBenchmarks' },
-    { title: 'Appendix C: Definitions, Assumptions & Disclosures', key: 'appendixCostAssumptions' },
-  ];
+  // Master TOC entry list — titles keyed to match PDF_PAGES entries.
+  // The TOC renders entries in the order they appear in includedPages,
+  // so page numbers always match the actual document.
+  const TOC_TITLES = {
+    executiveSummary:      'Executive Summary',
+    currentState:          'Current State Analysis',
+    investmentAnalysis:    'AI Investment Analysis & Cost Model',
+    scenarioProjections:   'Three-Scenario Projections & Hurdle Rate Analysis',
+    riskAssessment:        'Risk Assessment',
+    sensitivityAnalysis:   'Sensitivity Analysis',
+    extendedSensitivity:   'Variable Sensitivity Analysis (Extended)',
+    monteCarlo:            'Monte Carlo Simulation',
+    valueBreakdown:        'Value Creation Breakdown',
+    valuePathways:         'Value Creation Pathways',
+    capitalEfficiencyGates:'Capital Efficiency & Deployment Gates',
+    opportunityCost:       'Opportunity Cost & Scalability',
+    peerComparison:        'Industry Peer Comparison & Confidence Intervals',
+    workforceAlternatives: 'Capital Allocation: AI vs. Alternatives',
+    breakEvenUnits:        'Break-Even Unit Economics',
+    consultingAssumptions: 'AI Cost Model & Technical Assumptions',
+    recommendations:       'Recommendations & Next Steps',
+    qualitativeBenefits:   'Qualitative Benefits',
+    caseStudy:             'Case Study: Mid-Market Financial Services',
+    maturityPremium:       'AI Maturity Premium',
+    inputAssumptions:      'Selected AI Use Case & Model Inputs',
+    appendixMethodology:   'Appendix A: Calculation Walkthrough & DCF Model',
+    appendixBenchmarks:    'Appendix B: Source References & Benchmarks',
+    appendixCostAssumptions: 'Appendix C: Definitions, Assumptions & Disclosures',
+  };
 
-  // Filter to only included pages and assign sequential page numbers
+  // Build TOC entries in the exact order of includedPages
   // Page 1 = executive summary, page 2 = TOC, then content pages start at 3
   let pageNum = 3;
   const tocEntries = [];
   // Always include executive summary as page 1
   tocEntries.push({ title: 'Executive Summary', page: 1 });
-  for (const entry of allTocEntries) {
-    if (entry.key === 'executiveSummary') continue; // already added
-    if (entry.key === 'tableOfContents') continue;
-    if (!includedPages.includes(entry.key)) continue;
-    tocEntries.push({ title: entry.title, page: pageNum });
-    // Some pages span 2 pages
-    if (entry.key === 'appendixMethodology' || entry.key === 'appendixCostAssumptions') {
-      pageNum += 2;
-    } else {
-      pageNum += 1;
-    }
+
+  // Multi-page sections (known to span 2+ pages)
+  const MULTI_PAGE = new Set(['appendixMethodology', 'appendixCostAssumptions']);
+
+  for (const key of includedPages) {
+    if (key === 'executiveSummary' || key === 'tableOfContents') continue;
+    const title = TOC_TITLES[key];
+    if (!title) continue;
+    tocEntries.push({ title, page: pageNum });
+    pageNum += MULTI_PAGE.has(key) ? 2 : 1;
   }
 
   tocEntries.forEach((entry) => {
@@ -643,19 +748,26 @@ function page3_InvestmentAnalysis(doc, formData, results) {
   y += 4;
 
   const ai = results.aiCostModel;
+  const deployment = getDeploymentPlanSummary(formData, results);
 
-  // AI Implementation Team Cost Breakdown
+  // AI Deployment Cost Breakdown
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...NAVY);
-  doc.text('AI Implementation Cost Model [7][8]', MARGIN, y);
+  doc.text('AI Deployment Cost Model', MARGIN, y);
   y += 2;
-  y = bodyText(doc, `Based on ${formData.teamLocation || 'Remote'} salaries (${formatCurrency(ai.aiSalary)}/yr fully-loaded [7][8]) and ${results.riskAdjustments.adjustedTimeline}-month timeline.`, MARGIN, y, { size: 8, color: MID_GRAY });
+  y = bodyText(
+    doc,
+    `Uses the ${deployment.label.toLowerCase()} delivery scenario (${formatPercent(deployment.staffingMultiplier)} deployment staffing/cost; ${formatPercent(deployment.durationMultiplier)} duration) and a ${results.riskAdjustments.adjustedTimeline}-month timeline.`,
+    MARGIN,
+    y,
+    { size: 8, color: MID_GRAY },
+  );
   y += 2;
 
   const implRows = [
-    [`AI/ML Engineers (${ai.implEngineers} FTE x ${ai.implTimelineYears.toFixed(1)} yr)`, formatCurrency(ai.implEngineeringCost)],
-    [`Project Management (${ai.implPMs} FTE x ${ai.implTimelineYears.toFixed(1)} yr)`, formatCurrency(ai.implPMCost)],
+    [`Deployment engineering (${ai.implEngineers} FTE x ${ai.implTimelineYears.toFixed(1)} yr)`, formatCurrency(ai.implEngineeringCost)],
+    [`Deployment management (${ai.implPMs} FTE x ${ai.implTimelineYears.toFixed(1)} yr)`, formatCurrency(ai.implPMCost)],
     ['Infrastructure & Tooling (12%)', formatCurrency(ai.implInfraCost)],
     ['Training & Knowledge Transfer (8%)', formatCurrency(ai.implTrainingCost)],
   ];
@@ -753,8 +865,10 @@ function page3_InvestmentAnalysis(doc, formData, results) {
       ['Security & Privacy Audit', formatCurrency(ot.securityAuditCost)],
       [`Contingency Reserve (${(CONTINGENCY_RATE * 100).toFixed(0)}%) [10]`, formatCurrency(ot.contingencyReserve)],
     ];
-    if (ot.vendorTerminationCost > 0) {
-      otRows.push([`Vendor Contract Termination (${ot.vendorsReplaced} vendor${ot.vendorsReplaced > 1 ? 's' : ''})`, formatCurrency(ot.vendorTerminationCost)]);
+    const contractExitCost = ot.effectiveContractExitCost ?? ot.vendorTerminationCost;
+    if (contractExitCost > 0) {
+      const contractCount = ot.existingContractCount ?? ot.vendorsReplaced ?? 0;
+      otRows.push([`Contract Cancellation / Termination (${contractCount} contract${contractCount === 1 ? '' : 's'})`, formatCurrency(contractExitCost)]);
     }
 
     autoTable(doc, {
@@ -786,9 +900,13 @@ function page3_InvestmentAnalysis(doc, formData, results) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(...NAVY);
-    doc.text('Workforce Separation Costs (Phased FY 2-5) [15][21]', MARGIN, y);
+    doc.text('Workforce Separation Costs (Phased Model Schedule)', MARGIN, y);
     y += 2;
-    y = bodyText(doc, `${ot.displacedFTEs} of ${ot.displacedFTEs + ot.retainedFTEs} roles phased out over 4 years (${ot.retainedFTEs} retained — ${formatPercent(1 - MAX_HEADCOUNT_REDUCTION)} always human). FY 1 is enhancement only.`, MARGIN, y, { size: 8, color: MID_GRAY });
+    const separationYears = (ot.separationPhasing || [])
+      .map((pct, index) => (pct > 0 ? `FY ${index + 1}` : null))
+      .filter(Boolean)
+      .join(', ');
+    y = bodyText(doc, `${ot.displacedFTEs} of ${ot.displacedFTEs + ot.retainedFTEs} roles are included in the transition plan. Separation costs are phased across ${separationYears || 'the schedule below'}; validate the workforce action and HR cost before treating it as cash savings.`, MARGIN, y, { size: 8, color: MID_GRAY });
     y += 2;
 
     const sepRows = [];
@@ -1582,7 +1700,7 @@ function page7_Recommendations(doc, recommendation) {
 }
 
 // ---------------------------------------------------------------------------
-// Page 8: Input Assumptions & Model Parameters
+// Page 8: Selected AI Use Case & Model Inputs
 // ---------------------------------------------------------------------------
 
 function page8_InputAssumptions(doc, formData, results) {
@@ -1590,61 +1708,99 @@ function page8_InputAssumptions(doc, formData, results) {
   addHeader(doc, 8);
 
   let y = 25;
-  y = sectionTitle(doc, 'Input Assumptions & Model Parameters', y);
+  y = sectionTitle(doc, 'Selected AI Use Case & Model Inputs', y);
   y += 4;
 
-  // --- Your Inputs ---
+  const selectedCase = getSelectedCaseReportSummary(formData);
+  const workforce = getWorkforceMixSummary(formData, results);
+  const deployment = getDeploymentPlanSummary(formData, results);
+  const caseEconomics = results.caseEconomics || {};
+  const ai = results.aiCostModel || {};
+
+  // The selected case comes first. It is deliberately simple enough to be
+  // read without looking up a separate, generic assumptions tab.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...NAVY);
-  doc.text('Your Inputs', MARGIN, y);
+  doc.text(selectedCase.label, MARGIN, y);
   y += 6;
 
-  const errorPct = formData.errorRate != null ? `${(formData.errorRate * 100).toFixed(0)}%` : 'N/A';
-
-  const inputRows = [
-    ['Industry', formData.industry || 'N/A'],
-    ['Company Size', formData.companySize || 'N/A'],
-    ['AI Team Location', formData.teamLocation || 'N/A'],
-    ['Project Archetype', (getArchetypeById(formData.projectArchetype) || {}).label || formData.processType || 'N/A'],
-    ['Team Size', `${formData.teamSize || 0} people`],
-    ['Hours per Person per Week', `${formData.hoursPerWeek || 0} hours`],
-    ['Avg Fully-Loaded Cost per Person', formatCurrency(formData.avgSalary || 0)],
-    ['Error / Rework Rate', errorPct],
-    ['Current Tool / Software Costs', formatCurrency(formData.currentToolCosts || 0)],
-    ['Stated Implementation Budget', formatCurrency(formData.implementationBudget || 0)],
-    ['Expected Timeline', `${formData.expectedTimeline || 'N/A'} months`],
-    ['Stated Ongoing Annual AI Cost', formatCurrency(formData.ongoingAnnualCost || 0)],
-    ['Change Readiness', `${formData.changeReadiness || 0} / 5`],
-    ['Data Readiness', `${formData.dataReadiness || 0} / 5`],
-    ['Executive Sponsor', formData.execSponsor ? 'Yes' : 'No'],
+  const selectedCaseRows = [
+    ['1. Inputs', selectedCase.inputSummary],
+    ['2. Assumption', selectedCase.caseGuide.assumption],
+    ['3. Calculation', selectedCase.caseGuide.calculation],
+    ['4. Footnote', selectedCase.caseGuide.footnote],
   ];
 
   autoTable(doc, {
     startY: y,
-    head: [['Parameter', 'Value']],
-    body: inputRows,
+    head: [['Case component', 'How this use case is modeled']],
+    body: selectedCaseRows,
     ...autoTableTheme(),
-    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 7.5, cellPadding: 1.5 },
+    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 7.2, cellPadding: 1.6 },
     headStyles: { ...autoTableTheme().headStyles, fontSize: 7.5, cellPadding: 1.5 },
     columnStyles: {
-      0: { cellWidth: CONTENT_W * 0.55 },
-      1: { cellWidth: CONTENT_W * 0.45, halign: 'right' },
+      0: { cellWidth: CONTENT_W * 0.24, fontStyle: 'bold' },
+      1: { cellWidth: CONTENT_W * 0.76 },
     },
   });
 
   y = doc.lastAutoTable.finalY + 6;
 
-  // --- Derived Model Parameters ---
+  // --- Shared assumptions ---
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...NAVY);
-  doc.text('Derived Model Parameters', MARGIN, y);
+  doc.text('Shared Assumptions', MARGIN, y);
   y += 2;
 
   y = bodyText(
     doc,
-    'Computed from your inputs using industry benchmarks and risk models.',
+    'These common inputs apply after the selected use case establishes the workload and efficiency ceiling.',
+    MARGIN,
+    y,
+    { size: 8, color: MID_GRAY },
+  );
+  y += 2;
+
+  const errorPct = formData.errorRate != null ? `${(formData.errorRate * 100).toFixed(0)}%` : 'N/A';
+  const sharedRows = [
+    ['Workforce mix', workforce.label],
+    ['Hours per person on this process', `${formData.hoursPerWeek || 0} hours/week`],
+    ['Weighted fully burdened workforce cost', formatCurrency(workforce.weightedFullyBurdenedCost)],
+    ['Deployment rate basis', 'Weighted workforce mix and delivery pace'],
+    ['Current annual tool / software cost', formatCurrency(formData.currentToolCosts || 0)],
+    ['Error / rework baseline', errorPct],
+    ['Delivery pace', `${deployment.label}: ${formatPercent(deployment.staffingMultiplier)} staffing/cost; ${formatPercent(deployment.durationMultiplier)} duration`],
+    ['Implementation budget / stated annual AI cost', `${formatCurrency(formData.implementationBudget || 0)} / ${formatCurrency(formData.ongoingAnnualCost || 0)}`],
+    ['Change readiness / data readiness / sponsor', `${formData.changeReadiness || 0} / 5; ${formData.dataReadiness || 0} / 5; ${formData.execSponsor ? 'Yes' : 'No'}`],
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Shared assumption', 'Entered value']],
+    body: sharedRows,
+    ...autoTableTheme(),
+    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 7.2, cellPadding: 1.5 },
+    headStyles: { ...autoTableTheme().headStyles, fontSize: 7.5, cellPadding: 1.5 },
+    columnStyles: {
+      0: { cellWidth: CONTENT_W * 0.53 },
+      1: { cellWidth: CONTENT_W * 0.47, halign: 'right' },
+    },
+  });
+
+  y = doc.lastAutoTable.finalY + 6;
+
+  // --- Calculated values ---
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...NAVY);
+  doc.text('Calculated Model Outputs', MARGIN, y);
+  y += 2;
+
+  y = bodyText(
+    doc,
+    'The model uses the selected case first, then applies adoption, readiness, cost, and cash-realization rules. Source references are in Appendix B.',
     MARGIN,
     y,
     { size: 8, color: MID_GRAY },
@@ -1653,32 +1809,20 @@ function page8_InputAssumptions(doc, formData, results) {
 
   const adoptionMult = ADOPTION_MULTIPLIERS[formData.changeReadiness] || 0.70;
   const dataTimeMult = DATA_TIMELINE_MULTIPLIER[formData.dataReadiness] || 1.10;
-  const dataCostMult = DATA_COST_MULTIPLIER[formData.dataReadiness] || 1.10;
-  const sizeMult = SIZE_MULTIPLIER[formData.companySize] || 1.0;
-
-  const ai = results.aiCostModel;
   const derivedRows = [
-    ['Automation Potential (industry x process benchmark)', formatPercent(results.benchmarks.automationPotential)],
-    ['Industry Success Rate', formatPercent(results.benchmarks.industrySuccessRate)],
+    ['Case workload', `${Math.round(caseEconomics.caseWorkloadHoursPerWeek || 0).toLocaleString()} hours/week`],
+    ['Available process capacity', `${Math.round(caseEconomics.availableProcessHoursPerWeek || 0).toLocaleString()} hours/week`],
+    ['Effective efficiency ceiling', formatPercent(caseEconomics.efficiencyCeilingPct || results.benchmarks?.automationPotential || 0)],
+    ['Automation potential used in model', formatPercent(results.benchmarks?.automationPotential || 0)],
     [`Adoption Multiplier (change readiness = ${formData.changeReadiness})`, formatPercent(adoptionMult)],
-    ['Executive Sponsor Adjustment', formatPercent(results.riskAdjustments.sponsorAdjustment)],
-    [`Data Readiness Cost Multiplier (score = ${formData.dataReadiness})`, `${dataCostMult.toFixed(2)}x`],
-    ['Data Readiness Timeline Multiplier', `${dataTimeMult.toFixed(2)}x`],
-    ['Company Size Multiplier', `${sizeMult.toFixed(2)}x`],
-    ['AI Engineer Salary (fully-loaded)', formatCurrency(ai.aiSalary)],
+    ['Executive sponsor adjustment', formatPercent(results.riskAdjustments?.sponsorAdjustment || 0)],
+    [`Data-readiness timeline multiplier (score = ${formData.dataReadiness})`, `${dataTimeMult.toFixed(2)}x`],
     ['Impl. Team: Engineers / PMs', `${ai.implEngineers} / ${ai.implPMs}`],
-    ['Computed Implementation Cost', formatCurrency(ai.computedImplCost)],
-    ['Realistic Implementation Cost (model-adjusted)', formatCurrency(ai.realisticImplCost)],
-    ['Ongoing AI Ops Headcount', `${ai.ongoingAiHeadcount} FTE`],
-    ['Computed Annual Ongoing Cost', formatCurrency(ai.computedOngoingCost)],
-    ['FY 1 Ongoing Cost (model-adjusted)', formatCurrency(ai.baseOngoingCost)],
-    ['Risk-Adjusted Timeline', `${results.riskAdjustments.adjustedTimeline} months`],
+    ['Implementation cost used in model', formatCurrency(ai.realisticImplCost || ai.computedImplCost || 0)],
+    ['Annual AI cost used in model', formatCurrency(ai.baseOngoingCost || ai.computedOngoingCost || 0)],
+    ['Risk-adjusted timeline', `${results.riskAdjustments?.adjustedTimeline || 0} months`],
     ['Discount Rate (WACC proxy) [26]', formatPercent(results.discountRate || 0.10)],
-    ['Adoption Ramp (FY 1-5)', ADOPTION_RAMP.map((r) => (r * 100).toFixed(0) + '%').join(' / ')],
-    ['Scenario Multipliers (Cons / Base / Opt)', '0.75x / 1.00x / 1.25x'],
-    ['Base Case ROIC Cap [2]', `${(MAX_BASE_ROIC * 100).toFixed(0)}% max`],
-    ['Base Case IRR Cap [2][4]', `${(MAX_BASE_IRR * 100).toFixed(0)}% max`],
-    ['Vendor Lock-In Risk', results.vendorLockIn.level],
+    ['Model guardrail', caseEconomics.workloadBlocked ? 'Workload exceeds stated capacity — resolve before relying on ROI' : 'Workload/capacity reconciliation passed'],
   ];
 
   autoTable(doc, {
@@ -1686,7 +1830,7 @@ function page8_InputAssumptions(doc, formData, results) {
     head: [['Derived Parameter', 'Value']],
     body: derivedRows,
     ...autoTableTheme(),
-    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 7, cellPadding: 1.5 },
+    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 7.2, cellPadding: 1.5 },
     headStyles: { ...autoTableTheme().headStyles, fontSize: 7, cellPadding: 1.5 },
     columnStyles: {
       0: { cellWidth: CONTENT_W * 0.65 },
@@ -1965,15 +2109,16 @@ function page10_AppendixMethodology(doc, formData, results) {
   y += 6;
 
   const ai = results.aiCostModel;
+  const deployment = getDeploymentPlanSummary(formData, results);
 
   calcStep(
-    'AI engineering labor',
-    `${ai.implEngineers} engineers x ${formatCurrency(ai.aiSalary)}/yr x ${ai.implTimelineYears.toFixed(1)} yr`,
+    'Deployment engineering',
+    `${ai.implEngineers} FTE across ${ai.implTimelineYears.toFixed(1)} yr at the ${deployment.label.toLowerCase()} delivery pace`,
     formatCurrency(ai.implEngineeringCost),
   );
   calcStep(
-    'Project management labor',
-    `${ai.implPMs} PMs x ${formatCurrency(Math.round(ai.aiSalary * 0.85))}/yr x ${ai.implTimelineYears.toFixed(1)} yr`,
+    'Deployment management',
+    `${ai.implPMs} FTE across ${ai.implTimelineYears.toFixed(1)} yr; staffing/cost adjustment ${formatPercent(deployment.staffingMultiplier)}`,
     formatCurrency(ai.implPMCost),
   );
   calcStep(
@@ -2428,6 +2573,16 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   }
 
   // =====================================================================
+  // SELECTED AI USE CASE GLOSSARY
+  // =====================================================================
+  const selectedCase = getSelectedCaseReportSummary(formData);
+  subSection(`Selected AI Use Case Glossary — ${selectedCase.label}`);
+  defItem('Inputs', selectedCase.inputSummary);
+  defItem('Assumption', selectedCase.caseGuide.assumption);
+  defItem('Calculation', selectedCase.caseGuide.calculation);
+  defItem('Footnote', selectedCase.caseGuide.footnote);
+
+  // =====================================================================
   // I. BASIS OF PRESENTATION
   // =====================================================================
   subSection('I. Basis of Presentation');
@@ -2509,14 +2664,14 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     '85% without or 100% with a sponsor, reflecting documented failure rates for unsponsored projects; and industry ' +
     'success rate (45%-72%) reflects the documented rate at which AI projects in each industry achieve target ' +
     'outcomes [3][4][5]. Additionally, a 5-FY adoption ramp (60%, 85%, 100%, 100%, 100%) is applied [14]. ' +
-    'Headcount reduction is phased over FY 2-5 (FY 1 is enhancement only) and capped at 75% — 25% of roles always require humans [21].'
+    'For an explicit workforce plan, only declared redundancies are treated as cash savings and are capped by measured freed capacity; severance follows the stated 50% / 30% / 20% FY 1–3 model schedule.'
   );
   defItem('D. Implementation Cost Model',
-    'Implementation costs are estimated using a staffing model calibrated to industry salary data [7][8]. ' +
-    'The model derives engineering headcount from team scope (1 engineer per ~12 end users), adjusts for ' +
-    'timeline pressure and data readiness, and adds project management (1 PM per 4-5 engineers). ' +
-    'Infrastructure (12%) and training (8%) allocations are applied. The higher of the user-stated budget ' +
-    '(adjusted for data readiness risk) and the computed staffing cost is used, preventing underestimation.'
+    'Implementation costs use the entered direct-employee and contractor workforce mix as the deployment-rate basis when it is available. ' +
+    'The selected delivery pace is a transparent model scenario: Accelerated applies 120% staffing/cost and 80% duration; ' +
+    'Extended applies 80% staffing/cost and 125% duration. The model derives deployment staffing from team scope, timeline pressure, ' +
+    'and data readiness, then adds infrastructure (12%) and training (8%). The higher of the user-stated budget ' +
+    '(adjusted for data readiness risk) and the computed deployment cost is used, preventing underestimation. Delivery-pace deltas are planning rules, not external benchmarks.'
   );
   defItem('E. Ongoing Operational Costs',
     'Post-implementation costs include AI operations team labor (25% of implementation team, minimum 0.5 FTE), ' +
@@ -2531,11 +2686,10 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     'pricing early on that stabilizes over time. The higher of user-stated and model-computed ongoing costs is used.'
   );
   defItem('F. Separation and Transition Costs',
-    'Total separation cost for displaced employees is modeled as a multiple of annual salary (0.80x-1.50x by ' +
-    'company size), encompassing severance pay (55%), benefits continuation/COBRA (15%), outplacement services (12%), ' +
-    'administrative processing (10%), and legal review (8%) [15]. Separation is phased over FY 2-5 following the ' +
-    'headcount reduction schedule (0%, 20%, 25%, 20%, 10%), NOT charged as upfront costs. FY 1 is enhancement only — ' +
-    'no employees are separated on Day 1 [21].'
+    'For an explicit workforce plan, the workbook applies a transparent 1.5x fully burdened employee-cost rule to declared redundancies. ' +
+    'SHRM [15] provides contextual 1.0x-1.5x annual-salary guidance; it does not directly prove a fully burdened-cost multiplier. ' +
+    'The model schedules severance 50% / 30% / 20% across FY 1–3, rather than charging the full amount upfront. ' +
+    'Validate the actual HR, legal, and contractual cost before treating the result as a forecast.'
   );
   defItem('G. Empirical Return Ceilings',
     'Base case ROIC is capped at ' + (MAX_BASE_ROIC * 100).toFixed(0) + '% and base case IRR at ' +
@@ -2563,39 +2717,47 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   subSection('IV. Cost Assumption Schedules');
 
   sectionPara(
-    'The following schedules disclose all material cost assumptions used in the model. All salary figures ' +
-    'represent fully-loaded annual compensation. API cost data reflects 2025-2026 enterprise model pricing. ' +
+    'The following schedules disclose all material cost assumptions used in the model. Workforce costs use the entered ' +
+    'fully burdened employee and contractor rates, while delivery pace is a transparent planning scenario. API cost data reflects 2025-2026 enterprise model pricing. ' +
     'Bracketed numbers reference sources listed in Appendix B.'
   );
 
-  // Schedule 1: Salaries
+  // Schedule 1: Workforce mix and deployment pace
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...NAVY);
   checkPageBreak(45);
-  doc.text('Schedule 1: AI/ML Engineer Compensation by Location [7][8]', MARGIN, y);
+  doc.text('Schedule 1: Workforce Mix & Delivery Pace', MARGIN, y);
   y += 5;
 
-  const salaryRows = Object.entries(AI_TEAM_SALARY).map(([loc, sal]) => [
-    loc,
-    formatCurrency(sal),
-    loc === formData.teamLocation ? 'Selected' : '',
-  ]);
-  if (formData.teamLocation === 'Blended' && formData.blendedAISalary) {
-    salaryRows.push(['Blended (US + Offshore)', formatCurrency(formData.blendedAISalary), 'Selected']);
-  }
+  const workforce = getWorkforceMixSummary(formData, results);
+  const deployment = getDeploymentPlanSummary(formData, results);
+  const mixRows = workforce.hasWorkforceMix
+    ? [
+      ['Direct employees', `${workforce.directEmployeeCount}`, 'User-entered fully burdened employee cost'],
+      ['Offshore contractors', `${workforce.contractorCount}`, 'User-entered fully burdened contractor cost'],
+      ['Weighted workforce cost', formatCurrency(workforce.weightedFullyBurdenedCost), 'Deployment-rate basis'],
+    ]
+    : [
+      ['Current process workforce', `${workforce.totalHeadcount} people`, 'Aggregate workforce; validate employee/contractor mix'],
+      ['Weighted workforce cost', formatCurrency(workforce.weightedFullyBurdenedCost), 'Legacy aggregate rate pending workforce-mix validation'],
+    ];
+  mixRows.push(
+    ['Delivery pace', deployment.label, `${formatPercent(deployment.staffingMultiplier)} staffing/cost; ${formatPercent(deployment.durationMultiplier)} duration`],
+    ['Estimated deployment labor cost', deployment.estimatedDeploymentLaborCost == null ? 'N/A' : formatCurrency(deployment.estimatedDeploymentLaborCost), 'Before infrastructure, training, and readiness adjustments'],
+  );
 
   autoTable(doc, {
     startY: y,
-    head: [['Location', 'Fully-Loaded Annual Cost', '']],
-    body: salaryRows,
+    head: [['Planning Input', 'Value', 'How It Is Used']],
+    body: mixRows,
     ...autoTableTheme(),
     styles: { ...autoTableTheme().styles, fontSize: 7.5, cellPadding: 2 },
     headStyles: { ...autoTableTheme().headStyles, fontSize: 7.5, cellPadding: 2 },
     columnStyles: {
       0: { cellWidth: CONTENT_W * 0.42 },
       1: { cellWidth: CONTENT_W * 0.30, halign: 'right' },
-      2: { cellWidth: CONTENT_W * 0.28, fontStyle: 'italic', textColor: GOLD },
+      2: { cellWidth: CONTENT_W * 0.28, fontStyle: 'italic', textColor: MID_GRAY },
     },
   });
 
@@ -2758,7 +2920,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     ['Sensitivity Analysis',
       'A deterministic analysis that varies each input variable independently while holding all others constant, measuring the resulting change in NPV. Identifies which assumptions most materially affect the business case.'],
     ['Total Separation Cost',
-      'The fully burdened cost of separating a displaced employee, including severance pay, benefits continuation (COBRA), outplacement services, legal review, and administrative processing. Modeled as 0.80x-1.50x of annual salary by company size [15].'],
+      'The modeled cost of separating an explicitly redundant employee. This version applies 1.5x of fully burdened cost as a transparent planning rule, paid 50% / 30% / 20% across FY 1–3. SHRM [15] is context for annual-salary separation ranges, so validate the company-specific amount.'],
   ];
 
   definitions.forEach(([term, def]) => {
@@ -2856,6 +3018,49 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
 // NEW PAGE: Value Creation Breakdown
 // ---------------------------------------------------------------------------
 
+const reportAmount = (value) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+
+/**
+ * Report value categories intentionally exclude `archetypeRevenue`. A legacy
+ * revenue forecast is not a measured operating saving. Customer support cost
+ * avoidance appears only when the calculation model validates that input.
+ */
+export function getReportValueBreakdownCategories(valueBreakdown = {}) {
+  const categories = [
+    ['Headcount Optimization', valueBreakdown.headcount],
+    ['Efficiency Gains', valueBreakdown.efficiency],
+    ['Error Reduction', valueBreakdown.errorReduction],
+    ['Tool Replacement [16]', valueBreakdown.toolReplacement],
+  ].map(([label, bucket]) => ({
+    label,
+    gross: reportAmount(bucket?.gross),
+    riskAdjusted: reportAmount(bucket?.riskAdjusted),
+  }));
+
+  if (reportAmount(valueBreakdown.contractExit?.gross) > 0 || reportAmount(valueBreakdown.contractExit?.riskAdjusted) > 0) {
+    categories.push({
+      label: 'Existing contract savings',
+      gross: reportAmount(valueBreakdown.contractExit?.gross),
+      riskAdjusted: reportAmount(valueBreakdown.contractExit?.riskAdjusted),
+    });
+  }
+
+  if (reportAmount(valueBreakdown.caseDirectSavings?.gross) > 0 || reportAmount(valueBreakdown.caseDirectSavings?.riskAdjusted) > 0) {
+    const suppliedLabel = typeof valueBreakdown.caseDirectSavings?.label === 'string'
+      ? valueBreakdown.caseDirectSavings.label.trim()
+      : '';
+    categories.push({
+      label: suppliedLabel && !/revenue/i.test(suppliedLabel)
+        ? suppliedLabel
+        : 'Verified customer support cost avoidance',
+      gross: reportAmount(valueBreakdown.caseDirectSavings?.gross),
+      riskAdjusted: reportAmount(valueBreakdown.caseDirectSavings?.riskAdjusted),
+    });
+  }
+
+  return categories;
+}
+
 function pageN_ValueBreakdown(doc, results) {
   doc.addPage();
   addHeader(doc);
@@ -2865,24 +3070,21 @@ function pageN_ValueBreakdown(doc, results) {
   y += 4;
 
   y = bodyText(doc,
-    'Gross annual savings are decomposed into four value categories, then risk-adjusted ' +
+    'Gross annual savings are decomposed into cash and cost value categories, then risk-adjusted ' +
     'using a blended average of organizational readiness and industry success rate.',
     MARGIN, y, { size: 9, color: MID_GRAY });
   y += 6;
 
-  const vb = results.valueBreakdown;
-  const categories = [
-    ['Headcount Optimization', vb.headcount.gross, vb.headcount.riskAdjusted],
-    ['Efficiency Gains', vb.efficiency.gross, vb.efficiency.riskAdjusted],
-    ['Error Reduction', vb.errorReduction.gross, vb.errorReduction.riskAdjusted],
-    ['Tool Replacement [16]', vb.toolReplacement.gross, vb.toolReplacement.riskAdjusted],
-  ];
+  const vb = results.valueBreakdown || {};
+  const categories = getReportValueBreakdownCategories(vb);
+  const totalGross = categories.reduce((sum, category) => sum + category.gross, 0);
+  const totalRiskAdjusted = categories.reduce((sum, category) => sum + category.riskAdjusted, 0);
 
-  const vbRows = categories.map(([label, gross, adj]) => [
+  const vbRows = categories.map(({ label, gross, riskAdjusted }) => [
     label,
     formatCurrency(gross),
-    formatCurrency(adj),
-    vb.totalRiskAdjusted > 0 ? formatPercent(adj / vb.totalRiskAdjusted) : '0%',
+    formatCurrency(riskAdjusted),
+    totalRiskAdjusted > 0 ? formatPercent(riskAdjusted / totalRiskAdjusted) : '0%',
   ]);
 
   autoTable(doc, {
@@ -2906,8 +3108,8 @@ function pageN_ValueBreakdown(doc, results) {
   doc.setFontSize(9);
   doc.setTextColor(...WHITE);
   doc.text('Total', MARGIN + 4, y + 7);
-  doc.text(formatCurrency(vb.totalGross), MARGIN + CONTENT_W * 0.35 + CONTENT_W * 0.22 - 4, y + 7, { align: 'right' });
-  doc.text(formatCurrency(vb.totalRiskAdjusted), MARGIN + CONTENT_W * 0.35 + CONTENT_W * 0.44 - 4, y + 7, { align: 'right' });
+  doc.text(formatCurrency(totalGross), MARGIN + CONTENT_W * 0.35 + CONTENT_W * 0.22 - 4, y + 7, { align: 'right' });
+  doc.text(formatCurrency(totalRiskAdjusted), MARGIN + CONTENT_W * 0.35 + CONTENT_W * 0.44 - 4, y + 7, { align: 'right' });
   doc.text('100%', PAGE_W - MARGIN - 4, y + 7, { align: 'right' });
   y += 18;
 
@@ -2950,7 +3152,7 @@ function pageN_ValuePathways(doc, results) {
 
   y = bodyText(doc,
     'AI value is measured through three complementary lenses: direct cost efficiency ' +
-    '(cash savings from automation), capacity creation (freed hours and revenue acceleration), ' +
+    '(cash savings from automation), capacity creation (freed hours available for redeployment), ' +
     'and risk reduction (regulatory/compliance protection). Each pathway has an independent ' +
     'NPV inclusion toggle — only pathways marked "Included in NPV" flow into the financial model.',
     MARGIN, y, { size: 9, color: MID_GRAY });
@@ -2998,7 +3200,7 @@ function pageN_ValuePathways(doc, results) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...NAVY);
-  doc.text('B. Capacity Creation — Freed Hours + Revenue Acceleration', MARGIN + 4, y + 7);
+  doc.text('B. Capacity Creation — Freed Hours for Redeployment', MARGIN + 4, y + 7);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
@@ -3008,8 +3210,7 @@ function pageN_ValuePathways(doc, results) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...MID_GRAY);
-  const capDetails = `${Math.round(vp.capacityCreation.hoursFreed).toLocaleString()} hrs freed  |  ${vp.capacityCreation.fteEquivalent.toFixed(1)} FTE equiv` +
-    (vp.capacityCreation.revenueAcceleration > 0 ? `  |  Rev accel: ${formatCompactValue(vp.capacityCreation.revenueAcceleration)}` : '');
+  const capDetails = `${Math.round(vp.capacityCreation.hoursFreed).toLocaleString()} hrs freed  |  ${vp.capacityCreation.fteEquivalent.toFixed(1)} FTE equiv`;
   doc.text(capDetails, MARGIN + 4, y + 15);
 
   doc.setFont('helvetica', 'normal');
@@ -3209,7 +3410,7 @@ function pageN_CapitalEfficiencyGates(doc, results) {
 // NEW PAGE: Opportunity Cost & Scalability
 // ---------------------------------------------------------------------------
 
-function pageN_OpportunityCostRevenue(doc, results) {
+function pageN_OpportunityCost(doc, results) {
   doc.addPage();
   addHeader(doc);
 
@@ -3307,45 +3508,6 @@ function pageN_OpportunityCostRevenue(doc, results) {
     });
   }
 
-  // Revenue Enablement (informational — not in NPV/ROIC)
-  const revEn = results.revenueEnablement;
-  if (revEn && revEn.eligible) {
-    y += 12;
-    y = sectionTitle(doc, 'Revenue Enablement Potential (Informational)', y);
-    y += 4;
-
-    y = bodyText(doc,
-      'Estimated annual revenue uplift from AI-driven improvements. These figures are informational only ' +
-      'and are NOT included in NPV or ROIC calculations. All values are risk-adjusted and discounted.',
-      MARGIN, y, { size: 9, color: MID_GRAY });
-    y += 4;
-
-    const revRows = [
-      ['Time-to-Market Acceleration', formatCurrency(revEn.timeToMarket)],
-      ['Customer Experience Improvement', formatCurrency(revEn.customerExperience)],
-      ['New Capability Enablement', formatCurrency(revEn.newCapability)],
-    ];
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Revenue Driver', 'Annual Estimate']],
-      body: revRows,
-      ...autoTableTheme(),
-      columnStyles: {
-        0: { cellWidth: CONTENT_W * 0.65 },
-        1: { cellWidth: CONTENT_W * 0.35, halign: 'right' },
-      },
-    });
-
-    y = doc.lastAutoTable.finalY + 2;
-
-    drawRoundedRect(doc, MARGIN, y, CONTENT_W, 10, 1.5, GREEN);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(...WHITE);
-    doc.text('Total Potential Revenue Uplift (not in NPV)', MARGIN + 4, y + 7);
-    doc.text(formatCurrency(revEn.totalAnnualRevenue), PAGE_W - MARGIN - 4, y + 7, { align: 'right' });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4356,36 +4518,45 @@ export default function generateReport(formData, results, recommendation, mcResu
   const tier = getOutputTier(formData.role);
   const includedPages = PDF_PAGES[tier] || PDF_PAGES.detailed;
 
-  const has = (key) => includedPages.includes(key);
+  // Page builder registry — keyed by the same strings used in PDF_PAGES.
+  // Rendering order is driven by the PDF_PAGES array so TOC page numbers
+  // always match the actual document order.
+  const PAGE_BUILDERS = {
+    currentState:            () => page2_CurrentState(doc, formData, results),
+    investmentAnalysis:      () => page3_InvestmentAnalysis(doc, formData, results),
+    scenarioProjections:     () => page4_ScenarioProjections(doc, results),
+    riskAssessment:          () => page5_RiskAssessment(doc, formData, results),
+    sensitivityAnalysis:     () => page6_SensitivityAnalysis(doc, results),
+    extendedSensitivity:     () => page9_ExtendedSensitivity(doc, results),
+    monteCarlo:              () => pageN_MonteCarlo(doc, results, mcResults),
+    valueBreakdown:          () => pageN_ValueBreakdown(doc, results),
+    valuePathways:           () => pageN_ValuePathways(doc, results),
+    capitalEfficiencyGates:  () => pageN_CapitalEfficiencyGates(doc, results),
+    opportunityCost:         () => pageN_OpportunityCost(doc, results),
+    peerComparison:          () => pageN_PeerComparison(doc, formData, results),
+    workforceAlternatives:   () => pageN_WorkforceAlternatives(doc, results),
+    breakEvenUnits:          () => pageN_BreakEvenUnits(doc, results),
+    consultingAssumptions:   () => pageN_ConsultingAssumptions(doc, results),
+    recommendations:         () => page7_Recommendations(doc, recommendation),
+    qualitativeBenefits:     () => pageN_QualitativeBenefits(doc),
+    caseStudy:               () => pageN_CaseStudy(doc),
+    maturityPremium:         () => pageN_MaturityPremium(doc),
+    inputAssumptions:        () => page8_InputAssumptions(doc, formData, results),
+    appendixMethodology:     () => page10_AppendixMethodology(doc, formData, results),
+    appendixBenchmarks:      () => page12_AppendixBenchmarks(doc, formData),
+    appendixCostAssumptions: () => page13_AppendixCostAssumptions(doc, formData, results),
+  };
 
-  // Page builders mapped to their keys
   // Always: Executive Summary (p1) + Table of Contents (p2)
   page1_ExecutiveSummary(doc, formData, results, recommendation);
   page2_TableOfContents(doc, includedPages);
 
-  if (has('currentState'))            page2_CurrentState(doc, formData, results);
-  if (has('valueBreakdown'))          pageN_ValueBreakdown(doc, results);
-  if (has('valuePathways'))           pageN_ValuePathways(doc, results);
-  if (has('capitalEfficiencyGates'))  pageN_CapitalEfficiencyGates(doc, results);
-  if (has('investmentAnalysis'))      page3_InvestmentAnalysis(doc, formData, results);
-  if (has('scenarioProjections'))     page4_ScenarioProjections(doc, results);
-  if (has('riskAssessment'))          page5_RiskAssessment(doc, formData, results);
-  if (has('sensitivityAnalysis'))     page6_SensitivityAnalysis(doc, results);
-  if (has('extendedSensitivity'))     page9_ExtendedSensitivity(doc, results);
-  if (has('monteCarlo'))              pageN_MonteCarlo(doc, results, mcResults);
-  if (has('opportunityCost'))         pageN_OpportunityCostRevenue(doc, results);
-  if (has('peerComparison'))          pageN_PeerComparison(doc, formData, results);
-  if (has('recommendations'))         page7_Recommendations(doc, recommendation);
-  if (has('qualitativeBenefits'))     pageN_QualitativeBenefits(doc);
-  if (has('workforceAlternatives'))   pageN_WorkforceAlternatives(doc, results);
-  if (has('breakEvenUnits'))          pageN_BreakEvenUnits(doc, results);
-  if (has('consultingAssumptions'))   pageN_ConsultingAssumptions(doc, results);
-  if (has('caseStudy'))               pageN_CaseStudy(doc);
-  if (has('maturityPremium'))         pageN_MaturityPremium(doc);
-  if (has('inputAssumptions'))        page8_InputAssumptions(doc, formData, results);
-  if (has('appendixMethodology'))     page10_AppendixMethodology(doc, formData, results);
-  if (has('appendixBenchmarks'))      page12_AppendixBenchmarks(doc, formData);
-  if (has('appendixCostAssumptions')) page13_AppendixCostAssumptions(doc, formData, results);
+  // Render content pages in the exact order defined by PDF_PAGES
+  for (const key of includedPages) {
+    if (key === 'executiveSummary' || key === 'tableOfContents') continue;
+    const builder = PAGE_BUILDERS[key];
+    if (builder) builder();
+  }
 
   // Use blob URL + <a> click to ensure download works
   const blob = doc.output('blob');

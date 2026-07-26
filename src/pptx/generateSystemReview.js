@@ -11,6 +11,8 @@ import {
   mapArchetypeInputs,
 } from '../logic/archetypeInputs';
 
+const SUPPORTED_ARCHETYPE_COUNT = PROJECT_ARCHETYPES.length;
+
 // ---------------------------------------------------------------------------
 // Colors
 // ---------------------------------------------------------------------------
@@ -121,46 +123,35 @@ function addWizardFlow(pptx) {
   s.background = { color: C.white };
   hdr(s, 'Wizard Flow Overview');
 
-  s.addText('Two Modes:  Quick (~2 min)  |  Detailed (~5 min)', {
+  s.addText('Two-step workflow: project economics first, then company context and the transition plan.', {
     x: 0.4, y: 0.9, w: 12.5, h: 0.35,
     fontSize: 12, fontFace: 'Arial', bold: true, color: C.blue,
   });
 
   const steps = [
     {
-      num: '1', label: 'Context & Readiness', color: C.blue,
+      num: '1', label: 'Project & Workforce', color: C.teal,
       subs: [
-        'Industry (dropdown, 10 options)',
-        'Company Size (segmented, 5 tiers)',
-        'Role (dropdown, 12 options)',
-        'Team Location (segmented, 8 regions)',
-        'Change Readiness (1-5 stars)',
-        'Data Readiness (1-5 stars)',
-        'Executive Sponsor (yes/no toggle)',
+        `Archetype Selection (${SUPPORTED_ARCHETYPE_COUNT} card grid)`,
+        'Case-specific operating drivers',
+        'Workload / capacity guardrails',
+        'Direct employees: count + fully burdened annual cost',
+        'Offshore contractors: count + fully burdened annual cost',
+        'Hours per person on the process',
+        'Existing contracts + notice-period exit cost',
       ],
     },
     {
-      num: '2', label: 'Project & Costs', color: C.teal,
+      num: '2', label: 'Context & Transition', color: C.blue,
       subs: [
-        'Archetype Selection (6 card grid)',
-        'Team Size (slider, 1-500)',
-        '8 archetype-specific inputs + computed summary card',
-        '[Detailed] Fine-tune assumptions (adoption rate, tool replacement, agentic toggle)',
-        'Avg Salary (currency input w/ presets)',
-        'Current Tool Costs (currency input)',
-        '[Detailed] Vendors Replaced, Termination Cost',
-      ],
-    },
-    {
-      num: '3', label: 'AI Investment', color: C.green,
-      subs: [
-        'Budget (segmented, 5 tiers: $25K-$1M+)',
-        '"What This Gets You" scope preview (engineers, PMs, timeline)',
-        'Timeline (4 options: 1-18 months)',
-        'Reality Check (industry benchmark vs selected)',
-        'Ongoing Annual Cost (currency)',
-        'Advanced: Cash Realization %, Annual Revenue, Contribution Margin',
-        'Value Toggles: Capacity Creation, Risk Reduction, Revenue Acceleration',
+        'Industry + company size planning envelope',
+        'Change readiness + data readiness',
+        'Executive sponsor',
+        'Defensible efficiency ceiling + freed capacity',
+        'Delivery pace: accelerated / standard / more time',
+        'Retraining vs. redundancy + phased severance',
+        'Measured error and rework baseline',
+        'Build / access / consumption / run cost review',
       ],
     },
   ];
@@ -189,7 +180,7 @@ function addWizardFlow(pptx) {
     });
   });
 
-  s.addText('Orange italic = Detailed mode only (skipped in Quick mode)', {
+  s.addText('All figures are entered or calculated from the selected operating case; no implementation-team location is collected.', {
     x: 0.4, y: 5.0, w: 12, h: 0.3,
     fontSize: 9, fontFace: 'Arial', color: C.amber, italic: true,
   });
@@ -203,16 +194,15 @@ function addCommonInputs(pptx) {
   s.background = { color: C.white };
   hdr(s, 'Common Inputs (All Archetypes)');
 
-  sectionTitle(s, 'Step 1: Context & Readiness', 0.9);
+  sectionTitle(s, 'Step 1: Project, Process & Workforce', 0.9);
 
   const ctx = [
-    ['Industry', 'Dropdown', '10 industries', 'Sets automation potential, benchmark timelines, discount rate, peer data'],
-    ['Company Size', 'Segmented', '5 tiers', 'Drives team defaults, implementation cost multipliers, compliance costs'],
-    ['Role', 'Dropdown', '12 roles', 'Controls output tier (executive/financial/detailed) for UI, PDF, Excel'],
-    ['Team Location', 'Segmented', '8 regions', 'Sets AI engineer salary rates for implementation cost model'],
-    ['Change Readiness', '1-5 Stars', 'Default: 3', 'Multiplier on adoption rate, hidden cost for change management'],
-    ['Data Readiness', '1-5 Stars', 'Default: 3', 'Timeline multiplier, data cleanup hidden cost, cost multiplier'],
-    ['Executive Sponsor', 'Yes/No', 'Default: Yes', 'Failure rate multiplier (2x without sponsor)'],
+    ['Project archetype', 'Card grid', `${SUPPORTED_ARCHETYPE_COUNT} supported cases`, 'Loads the case-specific operating drivers and guardrails'],
+    ['Operating drivers', 'Case-specific inputs', 'Volume, time, quality, or evidence', 'Calculates the measured case workload and efficiency ceiling'],
+    ['Direct employee mix', 'Number + currency', 'Count + fully burdened annual cost', 'Calculates current labor baseline and weighted deployment rate'],
+    ['Offshore contractor mix', 'Number + currency', 'Count + fully burdened annual cost', 'Added to the blended workforce cost; no location benchmark is substituted'],
+    ['Hours on this process', 'Number', '1-80 hours per person / week', 'Reconciles stated workforce capacity to the case workload'],
+    ['Existing contracts', 'Number + currency', 'Count, annual cost, notice period', 'Calculates recurring contract spend and one-time exit cost'],
   ];
 
   s.addTable([
@@ -235,15 +225,15 @@ function addCommonInputs(pptx) {
     border: { type: 'solid', pt: 0.5, color: C.gray200 },
   });
 
-  sectionTitle(s, 'Step 3: AI Investment (same for all archetypes)', 3.8);
+  sectionTitle(s, 'Step 2: Company Context & Transition Plan', 3.8);
 
   const inv = [
-    ['Implementation Budget', 'Segmented', '$25K-$50K / $50K-$150K / $150K-$500K / $500K-$1M / $1M+', 'Auto-computed from benchmarks; drives upfront investment in DCF'],
-    ['Timeline', '4 Buttons', '1-3mo / 3-6mo / 6-12mo / 12-18mo', 'Blended with industry benchmark; affects ramp curve and hidden costs'],
-    ['Ongoing Annual Cost', 'Currency', 'Pre-filled from benchmarks', 'API, licenses, support staff; deducted from gross savings each year'],
-    ['Cash Realization %', '3 Buttons', '25% / 40% / 60%', 'Converts efficiency gains to actual cash savings vs. redeployed capacity'],
-    ['Annual Revenue', 'Currency', 'Optional', 'Enables revenue acceleration + competitive erosion calculations'],
-    ['Value Toggles', 'Checkboxes', 'Capacity / Risk / Revenue', 'Adds non-cost pathways to NPV when checked'],
+    ['Industry + company size', 'Select + segmented', '10 industries / 5 company sizes', 'Sets the implementation planning envelope, not workforce cost'],
+    ['Readiness + sponsor', 'Cards + toggle', 'Readiness 1-5 / sponsor yes-no', 'Adjusts deployment pace, implementation risk, and required change work'],
+    ['Expected efficiency gain', 'Slider', 'Capped by case evidence', 'Calculates freed capacity; the model will not claim more than the operating ceiling'],
+    ['Delivery pace', 'Card selector', 'Accelerated / standard / more time', 'Accelerated adds 20% deployment staffing/cost; more time reduces each by 20%'],
+    ['Workforce transition', 'Number inputs', 'Retrain / redundant direct employees', 'Separates capacity from cash savings and phases one-time severance'],
+    ['AI cost buckets', 'Calculated + optional meters', 'Build / access / consumption / run', 'Keeps fixed and variable AI costs explicit and auditable'],
   ];
 
   s.addTable([
@@ -273,9 +263,9 @@ function addCommonInputs(pptx) {
 function addArchetypeGrid(pptx) {
   const s = pptx.addSlide();
   s.background = { color: C.white };
-  hdr(s, 'Step 2 — Archetype Selection (Card Grid)');
+  hdr(s, 'Step 1 — AI Use Case Selection (Card Grid)');
 
-  s.addText('User sees 15 cards. Selecting one auto-loads archetype-specific inputs + industry defaults.', {
+  s.addText(`User sees ${SUPPORTED_ARCHETYPE_COUNT} supported cards. Selecting one auto-loads case-specific inputs + industry defaults.`, {
     x: 0.4, y: 0.85, w: 12.5, h: 0.3,
     fontSize: 11, fontFace: 'Arial', color: C.gray600, italic: true,
   });
@@ -307,11 +297,9 @@ function addArchetypeGrid(pptx) {
     });
 
     const tags = arch.tags || [];
-    const isRevenue = defaults?.revenueEligible;
-    const tagLine = tags.join(', ') + (isRevenue ? ' | Revenue Eligible' : '');
-    s.addText(tagLine, {
+    s.addText(tags.join(', '), {
       x: x + 0.1, y: y + 0.27, w: colW - 0.2, h: 0.2,
-      fontSize: 7, fontFace: 'Arial', color: isRevenue ? C.green : C.gray400,
+      fontSize: 7, fontFace: 'Arial', color: C.gray400,
     });
 
     s.addText(`${inputCount} inputs | ${mappingCount} computed | Auto%: ${defaults ? Math.round(defaults.automationPotential * 100) : '?'}%`, {
@@ -327,7 +315,7 @@ function addArchetypeGrid(pptx) {
 function addArchetypeInputSlide(pptx, arch, slideIdx) {
   const s = pptx.addSlide();
   s.background = { color: C.white };
-  hdr(s, `${slideIdx}/15  ${arch.icon}  ${arch.label}`);
+  hdr(s, `${slideIdx}/${SUPPORTED_ARCHETYPE_COUNT}  ${arch.icon}  ${arch.label} — Inputs & Assumptions`);
 
   const schema = ARCHETYPE_INPUT_MAP[arch.id];
   if (!schema) {
@@ -344,11 +332,15 @@ function addArchetypeInputSlide(pptx, arch, slideIdx) {
   });
 
   s.addText(`Tags: ${(arch.tags || []).join(', ')}  |  Source Process Types: ${arch.sourceProcessTypes.join(', ')}`, {
-    x: 0.4, y: 1.15, w: 12.5, h: 0.25,
+    x: 0.4, y: 1.15, w: 6.1, h: 0.25,
     fontSize: 8, fontFace: 'Arial', color: C.gray400,
   });
+  s.addText('Inputs → Assumptions → Calculation → Footnote', {
+    x: 6.5, y: 1.15, w: 6.4, h: 0.25,
+    fontSize: 8, fontFace: 'Arial', bold: true, color: C.teal, align: 'right',
+  });
 
-  sectionTitle(s, 'User Inputs (Step 2, Detailed Mode)', 1.5);
+  sectionTitle(s, '1. Inputs — User-entered operating drivers', 1.5);
 
   s.addTable([
     [
@@ -375,7 +367,7 @@ function addArchetypeInputSlide(pptx, arch, slideIdx) {
   });
 
   const mapY = 1.9 + (schema.inputs.length + 1) * 0.27 + 0.25;
-  sectionTitle(s, 'Computed Mappings (auto-calculated from inputs above)', mapY);
+  sectionTitle(s, '3. Calculation — auto-calculated mappings', mapY);
 
   s.addTable([
     [
@@ -401,7 +393,7 @@ function addArchetypeInputSlide(pptx, arch, slideIdx) {
   const defY = mapY + 0.4 + (schema.computedMappings.length + 1) * 0.27 + 0.25;
 
   if (defaults && defY < 6.5) {
-    sectionTitle(s, 'Base Assumptions (Technology / Software defaults)', defY);
+    sectionTitle(s, '2. Assumptions — Technology / Software defaults', defY);
 
     const defText = Object.entries(defaults).map(([k, v]) => {
       if (typeof v === 'boolean') return `${k}: ${v ? 'Yes' : 'No'}`;
@@ -419,7 +411,7 @@ function addArchetypeInputSlide(pptx, arch, slideIdx) {
 function addArchetypeDataSlide(pptx, arch, slideIdx) {
   const s = pptx.addSlide();
   s.background = { color: C.white };
-  hdr(s, `${slideIdx}/15  ${arch.icon}  ${arch.label} — Sample Data Flow`);
+  hdr(s, `${slideIdx}/${SUPPORTED_ARCHETYPE_COUNT}  ${arch.icon}  ${arch.label} — Calculation & Footnote`);
 
   const schema = ARCHETYPE_INPUT_MAP[arch.id];
   if (!schema) return;
@@ -428,7 +420,7 @@ function addArchetypeDataSlide(pptx, arch, slideIdx) {
   const computed = mapArchetypeInputs(arch.id, inputDefaults);
   const baseDefaults = getArchetypeDefaults(arch.id, 'Technology / Software');
 
-  sectionTitle(s, 'Default Input Values → Computed Outputs', 0.9);
+  sectionTitle(s, '3. Calculation — Default Input Values → Computed Outputs', 0.9);
 
   s.addTable([
     [
@@ -461,8 +453,8 @@ function addArchetypeDataSlide(pptx, arch, slideIdx) {
     ...computedEntries.map(([k, v], i) => {
       let formatted;
       if (k.includes('Rate') || k.includes('Potential') || k === 'errorRate') formatted = `${(v * 100).toFixed(1)}%`;
-      else if (k.includes('revenue') || k.includes('Revenue') || k.includes('risk') || k.includes('Risk')) formatted = `$${v.toLocaleString()}`;
-      else if (k === 'hoursPerWeek') formatted = `${v} hrs/wk`;
+      else if (k.includes('Savings') || k.includes('Avoidance') || k.includes('risk') || k.includes('Risk')) formatted = `$${v.toLocaleString()}`;
+      else if (k === 'hoursPerWeek' || k === 'caseWorkloadHoursPerWeek') formatted = `${v} hrs/wk`;
       else formatted = String(v);
 
       return [
@@ -486,10 +478,10 @@ function addArchetypeDataSlide(pptx, arch, slideIdx) {
 
   const flows = [
     ['automationPotential', 'Sets the % of labor hours that AI can handle. Directly caps gross savings.'],
-    ['hoursPerWeek', 'Overrides the base hoursPerWeek input. Multiplied by teamSize to get total weekly hours.'],
+    ['caseWorkloadHoursPerWeek', 'Translates the case-specific volume and time inputs into weekly workload for capacity reconciliation.'],
     ['errorRate', 'Drives rework cost savings = annualLaborCost x errorRate x automationPotential.'],
-    ['revenueImpact', 'Added to gross savings when includeRevenueAcceleration is checked. FY 1 only at 50%, then full.'],
-    ['riskReduction', 'Added to gross savings when includeRiskReduction is checked. Regulatory/compliance value.'],
+    ['caseDirectSavings', 'Included only when the user confirms the underlying support-cost evidence; otherwise it remains planning context.'],
+    ['caseRiskAvoidance', 'Shown as planning context; excluded from the core DCF until validated by finance or a pilot.'],
     ['toolReplacementRate', 'Controls how much of currentToolCosts are recaptured (saved tool licenses).'],
   ];
 
@@ -514,13 +506,21 @@ function addArchetypeDataSlide(pptx, arch, slideIdx) {
         `Base Assumptions (Tech/Software): automationPotential=${(baseDefaults.automationPotential * 100).toFixed(0)}%  |  ` +
         `adoptionRate=${(baseDefaults.adoptionRate * 100).toFixed(0)}%  |  ` +
         `toolReplacementRate=${(baseDefaults.toolReplacementRate * 100).toFixed(0)}%  |  ` +
-        `revenueEligible=${baseDefaults.revenueEligible ? 'Yes' : 'No'}`,
+        'commercial revenue uplift excluded from the core DCF',
         {
           x: 0.4, y: baseY, w: 12.5, h: 0.25,
           fontSize: 8, fontFace: 'Arial', color: C.gray400, italic: true,
         }
       );
     }
+  }
+
+  const footnoteY = 7.1;
+  if (schema.caseGuide?.footnote) {
+    s.addText(`4. Footnote: ${schema.caseGuide.footnote}`, {
+      x: 0.4, y: footnoteY, w: 12.5, h: 0.22,
+      fontSize: 7.5, fontFace: 'Arial', color: C.gray600, italic: true,
+    });
   }
 }
 
@@ -677,7 +677,7 @@ function addOutputsOverview(pptx) {
       ],
     },
     {
-      label: 'PowerPoint Deck', desc: 'generatePresentation.js (~22 slides)',
+      label: 'PowerPoint Deck', desc: 'generatePresentation.js (dynamic case count)',
       items: [
         'Architecture overview, key levers, archetype grid',
         'Per-archetype slides with sample inputs + ROI results',
@@ -731,15 +731,15 @@ export async function generateSystemReview() {
   addCommonInputs(pptx);    // 3
   addArchetypeGrid(pptx);   // 4
 
-  // Per-archetype: 2 slides each (inputs + data flow) = 30 slides
+  // Per-archetype input and data-flow slides are generated from the supported cases.
   PROJECT_ARCHETYPES.forEach((arch, i) => {
     addArchetypeInputSlide(pptx, arch, i + 1);
     addArchetypeDataSlide(pptx, arch, i + 1);
   });
 
   // System slides
-  addOutputTiers(pptx);     // 35
-  addOutputsOverview(pptx);  // 36
+  addOutputTiers(pptx);
+  addOutputsOverview(pptx);
 
   await pptx.writeFile({ fileName: 'AI_ROI_Modeler_System_Review.pptx' });
 }

@@ -1,11 +1,13 @@
 // ---------------------------------------------------------------------------
 // PowerPoint Presentation Generator
-// Architecture overview + sample ROI for all 15 archetypes
+// Architecture overview + sample ROI for every supported project archetype
 // ---------------------------------------------------------------------------
 import PptxGenJS from 'pptxgenjs';
 import { runCalculations } from '../logic/calculations';
 import { PROJECT_ARCHETYPES, getArchetypeDefaults } from '../logic/archetypes';
 import { getArchetypeInputDefaults, mapArchetypeInputs, ARCHETYPE_INPUT_MAP } from '../logic/archetypeInputs';
+
+const SUPPORTED_ARCHETYPE_COUNT = PROJECT_ARCHETYPES.length;
 
 // ---------------------------------------------------------------------------
 // App URL — set to your deployed URL; falls back to localhost
@@ -62,10 +64,16 @@ const BASE_INPUTS = {
   industry: 'Technology / Software',
   companySize: 'Mid-Market (501-5,000)',
   role: 'Director',
-  teamLocation: 'US - Major Tech Hub',
   changeReadiness: 3,
   dataReadiness: 3,
   execSponsor: true,
+  // The sample uses the same user-entered workforce mix shown in the
+  // wizard. It deliberately has no implementation-team location or hidden
+  // geography-based AI salary assumption.
+  directEmployeeCount: 25,
+  employeeFullyBurdenedCost: 120000,
+  offshoreContractorCount: 0,
+  contractorFullyBurdenedCost: 65000,
   teamSize: 25,
   avgSalary: 120000,
   hoursPerWeek: 30,
@@ -91,7 +99,6 @@ function makeInputs(archetypeId) {
   const archDefaults = getArchetypeDefaults(archetypeId, 'Technology / Software');
   const archetypeInputs = getArchetypeInputDefaults(archetypeId);
   const mapped = mapArchetypeInputs(archetypeId, archetypeInputs);
-  const isRevenue = archDefaults?.revenueEligible;
 
   return {
     ...BASE_INPUTS,
@@ -101,7 +108,8 @@ function makeInputs(archetypeId) {
     archetypeInputs,
     hoursPerWeek: mapped.hoursPerWeek ?? BASE_INPUTS.hoursPerWeek,
     errorRate: mapped.errorRate ?? BASE_INPUTS.errorRate,
-    includeRevenueAcceleration: isRevenue,
+    // Commercial-revenue uplift is deliberately excluded from sample DCFs.
+    includeRevenueAcceleration: false,
   };
 }
 
@@ -130,13 +138,13 @@ function addTitleSlide(pptx) {
     line: { color: C.blue, width: 2 },
   });
 
-  slide.addText('5-Year Discounted Cash Flow Model\n15 AI Project Archetypes | 3 Scenarios per Project', {
+  slide.addText(`5-Year Discounted Cash Flow Model\n${SUPPORTED_ARCHETYPE_COUNT} AI Project Archetypes | 3 Scenarios per Project`, {
     x: 0.8, y: 3.6, w: 8.4, h: 0.9,
     fontSize: 14, fontFace: 'Arial',
     color: C.gray400, align: 'center', lineSpacingMultiple: 1.4,
   });
 
-  slide.addText('Mid-Market Sample: 25-person team | $120K avg salary | Technology / Software', {
+  slide.addText('Mid-Market Sample: 25 direct employees | $120K blended annual cost | Technology / Software', {
     x: 0.8, y: 4.7, w: 8.4, h: 0.4,
     fontSize: 11, fontFace: 'Arial',
     color: C.gray400, align: 'center', italic: true,
@@ -167,7 +175,7 @@ function addOverviewSlide(pptx) {
     'A rigorous 5-year Discounted Cash Flow (DCF) model purpose-built for AI investment decisions',
     'Calculates NPV, IRR, ROIC, and payback period with risk-adjusted projections',
     'Runs 3 scenarios (Conservative / Base / Optimistic) with sensitivity and Monte Carlo analysis',
-    'Supports 15 AI project archetypes across 10 industries',
+    `Supports ${SUPPORTED_ARCHETYPE_COUNT} AI project archetypes across 10 industries`,
     'Outputs include interactive dashboard, branded PDF report, and auditable Excel model',
   ];
 
@@ -215,7 +223,7 @@ function addArchitectureSlide(pptx) {
   // Flow boxes
   const boxes = [
     { label: 'User Inputs', sub: 'Company, Team,\nProject, Costs', color: C.blue },
-    { label: 'Archetype Engine', sub: '15 AI archetypes\nwith industry defaults', color: C.teal },
+    { label: 'Archetype Engine', sub: `${SUPPORTED_ARCHETYPE_COUNT} AI archetypes\nwith industry defaults`, color: C.teal },
     { label: 'DCF Engine', sub: '5-year cash flows\nrisk-adjusted', color: C.navy },
     { label: '3 Scenarios', sub: 'Conservative\nBase | Optimistic', color: C.green },
     { label: 'Outputs', sub: 'Dashboard, PDF,\nExcel, PPTX', color: C.blue },
@@ -256,8 +264,8 @@ function addArchitectureSlide(pptx) {
 
   // Detail rows below
   const details = [
-    ['User Inputs', 'Company size, industry, team size, avg salary, implementation budget, timeline, ongoing costs, archetype-specific operational inputs'],
-    ['Archetype Engine', 'Maps 8 operational inputs per archetype to automation potential, hours/week, error rate, and revenue impact via computed formulas'],
+    ['User Inputs', 'Company context, case-specific operating inputs, entered employee/contractor mix, contracts, delivery pace, and AI cost meters'],
+    ['Archetype Engine', 'Maps case-specific operational inputs to workload, automation potential, quality, and cost drivers through computed formulas'],
     ['DCF Engine', 'Calculates gross savings, hidden costs, risk adjustments, adoption curves, 5-year projections with NPV/IRR/ROIC/payback'],
     ['3 Scenarios', 'Conservative (0.7x), Base (1.0x), Optimistic (1.3x) multipliers on savings with corresponding risk adjustments'],
     ['Outputs', 'Interactive dashboard, 24-page branded PDF, 8-tab auditable Excel model with formula-based validation'],
@@ -309,15 +317,15 @@ function addKeyLeversSlide(pptx) {
 
   const levers = [
     {
-      num: '#1', label: 'Team Size',
-      desc: 'Number of people on the process being automated. More people = more labor to offset.',
-      why: 'Directly multiplies every hour saved. A 50-person team sees 2x the savings of a 25-person team.',
+      num: '#1', label: 'Case Workload & Capacity',
+      desc: 'The process volume, time per item, and staffed capacity for the specific use case.',
+      why: 'The model reconciles workload to available staff capacity before estimating savings or workforce actions.',
       icon: '\uD83D\uDC65',
     },
     {
-      num: '#2', label: 'Avg Cost per Person',
-      desc: 'Fully loaded salary (base + benefits + overhead at 1.3-1.5x). Higher-cost teams = bigger dollar savings.',
-      why: 'Converts hours saved into dollars. A $180K employee generates 50% more value per hour saved than $120K.',
+      num: '#2', label: 'Blended Cost per Person',
+      desc: 'Weighted fully burdened annual cost from the direct-employee and contractor mix the user enters.',
+      why: 'Converts hours saved into dollars without inferring location or an AI-team salary. Validate the entered rate with HR, finance, or vendor data.',
       icon: '\uD83D\uDCB0',
     },
     {
@@ -374,7 +382,7 @@ function addArchetypeOverviewSlide(pptx, archetypeSlideNums) {
   const slide = pptx.addSlide();
   slide.background = { color: C.white };
 
-  slide.addText('15 AI Project Archetypes', {
+  slide.addText(`${SUPPORTED_ARCHETYPE_COUNT} AI Project Archetypes`, {
     x: 0.5, y: 0.3, w: 9.0, h: 0.6,
     fontSize: 26, fontFace: 'Arial', bold: true, color: C.navy,
   });
@@ -389,7 +397,7 @@ function addArchetypeOverviewSlide(pptx, archetypeSlideNums) {
     fontSize: 9, fontFace: 'Arial', color: C.gray400, italic: true,
   });
 
-  // 3 columns x 5 rows
+  // Responsive card grid for the supported archetypes.
   const colW = 3.0;
   const rowH = 0.8;
 
@@ -464,8 +472,10 @@ function addArchetypeSlide(pptx, archetype, inputs, results, overviewSlideNum) {
     });
   });
 
-  // LEFT: Key Inputs
-  slide.addText('Sample Inputs', {
+  // LEFT: Selected case in the same simple order as the wizard and glossary.
+  // This replaces the former generic "team size" assumptions with only the
+  // operating inputs that actually move the selected case.
+  slide.addText('1. Inputs', {
     x: 0.5, y: 1.55, w: 4.3, h: 0.35,
     fontSize: 14, fontFace: 'Arial', bold: true, color: C.navy,
   });
@@ -484,10 +494,6 @@ function addArchetypeSlide(pptx, archetype, inputs, results, overviewSlideNum) {
       return [inp.label, formatted];
     });
 
-    // Add base assumptions
-    inputRows.push(['Team Size', '25 people']);
-    inputRows.push(['Avg Salary', '$120,000']);
-
     const tableRows = [
       [
         { text: 'Input', options: { bold: true, fontSize: 8, color: C.white, fill: { color: C.blue } } },
@@ -505,6 +511,34 @@ function addArchetypeSlide(pptx, archetype, inputs, results, overviewSlideNum) {
       rowH: 0.22,
       border: { type: 'solid', pt: 0.5, color: C.gray200 },
     });
+
+    const guide = schema.caseGuide || {
+      assumption: 'Shared workforce, contract, and AI cost assumptions are reviewed separately from this operating case.',
+      calculation: 'The model maps the operating inputs above into a workload and efficiency ceiling before calculating cash flow.',
+      footnote: 'Only validated cash actions enter the base DCF.',
+    };
+    const guideStartY = 1.95 + (inputRows.length + 1) * 0.22 + 0.12;
+    const addGuideLine = (label, text, y, h, fill) => {
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: 0.5, y, w: 4.3, h,
+        fill: { color: fill },
+        rectRadius: 0.04,
+        line: { color: C.gray200, width: 0.4 },
+      });
+      slide.addText(`${label}: ${text}`, {
+        x: 0.62, y: y + 0.04, w: 4.06, h: h - 0.08,
+        fontSize: 7.2, fontFace: 'Arial', color: C.gray800,
+        margin: 0,
+      });
+    };
+
+    slide.addText('2. Assumptions → 3. Calculation → 4. Footnote', {
+      x: 0.5, y: guideStartY - 0.2, w: 4.3, h: 0.18,
+      fontSize: 7.5, fontFace: 'Arial', bold: true, color: C.teal,
+    });
+    addGuideLine('Assumption', guide.assumption, guideStartY, 0.42, C.lightBlue);
+    addGuideLine('Calculation', guide.calculation, guideStartY + 0.46, 0.48, C.gray100);
+    addGuideLine('Footnote', guide.footnote, guideStartY + 0.98, 0.36, C.offWhite);
   }
 
   // RIGHT: Results
@@ -647,7 +681,7 @@ function addSummaryTableSlide(pptx, allResults) {
     border: { type: 'solid', pt: 0.5, color: C.gray200 },
   });
 
-  slide.addText('All values based on mid-market sample: 25-person team, $120K avg salary, Technology / Software industry, $250K implementation budget', {
+  slide.addText('All values based on a mid-market sample: 25 direct employees, $120K blended annual cost, Technology / Software industry, $250K implementation budget', {
     x: 0.5, y: 5.1, w: 9.0, h: 0.3,
     fontSize: 8, fontFace: 'Arial', color: C.gray400, italic: true,
   });
@@ -664,7 +698,7 @@ function addClosingSlide(pptx) {
 
   const steps = [
     'Select the archetype that matches your AI initiative',
-    'Enter your organization-specific inputs (team size, costs, operational metrics)',
+    'Enter your organization-specific workforce mix, process costs, and operating metrics',
     'Review risk-adjusted 5-year projections across 3 scenarios',
     'Download the PDF report and auditable Excel model for stakeholders',
   ];
@@ -709,7 +743,7 @@ export async function generatePresentation() {
 
   // Slide numbering (1-based for PptxGenJS hyperlink.slide):
   // 1=Title, 2=Overview, 3=Architecture, 4=Key Levers, 5=Archetype Grid
-  // 6..20=Individual archetypes (15), 21=Summary, 22=Closing
+  // Individual-archetype slides are generated from PROJECT_ARCHETYPES, followed by summary and closing.
   const OVERVIEW_SLIDE = 5;
   const FIRST_ARCHETYPE_SLIDE = 6;
   const archetypeSlideNums = PROJECT_ARCHETYPES.map((_, i) => FIRST_ARCHETYPE_SLIDE + i);

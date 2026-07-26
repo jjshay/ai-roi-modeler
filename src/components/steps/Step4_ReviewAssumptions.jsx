@@ -3,7 +3,6 @@ import SliderInput from '../inputs/SliderInput';
 import { getArchetypeDefaults, getArchetypeById } from '../../logic/archetypes';
 import { mapArchetypeInputs } from '../../logic/archetypeInputs';
 import { getAutomationPotential, getErrorRate } from '../../logic/benchmarks';
-import { formatCurrency } from '../../utils/formatters';
 
 export default function Step4_ReviewAssumptions({ formData, updateField }) {
   const archetype = getArchetypeById(formData.projectArchetype);
@@ -32,8 +31,6 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
     }
   }, [formData.projectArchetype, industry, updateField]);
 
-  const showRevenue = assumptions.revenueEligible !== undefined;
-
   return (
     <div className="mx-auto w-full max-w-xl">
       <h2 className="mb-2 text-2xl font-bold text-navy sm:text-3xl">
@@ -48,20 +45,6 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
           <span className="text-sm text-gray-400">
             &mdash; {industry}
           </span>
-        </div>
-      )}
-
-      {/* ── Revenue Impact (display-only when present) ── */}
-      {computed.revenueImpact != null && computed.revenueImpact > 0 && (
-        <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-emerald-600">
-              Estimated Revenue Impact
-            </p>
-            <p className="text-2xl font-bold text-navy">
-              {formatCurrency(computed.revenueImpact)}
-            </p>
-          </div>
         </div>
       )}
 
@@ -173,25 +156,6 @@ export default function Step4_ReviewAssumptions({ formData, updateField }) {
           </label>
         </div>
 
-        {/* Revenue Eligible toggle — only for revenue archetypes */}
-        {showRevenue && (
-          <div className="flex items-center gap-3 rounded-xl border border-navy/10 bg-navy/5 px-4 py-3">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={assumptions.revenueEligible ?? false}
-                onChange={(e) => updateAssumption('revenueEligible', e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-gold focus:ring-gold"
-              />
-              <div>
-                <span className="text-sm font-medium text-navy">Revenue Eligible</span>
-                <p className="text-xs text-gray-500">
-                  Enable revenue uplift calculations for this project
-                </p>
-              </div>
-            </label>
-          </div>
-        )}
       </div>
 
       {/* Reset to Defaults */}

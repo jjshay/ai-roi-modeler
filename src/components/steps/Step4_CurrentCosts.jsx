@@ -53,7 +53,8 @@ export default function Step4_CurrentCosts({ formData, updateField }) {
                 onChange={handleSalaryChange}
                 presets={[100000, 125000, 150000, 200000, 250000, 300000]}
                 defaultValue={100000}
-                helperText="Fully-loaded = salary + benefits + overhead. Rule of thumb: multiply base salary by 1.3-1.5x"
+                max={2000000}
+                helperText="Fully-loaded = salary + benefits + overhead. Rule of thumb: multiply base salary by 1.3-1.5x. Entries above $2M/year are blocked in this planning model."
               />
 
               {formData.avgSalary != null && (
@@ -112,7 +113,8 @@ export default function Step4_CurrentCosts({ formData, updateField }) {
                 onChange={handleToolCostsChange}
                 presets={[0, 10000, 25000, 50000, 100000]}
                 defaultValue={0}
-                helperText="Include licenses, subscriptions, and maintenance costs"
+                max={100000000}
+                helperText="Include licenses, subscriptions, and maintenance costs. Entries above $100M/year require a separately documented tool-retirement portfolio."
               />
 
               <button

@@ -291,15 +291,13 @@ describe('Full V5 pipeline: archetype inputs → V5 outputs', () => {
 });
 
 // ============================================================
-// 10. V5 with revenue-eligible archetypes
+// 10. V5 with customer-facing operating case
 // ============================================================
-describe('Revenue-eligible archetypes: V5 outputs with revenue', () => {
-  const revenueArchetypes = PROJECT_ARCHETYPES.filter(a =>
-    ['customer-facing-ai', 'revenue-growth-ai'].includes(a.id)
-  );
+describe('Customer-facing archetype: V5 outputs without revenue forecast', () => {
+  const customerArchetypes = PROJECT_ARCHETYPES.filter(a => a.id === 'customer-facing-ai');
 
-  for (const arch of revenueArchetypes) {
-    it(`${arch.id}: V5 outputs with $50M revenue`, () => {
+  for (const arch of customerArchetypes) {
+    it(`${arch.id}: V5 outputs stay finite when old revenue inputs are present`, () => {
       const result = runCalculations(makeInputsWithArchetypeDefaults(arch.id, {
         annualRevenue: 50000000,
         contributionMargin: 0.30,
@@ -308,7 +306,8 @@ describe('Revenue-eligible archetypes: V5 outputs with revenue', () => {
 
       expect(result.workforceAlternatives).toBeDefined();
       expect(result.consultingAssumptions).toBeDefined();
-      // Revenue eligible archetypes should still produce valid workforce alternatives
+      expect(result.revenueEnablement.eligible).toBe(false);
+      // Customer-facing operating cases should still produce valid workforce alternatives.
       expect(result.workforceAlternatives.aiInvestment.annual5YearNet).toSatisfy(
         v => typeof v === 'number' && isFinite(v)
       );
@@ -469,7 +468,7 @@ describe('mapArchetypeInputs: complete override validation', () => {
       // Should always produce automationPotential and hoursPerWeek
       expect(overrides.automationPotential).toBeGreaterThan(0);
       expect(overrides.automationPotential).toBeLessThanOrEqual(1);
-      expect(overrides.hoursPerWeek).toBeGreaterThan(0);
+      expect(overrides.caseWorkloadHoursPerWeek).toBeGreaterThan(0);
     });
   }
 });

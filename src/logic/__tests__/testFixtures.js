@@ -27,7 +27,6 @@ export const BASE_INPUTS = {
   expectedTimeline: 6,
   implementationBudget: 200000,
   ongoingAnnualCost: 50000,
-  teamLocation: 'US - Major Tech Hub',
   companyState: 'California',
 };
 
@@ -73,7 +72,6 @@ export const ENTERPRISE_INPUTS = {
   expectedTimeline: 12,
   implementationBudget: 2000000,
   ongoingAnnualCost: 400000,
-  teamLocation: 'Remote / Distributed',
   companyState: 'New York',
 };
 
@@ -103,18 +101,17 @@ export const GOVERNMENT_INPUTS = {
   expectedTimeline: 18,
   implementationBudget: 500000,
   ongoingAnnualCost: 100000,
-  teamLocation: 'Remote / Distributed',
   companyState: 'Virginia',
 };
 
-// Non-US team (no R&D credit)
+// No declared US company state (no R&D-credit illustration)
 export const NON_US_INPUTS = {
   ...BASE_INPUTS,
-  teamLocation: 'Offshore - Employee',
   companyState: 'Other / Not Sure',
 };
 
-// Revenue-eligible process type
+// Legacy customer-commercial context. This fixture proves that historical
+// revenue fields cannot re-enable the retired revenue pathway.
 export const REVENUE_ELIGIBLE_INPUTS = {
   ...BASE_INPUTS,
   processType: 'Customer Communication',
@@ -126,7 +123,7 @@ export const REVENUE_ELIGIBLE_INPUTS = {
   annualRevenue: 10000000,
 };
 
-// Non-revenue-eligible process type
+// Baseline internal process for the legacy-pathway comparison.
 export const NON_REVENUE_INPUTS = {
   ...BASE_INPUTS,
   processType: 'Workflow Automation',

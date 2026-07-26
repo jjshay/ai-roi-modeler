@@ -135,18 +135,22 @@ export const PDF_PAGES = {
   financial: [
     'executiveSummary',
     'tableOfContents',
+    // Core analysis — tell the story
     'currentState',
     'investmentAnalysis',
     'scenarioProjections',
     'riskAssessment',
+    // Deep dives — support the story
     'sensitivityAnalysis',
     'valueBreakdown',
     'capitalEfficiencyGates',
     'opportunityCost',
     'peerComparison',
     'workforceAlternatives',
+    // Recommendations & reference
     'recommendations',
     'inputAssumptions',
+    // Appendices
     'appendixMethodology',
     'appendixBenchmarks',
     'appendixCostAssumptions',
@@ -154,26 +158,31 @@ export const PDF_PAGES = {
   detailed: [
     'executiveSummary',
     'tableOfContents',
+    // Core analysis
     'currentState',
-    'valueBreakdown',
-    'valuePathways',
-    'capitalEfficiencyGates',
     'investmentAnalysis',
     'scenarioProjections',
     'riskAssessment',
+    // Deep dives
     'sensitivityAnalysis',
     'extendedSensitivity',
     'monteCarlo',
+    'valueBreakdown',
+    'valuePathways',
+    'capitalEfficiencyGates',
     'opportunityCost',
     'peerComparison',
     'workforceAlternatives',
     'breakEvenUnits',
     'consultingAssumptions',
+    // Recommendations & supplemental
     'recommendations',
     'qualitativeBenefits',
     'caseStudy',
     'maturityPremium',
+    // Reference
     'inputAssumptions',
+    // Appendices
     'appendixMethodology',
     'appendixBenchmarks',
     'appendixCostAssumptions',
@@ -185,12 +194,20 @@ export const PDF_PAGES = {
  */
 // Per-archetype assumption tab names (must match generateExcelModel.js)
 const ASSUMPTION_TABS = [
-  'Assumptions: Process', 'Assumptions: Customer', 'Assumptions: Analytics',
-  'Assumptions: Revenue', 'Assumptions: Compliance', 'Assumptions: Knowledge',
+  'Assumptions - Process', 'Assumptions - Customer', 'Assumptions - Analytics',
+  'Assumptions - Compliance', 'Assumptions - Knowledge',
 ];
 
 export const EXCEL_TABS = {
-  executive: ['Summary', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
-  financial: ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
-  detailed:  ['Summary', 'Inputs', 'P&L & Cash Flow', 'Sensitivity', 'V5 Analysis', 'Key Formulas', 'Lookups', 'Model Audit', 'Assumption Definitions', ...ASSUMPTION_TABS],
+  executive: ['Summary', 'Model Audit', 'Glossary', 'Sources & Footnotes', ...ASSUMPTION_TABS],
+  financial: [
+    'Summary', 'Inputs', 'Archetype Detail', 'Key Formulas', 'P&L & Cash Flow',
+    'Sensitivity', 'V5 Analysis', 'Model Audit', 'Glossary', 'Sources & Footnotes',
+    ...ASSUMPTION_TABS,
+  ],
+  detailed:  [
+    'Summary', 'Inputs', 'Archetype Detail', 'Key Formulas', 'P&L & Cash Flow',
+    'Sensitivity', 'V5 Analysis', 'Model Audit', 'Glossary', 'Sources & Footnotes',
+    ...ASSUMPTION_TABS,
+  ],
 };
