@@ -2521,6 +2521,17 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
   y = sectionTitle(doc, 'Appendix C: Definitions, Assumptions & Disclosures', y);
   y += 2;
 
+  // Workforce actions are deliberately phased by the user's selected
+  // realization period. Keep the narrative aligned with the same live model
+  // input instead of preserving the retired fixed 50% / 30% / 20% schedule.
+  const selectedHeadcountReductionYears = Math.max(1, Math.min(5, Math.round(Number(
+    results?.workforceTransition?.headcountReductionYears
+      ?? results?.currentState?.headcountReductionYears
+      ?? formData?.headcountReductionYears
+      ?? 3,
+  )) || 3));
+  const equalWorkforcePhaseText = `evenly across the selected ${selectedHeadcountReductionYears} fiscal ${selectedHeadcountReductionYears === 1 ? 'year' : 'years'}`;
+
   // Helper for page-break-safe section rendering
   function checkPageBreak(needed) {
     if (y > PAGE_H - needed) {
@@ -2661,7 +2672,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     '85% without or 100% with a sponsor, reflecting documented failure rates for unsponsored projects; and industry ' +
     'success rate (45%-72%) reflects the documented rate at which AI projects in each industry achieve target ' +
     'outcomes [3][4][5]. Additionally, a 5-FY adoption ramp (60%, 85%, 100%, 100%, 100%) is applied [14]. ' +
-    'For an explicit workforce plan, only declared redundancies are treated as cash savings and are capped by measured freed capacity; severance follows the stated 50% / 30% / 20% FY 1–3 model schedule.'
+    `For an explicit workforce plan, only declared direct-employee redundancies and contractor roll-offs are treated as cash savings and are capped by measured freed capacity; direct-employee severance is phased ${equalWorkforcePhaseText}.`
   );
   defItem('D. Implementation Cost Model',
     'Implementation costs use the entered direct-employee and contractor workforce mix as the deployment-rate basis when it is available. ' +
@@ -2674,18 +2685,17 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     'Post-implementation costs include AI operations team labor (25% of implementation team, minimum 0.5 FTE), ' +
     'API/inference costs (derived from per-process-type token pricing [11] and estimated request volume; ' +
     'agentic workflows use 2.5x multiplier [30]; API pricing as of Jan 2025, declining ~30% annually), ' +
-    'retained talent premium (8-15% wage increase for key retained staff [29]), ' +
-    'data transfer/egress costs (by company size [31]), ' +
+    'measured data storage and connected-application costs, ' +
     'platform/license fees (by company size), adjacent product costs (25% of license, reflecting forced ' +
     'vendor cross-sells) [22], model retraining/drift monitoring, annual compliance recertification, ' +
     'retained employee retraining, technical debt/integration maintenance, and cyber insurance increases. ' +
     'Costs escalate on a tapered schedule (12%/12%/7%/7% in FY 2-5) reflecting aggressive vendor lock-in ' +
-    'pricing early on that stabilizes over time. The higher of user-stated and model-computed ongoing costs is used.'
+    'pricing early on that stabilizes over time. A selected annual planning amount replaces the model-derived annual total and is allocated across the recurring buckets for disclosure; otherwise the model-derived total is used.'
   );
   defItem('F. Separation and Transition Costs',
     'For an explicit workforce plan, the workbook applies a transparent 1.5x fully burdened employee-cost rule to declared redundancies. ' +
     'SHRM [15] provides contextual 1.0x-1.5x annual-salary guidance; it does not directly prove a fully burdened-cost multiplier. ' +
-    'The model schedules severance 50% / 30% / 20% across FY 1–3, rather than charging the full amount upfront. ' +
+    `The model schedules direct-employee severance ${equalWorkforcePhaseText}, rather than charging the full amount upfront; contractor roll-off carries no employee severance. ` +
     'Validate the actual HR, legal, and contractual cost before treating the result as a forecast.'
   );
   defItem('G. Empirical Return Ceilings',
@@ -2917,7 +2927,7 @@ function page13_AppendixCostAssumptions(doc, formData, results) {
     ['Sensitivity Analysis',
       'A deterministic analysis that varies each input variable independently while holding all others constant, measuring the resulting change in NPV. Identifies which assumptions most materially affect the business case.'],
     ['Total Separation Cost',
-      'The modeled cost of separating an explicitly redundant employee. This version applies 1.5x of fully burdened cost as a transparent planning rule, paid 50% / 30% / 20% across FY 1–3. SHRM [15] is context for annual-salary separation ranges, so validate the company-specific amount.'],
+      `The modeled cost of separating an explicitly redundant direct employee. This version applies 1.5x of fully burdened cost as a transparent planning rule, phased ${equalWorkforcePhaseText}. Contractor roll-off has no employee severance. SHRM [15] is context for annual-salary separation ranges, so validate the company-specific amount.`],
   ];
 
   definitions.forEach(([term, def]) => {

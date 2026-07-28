@@ -37,6 +37,8 @@ const DEFAULT_FORM_DATA = {
   totalEfficiencyGainPct: 10,
   employeesToRetrain: 0,
   employeesToMakeRedundant: 0,
+  contractorsToRollOff: 0,
+  headcountReductionYears: 3,
   deliveryPace: 'standard',
   projectInputsComplete: false,
   costTransitionComplete: false,

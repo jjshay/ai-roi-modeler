@@ -1,10 +1,11 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import CardSelector from '../inputs/CardSelector';
 import SliderInput from '../inputs/SliderInput';
 import CurrencyInput from '../inputs/CurrencyInput';
 import NumberInput from '../inputs/NumberInput';
 import { ARCHETYPE_INPUT_MAP } from '../../logic/archetypeInputs';
 import { TOKEN_PROFILES } from '../../logic/benchmarks';
+import { getAnnualAiCostSuggestion } from '../../logic/aiCostSuggestions';
 import { runCalculations } from '../../logic/calculations';
 import {
   calculateContractExitCost,
@@ -14,6 +15,16 @@ import {
   calculateWorkforceTransitionPlan,
 } from '../../logic/workforceMix';
 import { formatCurrency } from '../../utils/formatters';
+import {
+  ANNUAL_AI_COST_MODES,
+  getAnnualAiCostMode,
+  getAnnualAiCostModeValue,
+} from './annualAiCostSelection';
+import {
+  formatPeople,
+  getHeadcountReductionPlan,
+  getWorkforceActionCaps,
+} from './headcountReductionPlan';
 
 const DELIVERY_PACE_OPTIONS = [
   {
@@ -98,6 +109,40 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
       ?? calculateWorkforceTransitionPlan(formData, workforce),
     [formData, modelResult, workforce],
   );
+  const headcountReductionPlan = useMemo(
+    () => getHeadcountReductionPlan({
+      workforce,
+      transitionPlan,
+      years: formData.headcountReductionYears,
+    }),
+    [formData.headcountReductionYears, transitionPlan, workforce],
+  );
+  // The calculation engine is the source of truth for an action after the
+  // shared reduction target has been applied. Rendering raw form values here
+  // could show an impossible direct/contractor combination for one frame.
+  const effectiveEmployeesToMakeRedundant = transitionPlan.employeesToMakeRedundant
+    ?? formData.employeesToMakeRedundant
+    ?? 0;
+  const effectiveContractorsToRollOff = transitionPlan.contractorsToRollOff
+    ?? formData.contractorsToRollOff
+    ?? 0;
+  const effectiveEmployeesToRetrain = transitionPlan.employeesToRetrain
+    ?? formData.employeesToRetrain
+    ?? 0;
+  const workforceActionCaps = useMemo(
+    () => getWorkforceActionCaps(headcountReductionPlan, {
+      employeesToMakeRedundant: effectiveEmployeesToMakeRedundant,
+      contractorsToRollOff: effectiveContractorsToRollOff,
+    }),
+    [effectiveContractorsToRollOff, effectiveEmployeesToMakeRedundant, headcountReductionPlan],
+  );
+  const annualEmployeeRedundancySavings = transitionPlan.annualEmployeeRedundancySavings
+    ?? transitionPlan.annualHeadcountSavings
+    ?? 0;
+  const annualContractorRollOffSavings = transitionPlan.annualContractorRollOffSavings ?? 0;
+  const annualHeadcountSavings = transitionPlan.annualHeadcountSavings
+    ?? annualEmployeeRedundancySavings + annualContractorRollOffSavings;
+  const annualSeverancePhase = (transitionPlan.oneTimeRedundancyCost ?? 0) / headcountReductionPlan.years;
   const caseEconomics = modelResult?.caseEconomics;
   const requestedEfficiencyPct = Math.max(0, Math.min(
     100,
@@ -155,6 +200,21 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
   const runCost = costBuckets.runAnnual ?? aiCostModel?.computedOngoingCost ?? 0;
   const processVolumeDefault = defaultMonthlyVolume(formData.projectArchetype, formData.archetypeInputs);
   const tokenProfile = TOKEN_PROFILES[formData.processType] || TOKEN_PROFILES.Other;
+  const annualAiCostSuggestion = modelResult?.aiCostModel?.annualCostSuggestion
+    ?? getAnnualAiCostSuggestion({
+      companySize: formData.companySize,
+      industry: formData.industry,
+      licensedUsers: formData.aiLicensedUsers ?? workforce.totalHeadcount,
+      monthlyRequests: formData.monthlyAiRequests ?? processVolumeDefault,
+      modeledBuckets: costBuckets,
+      buildIntegrationOneTime: buildIntegrationCost,
+    });
+  const [annualAiCostMode, setAnnualAiCostMode] = useState(() => (
+    getAnnualAiCostMode(formData.ongoingAnnualCost, annualAiCostSuggestion.annual)
+  ));
+  const selectedAnnualAiCostMode = annualAiCostMode === ANNUAL_AI_COST_MODES.custom
+    ? ANNUAL_AI_COST_MODES.custom
+    : getAnnualAiCostMode(formData.ongoingAnnualCost, annualAiCostSuggestion.annual);
 
   const updatePlanField = useCallback((key, value) => {
     updateField(key, value);
@@ -165,6 +225,13 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
     updateField(key, value);
     updateField('costTransitionComplete', false);
   }, [updateField]);
+
+  const handleAnnualAiCostModeChange = useCallback((event) => {
+    const mode = event.target.value;
+    setAnnualAiCostMode(mode);
+    const nextValue = getAnnualAiCostModeValue(mode, annualAiCostSuggestion.annual);
+    if (nextValue !== undefined) updatePlanField('ongoingAnnualCost', nextValue);
+  }, [annualAiCostSuggestion.annual, updatePlanField]);
 
   const handleComplete = () => {
     if (isEfficiencyBlocked) {
@@ -249,36 +316,118 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
       </div>
 
       <div className="rounded-xl border border-navy/10 bg-white p-4">
-        <p className="mb-4 text-sm font-semibold text-navy">Workforce transition</p>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-navy">Workforce transition</p>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">
+              Start with the calculated target from the workforce entered earlier, then choose the pace. Direct redundancies remain an explicit decision; contractor roll-off is modeled separately.
+            </p>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">Model-calculated target</span>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-emerald-950">Calculated total headcount reduction target</p>
+              <p className="mt-1 text-xs leading-relaxed text-emerald-900/75">
+                Based on the {formatPeople(headcountReductionPlan.totalWorkforce)} currently doing this process: {formatPeople(headcountReductionPlan.directEmployeeCount)} direct employees and {formatPeople(headcountReductionPlan.contractorCount)} offshore contractors.
+              </p>
+            </div>
+            <span className="font-mono text-2xl font-bold text-emerald-950">{formatPeople(headcountReductionPlan.totalHeadcountReductionTarget)}</span>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <SummaryMetric
+              label="Direct employee cap"
+              value={`Up to ${formatPeople(headcountReductionPlan.directEmployeeReductionCap)}`}
+              detail="Alternative way to realize the shared target; severance only applies if selected"
+            />
+            <SummaryMetric
+              label="Contractor roll-off cap"
+              value={`Up to ${formatPeople(headcountReductionPlan.contractorRollOffCap)}`}
+              detail="Alternative way to realize the shared target; no employee severance"
+            />
+            <SummaryMetric
+              label="Even annual phase"
+              value={formatPeople(headcountReductionPlan.annualTarget, { approximate: !Number.isInteger(headcountReductionPlan.annualTarget) })}
+              detail={`Across ${headcountReductionPlan.years} ${headcountReductionPlan.years === 1 ? 'year' : 'years'}`}
+            />
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-emerald-900/75">
+            Direct employee and contractor caps are alternatives within the same {formatPeople(headcountReductionPlan.totalHeadcountReductionTarget)} target—they are not added together.
+          </p>
+        </div>
+
+        <div className="mt-4 grid gap-4 rounded-xl border border-navy/10 bg-navy/[0.025] p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
           <NumberInput
-            label="Employees to retrain"
-            value={formData.employeesToRetrain ?? 0}
+            label="Years to achieve the reduction target"
+            value={headcountReductionPlan.years}
+            onChange={(value) => updatePlanField('headcountReductionYears', value)}
+            min={1}
+            max={5}
+            suffix="years"
+            helperText="User-entered planning timeline."
+          />
+          <div className="rounded-lg bg-white/75 px-3 py-3 text-xs leading-relaxed text-navy/75">
+            <p className="font-semibold text-navy">The model phases reductions evenly.</p>
+            <p className="mt-1">
+              {formatPeople(headcountReductionPlan.totalHeadcountReductionTarget)} is split evenly across {headcountReductionPlan.years} {headcountReductionPlan.years === 1 ? 'year' : 'years'}—{formatPeople(headcountReductionPlan.annualTarget, { approximate: !Number.isInteger(headcountReductionPlan.annualTarget) })} per year. Whole-person actions are allocated as evenly as practical.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-navy/10 bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-navy/60">Direct employees</p>
+            <p className="mt-1 text-sm font-semibold text-navy">Explicit people decisions</p>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">Retraining retains capacity. Direct redundancies create cash savings and the one-time severance cost below.</p>
+          </div>
+          <div className="rounded-xl border border-sky/25 bg-sky/[0.05] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-navy/60">Offshore contractors</p>
+            <p className="mt-1 text-sm font-semibold text-navy">Explicit contract roll-off</p>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">Contractor roll-off is a separate cost reduction you choose below. It does not apply employee severance.</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <NumberInput
+            label="Direct employees to retrain"
+            value={effectiveEmployeesToRetrain}
             onChange={(value) => updatePlanField('employeesToRetrain', value)}
             min={0}
-            max={workforce.directEmployeeCount}
+            max={workforceActionCaps.employeeRetrainMax}
             suffix="employees"
             helperText="User-entered. Retained employees are treated as capacity reallocation, not cash savings."
           />
           <div className="space-y-2">
             <NumberInput
-              label="Employees to make redundant"
-              value={formData.employeesToMakeRedundant ?? 0}
+              label="Direct employees to make redundant"
+              value={effectiveEmployeesToMakeRedundant}
               onChange={(value) => updatePlanField('employeesToMakeRedundant', value)}
               min={0}
-              max={workforce.directEmployeeCount}
+              max={workforceActionCaps.directEmployeeMax}
               suffix="employees"
-              helperText={`User-entered. Model limit based on freed capacity: ${transitionPlan.maximumRedundancies} employees.`}
+              helperText={`User-entered explicit action. Up to ${formatPeople(workforceActionCaps.directEmployeeMax)} can be selected after the contractor roll-off below.`}
             />
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
-              Planning assumption: severance is phased 50% in Year 1, 30% in Year 2, and 20% in Year 3.
-              {' '}Model/user schedule [W2]; source notes are in the exported Sources &amp; Footnotes tab.
+              Planning assumption: {formatCurrency(transitionPlan.oneTimeRedundancyCost)} of severance is phased evenly over {headcountReductionPlan.years} {headcountReductionPlan.years === 1 ? 'year' : 'years'}—{formatCurrency(annualSeverancePhase)} per year. Model/user schedule [W2]; source notes are in the exported Sources &amp; Footnotes tab.
             </p>
           </div>
+          <NumberInput
+            label="Contractors to roll off"
+            value={effectiveContractorsToRollOff}
+            onChange={(value) => updatePlanField('contractorsToRollOff', value)}
+            min={0}
+            max={workforceActionCaps.contractorMax}
+            suffix="contractors"
+            helperText={`User-entered explicit action. Up to ${formatPeople(workforceActionCaps.contractorMax)} can be selected after direct redundancies; no employee severance applies.`}
+          />
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <SummaryMetric label="Annual cash headcount savings" value={formatCurrency(transitionPlan.annualHeadcountSavings)} detail="Only declared redundancies" />
-          <SummaryMetric label="One-time redundancy cost" value={formatCurrency(transitionPlan.oneTimeRedundancyCost)} detail="Planning assumption [W1]: 1.5× fully burdened employee cost" />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryMetric label="Annual direct-employee savings" value={formatCurrency(annualEmployeeRedundancySavings)} detail="Declared direct redundancies" />
+          <SummaryMetric label="Annual contractor savings" value={formatCurrency(annualContractorRollOffSavings)} detail="Declared contractor roll-off" />
+          <SummaryMetric label="Total annual workforce savings" value={formatCurrency(annualHeadcountSavings)} detail="Direct employees + contractors" />
+          <SummaryMetric label="One-time direct-employee redundancy cost" value={formatCurrency(transitionPlan.oneTimeRedundancyCost)} detail="Planning assumption [W1]: 1.5× fully burdened employee cost" />
         </div>
         {transitionPlan.warnings.length > 0 && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
@@ -347,11 +496,62 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
           </div>
           <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-navy/55">Model-derived</span>
         </div>
+        <div className="mt-4 rounded-xl border border-sky/25 bg-white/80 p-4">
+          <label htmlFor="annual-ai-cost-mode" className="block text-base font-semibold text-navy">
+            {annualAiCostSuggestion.question}
+          </label>
+          <p className="mt-1 text-xs leading-relaxed text-gray-600">
+            Choose a planning point based on your company size and industry, or enter a Finance-approved annual total. Model-derived keeps the live Access, Consumption, and Operations &amp; governance build-up as the source of truth.
+          </p>
+          <select
+            id="annual-ai-cost-mode"
+            value={selectedAnnualAiCostMode}
+            onChange={handleAnnualAiCostModeChange}
+            className="mt-3 w-full rounded-lg border-2 border-gray-200 bg-white px-3 py-3 text-sm font-medium text-navy transition-colors focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/30"
+          >
+            <option value={ANNUAL_AI_COST_MODES.modelDerived}>
+              Model-derived — {formatCurrency(annualAiCostSuggestion.annual.modeledAnnualTotal)}/year
+            </option>
+            <option value={ANNUAL_AI_COST_MODES.lowerPlanning}>
+              Lower planning — {formatCurrency(annualAiCostSuggestion.annual.lowerPlanning)}/year
+            </option>
+            <option value={ANNUAL_AI_COST_MODES.typical}>
+              Typical planning — {formatCurrency(annualAiCostSuggestion.annual.typical)}/year
+            </option>
+            <option value={ANNUAL_AI_COST_MODES.higherPlanning}>
+              Higher planning — {formatCurrency(annualAiCostSuggestion.annual.higherPlanning)}/year
+            </option>
+            <option value={ANNUAL_AI_COST_MODES.custom}>Custom annual amount</option>
+          </select>
+          <p className="mt-2 text-[11px] leading-relaxed text-navy/65">
+            Annual total includes <strong>Access &amp; licensing</strong>, <strong>Consumption</strong>, and <strong>Operations &amp; governance</strong>. <strong>Build &amp; integration</strong> is a separate one-time cost.
+          </p>
+          {selectedAnnualAiCostMode === ANNUAL_AI_COST_MODES.custom && (
+            <div className="mt-4">
+              <NumberInput
+                label="Custom annual AI cost"
+                value={formData.ongoingAnnualCost}
+                onChange={(value) => updatePlanField('ongoingAnnualCost', value)}
+                min={0}
+                max={100000000}
+                step={1000}
+                prefix="$"
+                suffix="/year"
+                allowEmpty
+                placeholder={Math.round(annualAiCostSuggestion.annual.typical).toLocaleString()}
+                helperText="A custom amount overrides the model’s annual total. The results page will show the adjustment and allocate it transparently across Access, Consumption, and Operations & governance."
+              />
+            </div>
+          )}
+          <p className="mt-3 text-[11px] leading-relaxed text-gray-500">
+            {annualAiCostSuggestion.annual.note}
+          </p>
+        </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <SummaryMetric label="Build & integration" value={formatCurrency(buildIntegrationCost)} detail="One-time engineering, integration, and training" />
-          <SummaryMetric label="Access" value={formatCurrency(accessCost)} detail="Annual licensing and platform access" />
+          <SummaryMetric label="Access & licensing" value={formatCurrency(accessCost)} detail="Annual platform contract, seats, and add-ons" />
           <SummaryMetric label="Consumption" value={formatCurrency(consumptionCost)} detail="Annual model calls, tokens, compute, and agent runs" />
-          <SummaryMetric label="Run" value={formatCurrency(runCost)} detail="Annual support, monitoring, retraining, and governance" />
+          <SummaryMetric label="Operations & governance" value={formatCurrency(runCost)} detail="Annual support, monitoring, retraining, security, and governance" />
         </div>
 
         <details className="mt-4 rounded-lg border border-sky/20 bg-white/70 px-3 py-2.5">

@@ -57,7 +57,6 @@ import {
   PRODUCTIVITY_DIP_PARAMS,
   RETAINED_TALENT_PREMIUM_RATE,
   AGENTIC_COMPUTE_MULTIPLIER,
-  DATA_TRANSFER_COST_MONTHLY,
   COMPLIANCE_ESCALATION_RATE,
   ALTERNATIVE_HURDLE_RATES,
   AI_ADOPTION_RATE_BY_INDUSTRY,
@@ -80,6 +79,10 @@ import {
   ARCHETYPE_INPUT_MAP,
 } from './archetypeInputs';
 import { getRetiredArchetypeLabel, isRetiredArchetype } from './archetypes';
+import {
+  getAnnualAiCostSuggestion,
+  getIndustryCostMultiplier,
+} from './aiCostSuggestions';
 import {
   calculateContractExitCost,
   calculateDeploymentPlan,
@@ -120,21 +123,9 @@ export function runCalculations(inputs) {
   const industry = inputs.industry || 'Other';
   const processType = inputs.processType || 'Other';
   // Regulated or safety-critical industries need more integration, governance,
-  // and access controls. This multiplier is a planning envelope, not a quote.
-  const INDUSTRY_COST_MULTIPLIER = {
-    'Financial Services / Banking': 1.30,
-    'Healthcare / Life Sciences': 1.35,
-    'Government / Public Sector': 1.40,
-    'Energy / Utilities': 1.20,
-    'Manufacturing / Industrial': 1.15,
-    'Professional Services / Consulting': 1.10,
-    'Technology / Software': 1.00,
-    'Retail / E-Commerce': 1.00,
-    'Media / Entertainment': 1.00,
-    Other: 1.05,
-  };
-  const industryCostMultiplier = INDUSTRY_COST_MULTIPLIER[industry]
-    ?? INDUSTRY_COST_MULTIPLIER.Other;
+  // and access controls. This visible planning envelope is shared with the
+  // annual-cost suggestion helper; it is not a vendor quote.
+  const industryCostMultiplier = getIndustryCostMultiplier(industry);
   const workforceMix = calculateWorkforceMix(inputs);
   const teamSize = workforceMix.hasWorkforceMix
     ? workforceMix.totalHeadcount
@@ -343,7 +334,17 @@ export function runCalculations(inputs) {
   // Auto-calculate ongoing cost if not provided
   const licenseCostForCalc = PLATFORM_LICENSE_COST[companySize] || 48000;
   const autoOngoing = Math.round((licenseCostForCalc + (engForCalc * deploymentRateForCalc * 0.15)) / 5000) * 5000;
-  const ongoingAnnualCost = inputs.ongoingAnnualCost ?? autoOngoing;
+  const hasOngoingAnnualCostValue = inputs.ongoingAnnualCost != null
+    && !(typeof inputs.ongoingAnnualCost === 'string' && inputs.ongoingAnnualCost.trim() === '');
+  const enteredOngoingAnnualCost = Number(inputs.ongoingAnnualCost);
+  const userProvidedOngoing = hasOngoingAnnualCostValue
+    && Number.isFinite(enteredOngoingAnnualCost);
+  const invalidOngoingAnnualCost = hasOngoingAnnualCostValue && !userProvidedOngoing;
+  // A custom annual operating total is a valid modelling choice, but it can
+  // never create a negative operating-cost stream through a stale share link.
+  const ongoingAnnualCost = userProvidedOngoing
+    ? Math.max(0, enteredOngoingAnnualCost)
+    : autoOngoing;
 
   // =====================================================================
   // CURRENT STATE
@@ -383,7 +384,9 @@ export function runCalculations(inputs) {
   const hasExplicitWorkforcePlan = workforceMix.hasWorkforceMix
     || inputs.totalEfficiencyGainPct != null
     || inputs.employeesToMakeRedundant != null
-    || inputs.employeesToRetrain != null;
+    || inputs.employeesToRetrain != null
+    || inputs.contractorsToRollOff != null
+    || inputs.headcountReductionYears != null;
   const totalCurrentCost = annualLaborCost + annualReworkCost + currentToolCosts + annualContractSpend;
 
   // =====================================================================
@@ -444,16 +447,20 @@ export function runCalculations(inputs) {
     : (usesExplicitRedundancyPlan
       ? workforceTransition.totalEfficiencyGainPct
       : automationPotential);
+  // `displacedFTEs` is the selected workforce action, not the calculated
+  // capacity target. This prevents freed time from becoming an automatic
+  // layoff assumption while retaining a transparent total action when an
+  // explicit contractor roll-off is also selected.
   const displacedFTEs = usesExplicitRedundancyPlan
-    ? workforceTransition.employeesToMakeRedundant
+    ? workforceTransition.totalSelectedWorkforceReductions
     : Math.min(rawDisplacedFTEs, maxDisplaced);
   const headcountReductionSchedule = usesExplicitRedundancyPlan
-    ? workforceTransition.redundancySchedule
+    ? workforceTransition.headcountReductionSchedule
     : HEADCOUNT_REDUCTION_SCHEDULE;
   const headcountFeasible = usesExplicitRedundancyPlan
-    ? workforceTransition.freedCapacityFTEs >= 0.5
+    ? workforceTransition.totalHeadcountReductionTarget > 0
     : legacyHeadcountFeasible;
-  const retainedFTEs = teamSize - displacedFTEs;
+  const retainedFTEs = Math.max(0, teamSize - displacedFTEs);
 
   // =====================================================================
   // ADJUSTED TIMELINE
@@ -661,11 +668,12 @@ export function runCalculations(inputs) {
   const retainedTalentPremiumRate = inputs.retainedTalentPremiumRate ?? RETAINED_TALENT_PREMIUM_RATE;
   const retainedTalentPremium = retainedFTEs * avgSalary * retainedTalentPremiumRate;
 
-  // Data egress, stored data, and connected applications are Run costs rather
-  // than token consumption. They scale with the fixed company envelope and
-  // optional real meters.
-  const dataTransferBaselineMonthly = (DATA_TRANSFER_COST_MONTHLY[companySize] || 3000)
-    * industryCostMultiplier;
+  // Data storage and connected-system upkeep are Run costs rather than token
+  // consumption. Do not silently charge an entire-company data-egress envelope
+  // when this project has zero data and connector meters: the selected use
+  // case has not established that scope. Actual measured GB and applications
+  // are priced directly below.
+  const dataTransferBaselineMonthly = 0;
   const dataStorageCostMonthly = dataStoredGb * 0.12;
   const connectedApplicationCostMonthly = connectedApplications * 100 * industryCostMultiplier;
   const dataTransferCostMonthly = dataTransferBaselineMonthly
@@ -684,11 +692,30 @@ export function runCalculations(inputs) {
   const coreOngoingCost = accessAnnual + consumptionAnnual + ongoingAiLaborCost
     + annualAgentInfrastructureCost;
   const computedOngoingCost = accessAnnual + consumptionAnnual + runAnnual;
-  // Use computed ongoing if user didn't provide a value; never silently override user input
-  const userProvidedOngoing = inputs.ongoingAnnualCost != null;
+  // Use the derived operating model unless the user deliberately provides an
+  // all-in annual total. A manual total is allocated proportionally for
+  // disclosure so every displayed bucket reconciles exactly to the DCF.
   const baseOngoingCost = userProvidedOngoing ? ongoingAnnualCost : computedOngoingCost;
-  const ongoingCostOverridden = !userProvidedOngoing && computedOngoingCost > ongoingAnnualCost;
+  const ongoingCostOverridden = userProvidedOngoing && Math.abs(baseOngoingCost - computedOngoingCost) > 0.5;
   const modeledAnnualBucketTotal = accessAnnual + consumptionAnnual + runAnnual;
+  const manualAnnualAllocationFactor = modeledAnnualBucketTotal > 0
+    ? baseOngoingCost / modeledAnnualBucketTotal
+    : 0;
+  const effectiveAccessAnnual = userProvidedOngoing
+    ? accessAnnual * manualAnnualAllocationFactor
+    : accessAnnual;
+  const effectiveConsumptionAnnual = userProvidedOngoing
+    ? consumptionAnnual * manualAnnualAllocationFactor
+    : consumptionAnnual;
+  // Use a residual for the final bucket so floating-point arithmetic cannot
+  // leave a visible $0.01 mismatch between the three bucket totals and DCF.
+  const effectiveRunAnnual = Math.max(
+    0,
+    baseOngoingCost - effectiveAccessAnnual - effectiveConsumptionAnnual,
+  );
+  const effectiveAnnualComplianceCost = userProvidedOngoing
+    ? annualComplianceCostVal * manualAnnualAllocationFactor
+    : annualComplianceCostVal;
   const costAllocationShares = modeledAnnualBucketTotal > 0
     ? {
       access: accessAnnual / modeledAnnualBucketTotal,
@@ -740,13 +767,93 @@ export function runCalculations(inputs) {
       sources: sourceFootnotes([11, 29, 30, 36]),
     },
   };
-  const costBuckets = {
-    buildIntegrationOneTime: realisticImplCost,
-    accessAnnual,
-    consumptionAnnual,
-    runAnnual,
+  const annualBucketBreakdown = {
+    source: userProvidedOngoing ? 'user-entered-total' : 'model-derived',
+    allocationIsEstimated: userProvidedOngoing,
     modeledAnnualTotal: modeledAnnualBucketTotal,
     annualTotal: baseOngoingCost,
+    annualOverrideDelta: baseOngoingCost - modeledAnnualBucketTotal,
+    dataOperationsScope: {
+      dataStoredGb,
+      connectedApplications,
+      hasMeasuredScope: dataStoredGb > 0 || connectedApplications > 0,
+      note: dataStoredGb > 0 || connectedApplications > 0
+        ? 'Data storage and connected-system run cost uses the meters entered for this project.'
+        : 'No data-transfer or connector charge is included until a measured data or connected-system scope is entered.',
+    },
+    categories: [
+      {
+        key: 'access',
+        label: 'Access & licensing',
+        modeledAmount: accessAnnual,
+        amount: effectiveAccessAnnual,
+        items: [
+          { key: 'platformLicense', label: 'Platform licence', modeledAmount: annualBasePlatformLicense, amount: annualBasePlatformLicense * manualAnnualAllocationFactor },
+          { key: 'userLicenses', label: 'User licences', modeledAmount: annualUserLicenseCost, amount: annualUserLicenseCost * manualAnnualAllocationFactor },
+          { key: 'adjacentProducts', label: 'Adjacent AI products', modeledAmount: annualAdjacentCost, amount: annualAdjacentCost * manualAnnualAllocationFactor },
+        ],
+      },
+      {
+        key: 'consumption',
+        label: 'Consumption',
+        modeledAmount: consumptionAnnual,
+        amount: effectiveConsumptionAnnual,
+        items: [
+          {
+            key: 'modelUsage',
+            label: useTokenModel
+              ? 'Tokens, model calls & document processing'
+              : 'Requests, model calls & document processing',
+            modeledAmount: consumptionAnnual,
+            amount: consumptionAnnual * manualAnnualAllocationFactor,
+          },
+        ],
+      },
+      {
+        key: 'run',
+        label: 'Operations & governance',
+        modeledAmount: runAnnual,
+        amount: effectiveRunAnnual,
+        items: [
+          { key: 'aiOperations', label: 'AI operations & support', modeledAmount: ongoingAiLaborCost, amount: ongoingAiLaborCost * manualAnnualAllocationFactor },
+          { key: 'agentInfrastructure', label: 'Agent tools, monitoring & guardrails', modeledAmount: annualAgentInfrastructureCost, amount: annualAgentInfrastructureCost * manualAnnualAllocationFactor },
+          { key: 'modelMaintenance', label: 'Model updates & retraining', modeledAmount: modelRetrainingCost, amount: modelRetrainingCost * manualAnnualAllocationFactor },
+          { key: 'governance', label: 'Governance & compliance', modeledAmount: annualComplianceCostVal, amount: effectiveAnnualComplianceCost },
+          { key: 'employeeRetraining', label: 'Employee retraining', modeledAmount: retainedRetrainingCost, amount: retainedRetrainingCost * manualAnnualAllocationFactor },
+          { key: 'technicalMaintenance', label: 'Technology maintenance reserve', modeledAmount: techDebtCost, amount: techDebtCost * manualAnnualAllocationFactor },
+          { key: 'cybersecurity', label: 'Cybersecurity coverage', modeledAmount: cyberInsuranceCost, amount: cyberInsuranceCost * manualAnnualAllocationFactor },
+          { key: 'dataOperations', label: 'Measured data storage & connected apps', modeledAmount: dataTransferCostAnnual, amount: dataTransferCostAnnual * manualAnnualAllocationFactor },
+        ],
+      },
+    ],
+  };
+  // Keep the nested Run items exactly reconciled too. The residual is normally
+  // zero, but is explicit rather than silently dropping a future model cost.
+  const runItemTotal = annualBucketBreakdown.categories[2].items
+    .reduce((sum, item) => sum + item.amount, 0);
+  const runItemResidual = effectiveRunAnnual - runItemTotal;
+  if (Math.abs(runItemResidual) > 1e-9) {
+    annualBucketBreakdown.categories[2].items.push({
+      key: 'otherRunCosts',
+      label: 'Other operating-model costs',
+      modeledAmount: 0,
+      amount: runItemResidual,
+    });
+  }
+  const costBuckets = {
+    buildIntegrationOneTime: realisticImplCost,
+    accessAnnual: effectiveAccessAnnual,
+    consumptionAnnual: effectiveConsumptionAnnual,
+    runAnnual: effectiveRunAnnual,
+    modeledAccessAnnual: accessAnnual,
+    modeledConsumptionAnnual: consumptionAnnual,
+    modeledRunAnnual: runAnnual,
+    modeledAnnualTotal: modeledAnnualBucketTotal,
+    annualTotal: baseOngoingCost,
+    source: annualBucketBreakdown.source,
+    allocationIsEstimated: annualBucketBreakdown.allocationIsEstimated,
+    annualOverrideDelta: annualBucketBreakdown.annualOverrideDelta,
+    breakdown: annualBucketBreakdown,
     costAllocationShares,
     planningHorizonYears,
     programAllocationShares,
@@ -757,15 +864,27 @@ export function runCalculations(inputs) {
   // 5-year ongoing costs with tapered vendor escalation + compliance escalation
   // Years 1-2: 12% increase, Years 3-4: 7% (stabilized)
   // Compliance portion escalates separately at 8% annually (growing regulatory burden)
-  const baseOngoingExCompliance = baseOngoingCost - annualComplianceCostVal;
+  // The compliance slice must follow an explicit all-in annual override too.
+  // Otherwise a low entered total could subtract the full modelled compliance
+  // amount and create a negative non-compliance cost stream in later years.
+  const baseOngoingExCompliance = Math.max(0, baseOngoingCost - effectiveAnnualComplianceCost);
   const ongoingCostsByYear = [];
   let cumulativeEscalation = 1.0;
   for (let yr = 0; yr < DCF_YEARS; yr++) {
     cumulativeEscalation *= (1 + (AI_COST_ESCALATION_SCHEDULE[yr] || 0));
-    const complianceCostThisYear = annualComplianceCostVal * Math.pow(1 + COMPLIANCE_ESCALATION_RATE, yr);
+    const complianceCostThisYear = effectiveAnnualComplianceCost * Math.pow(1 + COMPLIANCE_ESCALATION_RATE, yr);
     ongoingCostsByYear.push(baseOngoingExCompliance * cumulativeEscalation + complianceCostThisYear);
   }
   const totalOngoing5Year = ongoingCostsByYear.reduce((sum, c) => sum + c, 0);
+  const annualCostSuggestion = getAnnualAiCostSuggestion({
+    companySize,
+    industry,
+    licensedUsers: aiLicensedUsers,
+    monthlyRequests: monthlyAiRequests,
+    apiCostPer1kRequests: apiCostPerK,
+    modeledBuckets: costBuckets,
+    buildIntegrationOneTime: realisticImplCost,
+  });
 
   const aiCostModel = {
     // `aiSalary` is retained as a compatibility alias for older report
@@ -798,6 +917,7 @@ export function runCalculations(inputs) {
     annualLicenseCost,
     annualAdjacentCost,
     costBuckets,
+    annualCostSuggestion,
     costAllocationShares,
     usageMeters: {
       aiLicensedUsers,
@@ -814,6 +934,7 @@ export function runCalculations(inputs) {
     coreOngoingCost,
     modelRetrainingCost,
     annualComplianceCost: annualComplianceCostVal,
+    effectiveAnnualComplianceCost,
     retainedRetrainingCost,
     techDebtCost,
     cyberInsuranceCost,
@@ -879,7 +1000,7 @@ export function runCalculations(inputs) {
     ? 1.5
     : (SEPARATION_COST_MULTIPLIER[companySize] || 1.0);
   const separationCostPerFTE = usesExplicitRedundancyPlan
-    ? workforceTransition.oneTimeRedundancyCost / Math.max(displacedFTEs, 1)
+    ? workforceTransition.oneTimeRedundancyCost / Math.max(workforceTransition.directEmployeeRedundancies, 1)
     : avgSalary * separationMultiplier;
   const totalSeparationCost = usesExplicitRedundancyPlan
     ? workforceTransition.oneTimeRedundancyCost
@@ -895,7 +1016,9 @@ export function runCalculations(inputs) {
     };
   }
 
-  // Explicit plans phase severance 50% / 30% / 20% across Years 1–3.
+  // Explicit plans phase selected direct-employee severance evenly over the
+  // user-chosen headcount-reduction period. Contractor roll-off is a separate
+  // action and has no severance charge.
   const separationByYear = usesExplicitRedundancyPlan
     ? workforceTransition.redundancyCostByYear
     : HEADCOUNT_REDUCTION_SCHEDULE.map(pct => totalSeparationCost * pct);
@@ -934,6 +1057,18 @@ export function runCalculations(inputs) {
   const oneTimeCosts = {
     displacedFTEs,
     retainedFTEs,
+    totalHeadcountReductionTarget: usesExplicitRedundancyPlan
+      ? workforceTransition.totalHeadcountReductionTarget
+      : maxDisplaced,
+    directEmployeeRedundancies: usesExplicitRedundancyPlan
+      ? workforceTransition.directEmployeeRedundancies
+      : displacedFTEs,
+    contractorsToRollOff: usesExplicitRedundancyPlan
+      ? workforceTransition.contractorsToRollOff
+      : 0,
+    headcountReductionYears: usesExplicitRedundancyPlan
+      ? workforceTransition.headcountReductionYears
+      : 3,
     maxHeadcountReduction: MAX_HEADCOUNT_REDUCTION,
     processAllocation,
     headcountFeasible,
@@ -965,7 +1100,7 @@ export function runCalculations(inputs) {
       },
       redundancySchedule: {
         type: 'user-planning-schedule',
-        note: 'The 50% / 30% / 20% Year 1–3 timing is the model’s stated transition plan, not an external benchmark.',
+        note: 'Selected workforce actions are phased evenly over the user-entered reduction period. This is a user planning input, not an external benchmark.',
         sources: [],
       },
       contractExit: {
@@ -2332,6 +2467,13 @@ export function runCalculations(inputs) {
   // =====================================================================
   const inputWarnings = [];
   inputWarnings.push(...caseBumpers);
+  if (invalidOngoingAnnualCost) {
+    inputWarnings.push({
+      field: 'ongoingAnnualCost',
+      severity: 'warning',
+      message: 'The annual AI cost was not a usable number, so the model used its transparent operating-cost build-up instead.',
+    });
+  }
   const salaryRange = SALARY_RANGES_BY_INDUSTRY[industry] || SALARY_RANGES_BY_INDUSTRY['Other'];
   if (avgSalary < salaryRange.low) {
     inputWarnings.push({
@@ -2346,6 +2488,14 @@ export function runCalculations(inputs) {
       field: 'hoursPerWeek',
       severity: 'info',
       message: `Team spends ${Math.round(processAllocation * 100)}% of time on this process. Headcount reduction is unlikely — model uses capacity reallocation instead.`,
+    });
+  }
+  if (usesExplicitRedundancyPlan
+    && workforceTransition.totalHeadcountReductionTarget > workforceTransition.totalSelectedWorkforceReductions) {
+    inputWarnings.push({
+      field: 'employeesToMakeRedundant',
+      severity: 'info',
+      message: `The model calculates capacity for up to ${workforceTransition.totalHeadcountReductionTarget} workforce reductions. Only ${workforceTransition.totalSelectedWorkforceReductions} selected action(s) are cash-realized; the remaining capacity stays available for retraining or redeployment.`,
     });
   }
   if (!userProvidedOngoing && computedOngoingCost > ongoingAnnualCost) {
@@ -2629,6 +2779,11 @@ export function runCalculations(inputs) {
       totalEfficiencyGainPct,
       freedUpAnnualHours: workforceTransition.freedUpAnnualHours,
       freedCapacityFTEs: workforceTransition.freedCapacityFTEs,
+      totalHeadcountReductionTarget: workforceTransition.totalHeadcountReductionTarget,
+      selectedWorkforceReductions: workforceTransition.totalSelectedWorkforceReductions,
+      directEmployeeRedundancies: workforceTransition.directEmployeeRedundancies,
+      contractorRollOffs: workforceTransition.contractorsToRollOff,
+      headcountReductionYears: workforceTransition.headcountReductionYears,
       annualCapacityOnlyValue: capacityOnlyEfficiencyValue,
       annualErrorCount: rework.annualErrorCount,
       reworkFraction: rework.reworkFraction,

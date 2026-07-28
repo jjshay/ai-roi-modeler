@@ -28,6 +28,7 @@ function boundedNonNegative(value, maximum, fallback = 0) {
 export const MODEL_INPUT_LIMITS = {
   workforceCount: 100000,
   fullyBurdenedAnnualCost: 2000000,
+  headcountReductionYears: 5,
   existingContractCount: 100000,
   annualCostPerContract: 50000000,
   annualExistingContractSpend: 500000000,
@@ -38,6 +39,30 @@ export const MODEL_INPUT_LIMITS = {
 
 function hasValue(value) {
   return value !== null && value !== undefined && value !== '';
+}
+
+/**
+ * Converts the user-selected realization period into an in-model DCF period.
+ * The DCF covers five years, so a requested value outside 1–5 is bounded
+ * rather than silently extending a cash claim beyond the forecast horizon.
+ */
+export function normalizeHeadcountReductionYears(value, fallback = 3) {
+  const parsed = Number(value);
+  const requested = Number.isFinite(parsed) ? Math.round(parsed) : fallback;
+  return Math.max(1, Math.min(MODEL_INPUT_LIMITS.headcountReductionYears, requested));
+}
+
+/**
+ * Equal realization fractions for a five-year DCF. Fractions—not rounded
+ * people—are used so a two-person plan over three years is not forced into an
+ * artificial 1 / 1 / 0 timing pattern. The total cash action still reconciles
+ * exactly to the selected workforce action.
+ */
+export function equalHeadcountReductionSchedule(years, horizon = 5) {
+  const normalizedYears = Math.max(1, Math.min(horizon, Math.round(Number(years) || 1)));
+  return Array.from({ length: horizon }, (_, index) => (
+    index < normalizedYears ? 1 / normalizedYears : 0
+  ));
 }
 
 /**
@@ -272,8 +297,10 @@ export function calculateProcessCost(inputs = {}) {
 
 /**
  * Maps the user’s measured efficiency plan to capacity and explicit workforce
- * actions. The model recognizes cash labor savings only from declared direct-
- * employee redundancies; retrained employees remain capacity-only.
+ * actions. The calculated target is a capacity ceiling, not an automatic
+ * layoff forecast: cash labor savings arise only from declared direct-employee
+ * redundancies or an explicitly entered contractor roll-off. Retrained
+ * employees remain capacity-only.
  */
 export function calculateWorkforceTransitionPlan(inputs = {}, suppliedWorkforceMix, options = {}) {
   const workforceMix = suppliedWorkforceMix || calculateWorkforceMix(inputs);
@@ -302,11 +329,35 @@ export function calculateWorkforceTransitionPlan(inputs = {}, suppliedWorkforceM
   const freedUpAnnualHours = eligibleAnnualHours * totalEfficiencyGainPct;
   const freedCapacityFTEs = freedUpAnnualHours / 2080;
   const requestedEmployeesToMakeRedundant = nonNegative(inputs.employeesToMakeRedundant);
+  const requestedContractorsToRollOff = nonNegative(
+    inputs.contractorsToRollOff ?? inputs.contractorRollOffCount
+  );
   const requestedEmployeesToRetrain = nonNegative(inputs.employeesToRetrain);
-  const redundancyCapacityCap = Math.floor(freedCapacityFTEs + 1e-9);
   const redundanciesAllowed = options.allowRedundancies !== false;
+  // This is the automatically calculated total workforce-reduction target.
+  // It uses only whole measured FTE capacity and is deliberately not assumed
+  // to be cash-realized until a user selects the actual employee/contractor
+  // action below.
+  const totalHeadcountReductionTarget = redundanciesAllowed
+    ? Math.min(totalHeadcount, Math.floor(freedCapacityFTEs + 1e-9))
+    : 0;
+  const maximumContractorRollOffs = Math.min(
+    workforceMix.hasWorkforceMix ? workforceMix.offshoreContractorCount : 0,
+    totalHeadcountReductionTarget,
+  );
+  const contractorsToRollOff = Math.min(
+    requestedContractorsToRollOff,
+    maximumContractorRollOffs,
+  );
+  // The two maximums are alternative allocation ceilings within the same
+  // total target. `maximumDirectEmployeeRedundancies` must not be added to
+  // `maximumContractorRollOffs`; actual direct capacity is reduced once an
+  // explicit contractor roll-off is selected.
+  const maximumDirectEmployeeRedundancies = redundanciesAllowed
+    ? Math.min(directEmployees, totalHeadcountReductionTarget)
+    : 0;
   const maximumRedundancies = redundanciesAllowed
-    ? Math.min(directEmployees, redundancyCapacityCap)
+    ? Math.min(maximumDirectEmployeeRedundancies, Math.max(0, totalHeadcountReductionTarget - contractorsToRollOff))
     : 0;
   const employeesToMakeRedundant = Math.min(
     requestedEmployeesToMakeRedundant,
@@ -316,10 +367,27 @@ export function calculateWorkforceTransitionPlan(inputs = {}, suppliedWorkforceM
     requestedEmployeesToRetrain,
     Math.max(0, directEmployees - employeesToMakeRedundant)
   );
-  const annualHeadcountSavings = employeesToMakeRedundant * employeeCost;
+  const contractorCost = workforceMix.hasWorkforceMix
+    ? workforceMix.contractorFullyBurdenedCost
+    : 0;
+  const annualEmployeeRedundancySavings = employeesToMakeRedundant * employeeCost;
+  const annualContractorRollOffSavings = contractorsToRollOff * contractorCost;
+  const annualHeadcountSavings = annualEmployeeRedundancySavings + annualContractorRollOffSavings;
   const oneTimeRedundancyCost = employeesToMakeRedundant * 1.5 * employeeCost;
-  const redundancySchedule = [0.50, 0.30, 0.20, 0, 0];
+  const requestedHeadcountReductionYears = inputs.headcountReductionYears
+    ?? inputs.yearsToAchieveHeadcountReduction
+    ?? inputs.yearsToAchieve;
+  const headcountReductionYears = normalizeHeadcountReductionYears(requestedHeadcountReductionYears, 3);
+  const headcountReductionSchedule = equalHeadcountReductionSchedule(headcountReductionYears);
+  // Retain the established property name for downstream consumers; it now
+  // reflects the user-selected equal realization period rather than 50/30/20.
+  const redundancySchedule = headcountReductionSchedule;
   const redundancyCostByYear = redundancySchedule.map(pct => oneTimeRedundancyCost * pct);
+  const totalSelectedWorkforceReductions = employeesToMakeRedundant + contractorsToRollOff;
+  const unallocatedHeadcountReductionCapacity = Math.max(
+    0,
+    totalHeadcountReductionTarget - totalSelectedWorkforceReductions,
+  );
   const annualWorkforceCost = (
     workforceMix.hasWorkforceMix
       ? workforceMix.totalAnnualHeadcountCost
@@ -344,6 +412,11 @@ export function calculateWorkforceTransitionPlan(inputs = {}, suppliedWorkforceM
         : 'Redundancy plan is turned off because this case does not cover enough verified workforce capacity to support a defensible workforce action.'
     );
   }
+  if (requestedContractorsToRollOff > maximumContractorRollOffs) {
+    warnings.push(
+      `Contractor roll-off plan capped at ${maximumContractorRollOffs} contractors because the measured freed capacity supports ${freedCapacityFTEs.toFixed(1)} FTEs.`
+    );
+  }
   if (requestedEmployeesToRetrain > employeesToRetrain) {
     warnings.push(
       `Retraining plan capped at ${employeesToRetrain} direct employees after the redundancy plan.`
@@ -358,12 +431,30 @@ export function calculateWorkforceTransitionPlan(inputs = {}, suppliedWorkforceM
     redundanciesAllowed,
     freedUpAnnualHours,
     freedCapacityFTEs,
+    totalHeadcountReductionTarget,
+    headcountReductionTarget: totalHeadcountReductionTarget,
+    maximumHeadcountReduction: totalHeadcountReductionTarget,
+    requestedContractorsToRollOff,
+    maximumContractorRollOffs,
+    contractorRollOffTarget: maximumContractorRollOffs,
+    contractorsToRollOff,
     requestedEmployeesToMakeRedundant,
     employeesToMakeRedundant,
+    directEmployeeRedundancies: employeesToMakeRedundant,
     requestedEmployeesToRetrain,
     employeesToRetrain,
     maximumRedundancies,
+    maximumDirectEmployeeRedundancies,
+    directEmployeeReductionTarget: maximumDirectEmployeeRedundancies,
+    remainingDirectEmployeeReductionCapacity: maximumRedundancies,
+    totalSelectedWorkforceReductions,
+    unallocatedHeadcountReductionCapacity,
+    requestedHeadcountReductionYears,
+    headcountReductionYears,
+    headcountReductionSchedule,
     annualHeadcountSavings,
+    annualEmployeeRedundancySavings,
+    annualContractorRollOffSavings,
     oneTimeRedundancyCost,
     redundancySchedule,
     redundancyCostByYear,

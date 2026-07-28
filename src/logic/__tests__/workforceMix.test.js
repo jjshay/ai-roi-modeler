@@ -74,7 +74,7 @@ describe('workforce-mix model helpers', () => {
     expect(exit.contractExitCost).toBe(75000);
   });
 
-  it('caps redundancies to measured freed capacity and phases severance 50/30/20', () => {
+  it('caps redundancies to measured freed capacity and phases selected severance evenly over the default period', () => {
     const mix = calculateWorkforceMix(mixInputs);
     const plan = calculateWorkforceTransitionPlan({
       ...mixInputs,
@@ -87,8 +87,44 @@ describe('workforce-mix model helpers', () => {
     expect(plan.maximumRedundancies).toBe(1);
     expect(plan.employeesToMakeRedundant).toBe(1);
     expect(plan.oneTimeRedundancyCost).toBe(180000);
-    expect(plan.redundancyCostByYear).toEqual([90000, 54000, 36000, 0, 0]);
+    expect(plan.totalHeadcountReductionTarget).toBe(1);
+    expect(plan.headcountReductionYears).toBe(3);
+    expect(plan.redundancyCostByYear).toEqual([60000, 60000, 60000, 0, 0]);
     expect(plan.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('keeps capacity targets distinct from selected direct and contractor actions, with a two-year equal phase', () => {
+    const mix = calculateWorkforceMix(mixInputs);
+    const plan = calculateWorkforceTransitionPlan({
+      ...mixInputs,
+      totalEfficiencyGainPct: 0.50,
+      contractorsToRollOff: 4,
+      employeesToMakeRedundant: 5,
+      headcountReductionYears: 2,
+    }, mix);
+
+    // 15 workers × 40 hours × 52 × 50% = 15,600 hours = 7.5 FTEs.
+    // The calculated target is therefore seven whole roles, but it remains a
+    // capacity limit until individual workforce actions are selected.
+    expect(plan.totalHeadcountReductionTarget).toBe(7);
+    expect(plan.headcountReductionTarget).toBe(7);
+    expect(plan.maximumDirectEmployeeRedundancies).toBe(7);
+    expect(plan.maximumContractorRollOffs).toBe(5);
+
+    // Contractor selection consumes four of the same seven-role target, so
+    // the direct action is capped at the remaining three—not at seven.
+    expect(plan.contractorsToRollOff).toBe(4);
+    expect(plan.employeesToMakeRedundant).toBe(3);
+    expect(plan.totalSelectedWorkforceReductions).toBe(7);
+    expect(plan.totalSelectedWorkforceReductions).toBeLessThanOrEqual(plan.totalHeadcountReductionTarget);
+    expect(plan.unallocatedHeadcountReductionCapacity).toBe(0);
+
+    expect(plan.annualEmployeeRedundancySavings).toBe(360000);
+    expect(plan.annualContractorRollOffSavings).toBe(240000);
+    expect(plan.annualHeadcountSavings).toBe(600000);
+    expect(plan.oneTimeRedundancyCost).toBe(540000);
+    expect(plan.headcountReductionSchedule).toEqual([0.5, 0.5, 0, 0, 0]);
+    expect(plan.redundancyCostByYear).toEqual([270000, 270000, 0, 0, 0]);
   });
 
   it('limits workforce actions to the workload the selected case actually covers', () => {
@@ -191,7 +227,35 @@ describe('workforce-mix integration with the DCF', () => {
       + r.oneTimeCosts.contingencyReserve
       + r.oneTimeCosts.effectiveContractExitCost,
     );
-    expect(r.oneTimeCosts.separationByYear).toEqual([90000, 54000, 36000, 0, 0]);
+    expect(r.oneTimeCosts.separationByYear).toEqual([60000, 60000, 60000, 0, 0]);
+  });
+
+  it('applies selected mixed-workforce actions and direct-only severance evenly across a two-year DCF phase', () => {
+    const r = runCalculations({
+      ...BASE_INPUTS,
+      directEmployeeCount: 10,
+      employeeFullyBurdenedCost: 120000,
+      offshoreContractorCount: 5,
+      contractorFullyBurdenedCost: 60000,
+      hoursPerWeek: 40,
+      totalEfficiencyGainPct: 0.50,
+      employeesToMakeRedundant: 5,
+      contractorsToRollOff: 4,
+      headcountReductionYears: 2,
+    });
+
+    expect(r.workforceTransition.totalHeadcountReductionTarget).toBe(7);
+    expect(r.workforceTransition.totalSelectedWorkforceReductions).toBe(7);
+    expect(r.valueBreakdown.headcount.gross).toBe(600000);
+    expect(r.oneTimeCosts.totalSeparationCost).toBe(540000);
+    expect(r.oneTimeCosts.separationByYear).toEqual([270000, 270000, 0, 0, 0]);
+
+    const baseFlows = r.scenarios.base.projections;
+    expect(baseFlows[0].headcountSavings).toBeCloseTo(300000, 6);
+    expect(baseFlows[0].separationCost).toBeCloseTo(270000, 6);
+    expect(baseFlows[1].separationCost).toBeCloseTo(270000, 6);
+    expect(baseFlows.slice(2).every((flow) => flow.separationCost === 0)).toBe(true);
+    expect(baseFlows[2].headcountSavings).toBeGreaterThan(baseFlows[1].headcountSavings);
   });
 
   it('surfaces input-cap corrections in central calculation warnings', () => {

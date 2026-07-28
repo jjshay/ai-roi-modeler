@@ -160,13 +160,13 @@ describe('Excel Model: data consistency', () => {
   it('derives the same automatic ongoing-cost base for the risk regression vector', () => {
     const results = runCalculations(RISK_AUTO_ONGOING_INPUTS);
     expect(results.aiCostModel.userProvidedOngoing).toBe(false);
-    expect(results.aiCostModel.computedOngoingCost).toBeCloseTo(283160, 6);
-    expect(results.aiCostModel.baseOngoingCost).toBeCloseTo(283160, 6);
-    [283160, 305812.8, 319341.312, 322140.672, 316633.50144]
+    expect(results.aiCostModel.computedOngoingCost).toBeCloseTo(247160, 6);
+    expect(results.aiCostModel.baseOngoingCost).toBeCloseTo(247160, 6);
+    [247160, 266932.8, 278906.112, 281705.472, 277411.35744]
       .forEach((expectedCost, index) => {
         expect(results.scenarios.base.projections[index].ongoingCost).toBeCloseTo(expectedCost, 6);
       });
-    expect(results.scenarios.base.npv).toBeCloseTo(-996007.857414439, 6);
+    expect(results.scenarios.base.npv).toBeCloseTo(-848797.1378287179, 6);
   });
 });
 
@@ -230,7 +230,11 @@ describe('Excel Model: formula reference audit', () => {
   it('matches the core workforce-transition cash rules', () => {
     expect(source).toContain("fml(KF, 12, 2, 'Inputs!B13/2080'");
     expect(source).toContain('INT(B86/2080+0.000000001)');
-    expect(source).toContain("fml(KF, 54, 2, `B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}`");
+    expect(source).toContain("fml(KF, 54, 2, `B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}+B19*Inputs!B${exportInputRows.contractorFullyBurdenedCost}`");
+    expect(source).toContain('Calculated Total Reduction Target');
+    expect(source).toContain('Selected Contractor Roll-Off');
+    expect(source).toContain('headcountReductionYearsFormula');
+    expect(source).toContain('annualHeadcountReductionFraction');
     expect(source).toContain('Customer Service evidence gate');
     expect(source).toContain('Inputs!B78="Yes"');
     expect(source).toContain('MIN(B79,Inputs!B11*Inputs!B12)*52*B98');
@@ -514,7 +518,7 @@ describe('Excel Model: live formula-driven workbook', () => {
     expect(workbook.getWorksheet('Engine Results')).toBeUndefined();
     expect(pnl.getCell('B21').formula).toBe("-'Key Formulas'!B64-'Key Formulas'!B62");
     expect(pnl.getCell('C12').formula).toBe("'Key Formulas'!B58*C5*C6*C10");
-    expect(pnl.getCell('C18').formula).toContain("'Key Formulas'!$B$105");
+    expect(pnl.getCell('C18').formula).toContain("'Key Formulas'!$B$110");
     expect(pnl.getCell('C21').formula).toBe('C14-C17-C18');
     expect(pnl.getCell('B27').formula).toBe('SUM(B23:G23)');
     expect(pnl.getCell('B28').formula).toContain('IRR(B21:G21)');
@@ -533,13 +537,22 @@ describe('Excel Model: live formula-driven workbook', () => {
     expect(formulas.getCell('B83').formula).toContain("'Assumptions - Analytics'!$B$30");
     expect(formulas.getCell('B98').formula).toContain('MIN(Inputs!B53,B77)');
     expect(formulas.getCell('B97').formula).toContain('BLOCKED');
+    expect(formulas.getCell('B18').formula).toContain('INT(B86/2080');
+    expect(formulas.getCell('B19').formula).toContain('Inputs!B56');
+    expect(formulas.getCell('B20').formula).toContain('B18-B19');
+    expect(formulas.getCell('B54').formula).toContain('B19*Inputs!B43');
+    expect(pnl.getCell('C7').formula).toContain('Inputs!B38');
+    expect(pnl.getCell('C8').formula).toContain('Inputs!B38');
     expect(formulas.getCell('B51').formula).toBe('IF(OR(ISBLANK(Inputs!B25),Inputs!B25=""),B50,Inputs!B25)');
+    expect(formulas.getCell('B73').formula).not.toContain('IF(Inputs!B5="Startup (1-50)"');
+    expect(formulas.getCell('B73').formula).toContain('Inputs!B75*0.12*12');
+    expect(formulas.getCell('B110').formula).toBe('IFERROR(B105*B51/B50,0)');
     expect(formulas.getCell('B80').formula).toContain('Lookups!A205:D208');
     expect(formulas.getCell('B40').formula).toContain('B101:B104');
 
     // Central workforce, contract, and evidence inputs are editable even if
     // the workbook is protected by a recipient.
-    [40, 41, 42, 43, 48, 49, 50, 51, 53, 54, 55, 58, 59, 60, 65, 78].forEach((row) => {
+    [38, 40, 41, 42, 43, 48, 49, 50, 51, 53, 54, 55, 56, 58, 59, 60, 65, 78].forEach((row) => {
       expect(inputs.getCell(`B${row}`).protection.locked).toBe(false);
     });
 

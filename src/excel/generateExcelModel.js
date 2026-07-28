@@ -388,6 +388,18 @@ export async function generateExcelModel(formData, mcResults, results) {
     formData.employeesToMakeRedundant, formData.employeeCountToMakeRedundant,
     formData.redundantEmployeeCount,
   ));
+  const contractorsToRollOff = nonNegative(firstPresent(
+    formData.contractorsToRollOff, formData.contractorRollOffCount,
+  ));
+  const requestedHeadcountReductionYears = firstPresent(
+    formData.headcountReductionYears,
+    formData.yearsToAchieveHeadcountReduction,
+    formData.yearsToAchieve,
+  );
+  const parsedHeadcountReductionYears = Number(requestedHeadcountReductionYears);
+  const headcountReductionYears = Math.max(1, Math.min(5, Math.round(
+    Number.isFinite(parsedHeadcountReductionYears) ? parsedHeadcountReductionYears : 3,
+  )));
 
   const existingContractCount = nonNegative(firstPresent(
     formData.existingContractCount, formData.existingContracts, formData.contractCount,
@@ -609,12 +621,14 @@ export async function generateExcelModel(formData, mcResults, results) {
   ];
   CONSTS.forEach((c, i) => { val(L, 82 + i, 1, c[0]); val(L, 82 + i, 2, c[1], c[2], inputFill); });
 
-  // Schedules (R102-R108)
-  hdr(L, 102, 'YEAR-BY-YEAR SCHEDULES', 6);
-  tableHeaders(L, 103, ['Year', 'Severance Schedule', 'Cum. Workforce Savings', 'Adoption Ramp', 'Cost Escalation', 'Cum Escalation']);
+  // Schedules (R102-R108). Workforce timing is now live from the user’s
+  // Inputs!B38 selection, so these legacy columns remain neutral and cannot
+  // be mistaken for a second 50/30/20 severance schedule.
+  hdr(L, 102, 'YEAR-BY-YEAR ADOPTION & COST SCHEDULES', 6);
+  tableHeaders(L, 103, ['Year', 'Legacy workforce phase (not used)', 'Legacy cumulative phase (not used)', 'Adoption Ramp', 'Cost Escalation', 'Cum Escalation']);
   const SCHED = [
-    [1,0.50,0.50,0.75,0,1.000000],[2,0.30,0.80,0.90,0.08,1.080000],
-    [3,0.20,1.00,1.00,0.04,1.123200],[4,0,1.00,1.00,0,1.123200],[5,0,1.00,1.00,-0.03,1.089504],
+    [1,0,0,0.75,0,1.000000],[2,0,0,0.90,0.08,1.080000],
+    [3,0,0,1.00,0.04,1.123200],[4,0,0,1.00,0,1.123200],[5,0,0,1.00,-0.03,1.089504],
   ];
   SCHED.forEach((s, i) => {
     dataRow(L, 104 + i, s, ['0', PCT, PCT, PCT, PCT, DEC]);
@@ -762,6 +776,7 @@ export async function generateExcelModel(formData, mcResults, results) {
     '5f': 'Legacy revenue acceleration (not used)',
     '5g': 'Retained-talent premium',
     '5h': 'Multi-step agent workflow',
+    '5i': 'Years to achieve workforce reduction',
     '6a': 'Direct employees',
     '6b': 'Direct employee fully burdened cost',
     '6c': 'Offshore contractors',
@@ -776,6 +791,7 @@ export async function generateExcelModel(formData, mcResults, results) {
     '7f': 'Total efficiency gain',
     '7g': 'Employees to retrain',
     '7h': 'Employees to make redundant',
+    '7i': 'Contractors to roll off',
     '8a': 'Existing contracts to cancel',
     '8b': 'Annual cost per contract',
     '8c': 'Notice period (months)',
@@ -980,6 +996,9 @@ export async function generateExcelModel(formData, mcResults, results) {
   inp(I, 37, '5h', formData.isAgenticWorkflow ? 'Yes' : 'No', null, false,
     'Is this a multi-step AI agent workflow? [29] Agentic workflows may use materially more model calls; validate against measured usage.', '');
 
+  inp(I, 38, '5i', headcountReductionYears, NUM, false,
+    'User-entered realization period for selected workforce actions. The model spreads selected direct redundancies, explicit contractor roll-offs, and direct-employee severance evenly across these years. Capacity is not a layoff forecast.', '');
+
   // Data validation dropdowns (same cell positions as before)
   I.getRow(4).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$3:$A$12'] };
   I.getRow(5).getCell(2).dataValidation = { type: 'list', formulae: ['Lookups!$A$37:$A$41'] };
@@ -992,6 +1011,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   I.getRow(34).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
   I.getRow(35).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
   I.getRow(37).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
+  I.getRow(38).getCell(2).dataValidation = { type: 'list', formulae: ['"1,2,3,4,5"'] };
   I.getRow(65).getCell(2).dataValidation = { type: 'list', formulae: ['"Accelerated,Standard,Extended"'] };
 
   // ---------------------------------------------------------------
@@ -1012,6 +1032,8 @@ export async function generateExcelModel(formData, mcResults, results) {
     totalEfficiencyGainPct: 53,
     employeesToRetrain: 54,
     employeesToMakeRedundant: 55,
+    contractorsToRollOff: 56,
+    headcountReductionYears: 38,
     existingContractCount: 58,
     annualCostPerContract: 59,
     contractNoticePeriodMonths: 60,
@@ -1065,7 +1087,9 @@ export async function generateExcelModel(formData, mcResults, results) {
   inp(I, 54, '7g', employeesToRetrain, NUM, false,
     'Employees whose time is expected to be redeployed or retrained (capacity, not an automatic cash saving)', '');
   inp(I, 55, '7h', employeesToMakeRedundant, NUM, false,
-    '[W1/W2] Direct employees whose roles are explicitly expected to become redundant. This is the hard headcount-savings input. The workbook applies 1.5× fully burdened cost and a 50% / 30% / 20% schedule as model rules; [15] itself refers to annual salary, so validate actual HR costs.', '');
+    '[W1] Direct employees whose roles are explicitly expected to become redundant. This is a cash action only after you select it; it is capped by the calculated workforce-reduction target after any contractor roll-off. The workbook applies 1.5× fully burdened employee cost; validate actual HR costs.', '');
+  inp(I, 56, '7i', contractorsToRollOff, NUM, false,
+    'Optional explicit contractor action. Contractors to roll off are capped by the same calculated total reduction target and have no employee severance charge. Leave at 0 if capacity will be retrained or redeployed instead.', '');
 
   sub(I, 57, '8. CONTRACT EXIT ESTIMATE — Contracts AI is expected to replace', 4);
   inp(I, 58, '8a', existingContractCount, NUM, false,
@@ -1166,7 +1190,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   [3, 9, 17, 22, 29, 39, 47, 57, 64, 68, 79].forEach((rowNumber) => {
     I.getRow(rowNumber).height = 20;
   });
-  [6, 8, 16, 21, 28, 38, 46, 56].forEach((rowNumber) => {
+  [6, 8, 16, 21, 28, 46].forEach((rowNumber) => {
     I.getRow(rowNumber).height = 7;
   });
   I.getCell('B2').alignment = { horizontal: 'right', vertical: 'middle', wrapText: true };
@@ -1348,15 +1372,21 @@ export async function generateExcelModel(formData, mcResults, results) {
 
   // --- Workforce Allocation (rows 17-21) ---
   sub(KF, 17, 'Workforce Allocation', 3);
-  val(KF, 18, 1, 'Employees Marked Redundant');
-  fml(KF, 18, 2, `MIN(Inputs!B${exportInputRows.employeesToMakeRedundant},Inputs!B${exportInputRows.directEmployeeCount},INT(B86/2080+0.000000001))`, '0');
-  note(KF, 18, 3, 'Explicit direct-employee input, capped by direct employees and measured freed capacity (whole FTEs).');
-  val(KF, 19, 1, 'Direct Employees Available');
-  fml(KF, 19, 2, `Inputs!B${exportInputRows.directEmployeeCount}`, '0');
-  val(KF, 20, 1, 'Hard Headcount Reductions');
-  fml(KF, 20, 2, 'B18', '0');
+  val(KF, 18, 1, 'Calculated Total Reduction Target');
+  fml(KF, 18, 2, 'IF(B97="OK",MIN(Inputs!B11,INT(B86/2080+0.000000001)),0)', '0', calcFill);
+  note(KF, 18, 3, 'Automatically calculated whole-FTE capacity from measured freed hours. It is a capacity target—not an assumed layoff or cash saving.');
+  val(KF, 19, 1, 'Selected Contractor Roll-Off');
+  fml(KF, 19, 2, `MIN(Inputs!B${exportInputRows.contractorsToRollOff},Inputs!B${exportInputRows.offshoreContractorCount},B18)`, '0');
+  note(KF, 19, 3, 'Explicit contractor action, capped within the same total target. Contractor roll-off carries no direct-employee severance cost.');
+  val(KF, 20, 1, 'Selected Direct Employee Redundancies');
+  fml(KF, 20, 2, `MIN(Inputs!B${exportInputRows.employeesToMakeRedundant},Inputs!B${exportInputRows.directEmployeeCount},MAX(0,B18-B19))`, '0');
+  note(KF, 20, 3, 'Explicit direct-employee action, capped after any selected contractor roll-off. This is the only action that creates severance.');
   val(KF, 21, 1, 'Remaining Workforce');
-  fml(KF, 21, 2, 'Inputs!B11-B20', '0');
+  fml(KF, 21, 2, 'Inputs!B11-B19-B20', '0');
+  note(KF, 21, 3, 'Total workforce less selected contractor roll-off and selected direct employee redundancies.');
+  val(KF, 22, 1, 'Unallocated Reduction Capacity');
+  fml(KF, 22, 2, 'MAX(0,B18-B19-B20)', '0', calcFill);
+  note(KF, 22, 3, 'Calculated capacity not selected as a cash workforce action; it remains available for retraining or redeployment.');
 
   // --- Implementation Cost (rows 23-33) ---
   sub(KF, 23, 'Implementation Cost', 3);
@@ -1425,7 +1455,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   note(KF, 48, 3, '[M1/C1] Annual license/seat access. The size/license envelope and planning allocation are model/user planning assumptions, not external benchmarks.');
   val(KF, 49, 1, 'Run: Support, Monitoring & Governance');
   fml(KF, 49, 2, `B46+IF(Inputs!B37="Yes",VLOOKUP(Inputs!B5,Lookups!A37:N41,14,FALSE)*12,0)+B42*Lookups!B88+B105+Inputs!B${exportInputRows.employeesToRetrain}*Inputs!B${exportInputRows.employeeFullyBurdenedCost}*Lookups!B89+B42*Lookups!B90+VLOOKUP(Inputs!B5,Lookups!A37:J41,10,FALSE)*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)+B73`, DOL);
-  note(KF, 49, 3, '[M1/C1] Labor + agent infrastructure + retraining + compliance + retained-worker training + technical debt + cyber + data transfer. Validate against the operating model.');
+  note(KF, 49, 3, '[M1/C1] Labor + agent infrastructure + retraining + compliance + retained-worker training + technical debt + cyber + measured data/connector operations. Validate against the operating model.');
   val(KF, 50, 1, 'Computed Ongoing');
   fml(KF, 50, 2, 'B47+B48+B49', DOL);
   val(KF, 51, 1, 'Base Ongoing Cost');
@@ -1434,11 +1464,11 @@ export async function generateExcelModel(formData, mcResults, results) {
 
   // --- Annual Savings (rows 53-61) ---
   sub(KF, 53, 'Annual Savings', 3);
-  val(KF, 54, 1, 'Headcount Savings (Explicit Cash)');
-  fml(KF, 54, 2, `B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}`, DOL);
-  note(KF, 54, 3, 'Explicit redundancies only; direct employee fully burdened cost. This declared cash action is not risk-adjusted.');
+  val(KF, 54, 1, 'Selected Workforce Savings (Explicit Cash)');
+  fml(KF, 54, 2, `B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}+B19*Inputs!B${exportInputRows.contractorFullyBurdenedCost}`, DOL);
+  note(KF, 54, 3, 'Only explicit selected actions: direct-employee redundancies plus contractor roll-off. It is not risk-adjusted and does not include unallocated capacity.');
   val(KF, 55, 1, 'Freed Capacity Value (Context Only)');
-  fml(KF, 55, 2, `MAX(0,(B13*B98)-(B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}))*B9`, DOL);
+  fml(KF, 55, 2, 'MAX(0,(B13*B98)-B54)*B9', DOL);
   note(KF, 55, 3, '[E1] Freed capacity after hard headcount savings. Planning context only; excluded from NPV, ROIC, and payback unless Finance explicitly changes the cash-flow formulas.');
   val(KF, 56, 1, 'Measured Rework Savings (Risk-Adj)');
   fml(KF, 56, 2, 'B85*B98*B9', DOL);
@@ -1472,6 +1502,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 66, 2, `Inputs!B${exportInputRows.employeeFullyBurdenedCost}*B65`, DOL);
   val(KF, 67, 1, 'Total Severance Cost');
   fml(KF, 67, 2, 'B20*B66', DOL);
+  note(KF, 67, 3, 'Direct employee redundancies only. Contractor roll-off is intentionally excluded from severance.');
   val(KF, 68, 1, 'Total Investment');
   fmlBold(KF, 68, 2, 'B64+B62+B67', DOL);
   note(KF, 68, 3, 'Cost to Deploy + Contract Cancellation + Severance');
@@ -1484,8 +1515,8 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 72, 2, 'B21*Inputs!B13*Inputs!B36', DOL);
   note(KF, 72, 3, '[28] Retained FTEs × salary × premium rate. Workforce-planning context only; excluded from ongoing AI cost and the DCF.');
   val(KF, 73, 1, 'Data Transfer & Connected Systems');
-  fml(KF, 73, 2, `IF(Inputs!B5="Startup (1-50)",2400,IF(Inputs!B5="SMB (51-500)",9600,IF(Inputs!B5="Mid-Market (501-5,000)",36000,IF(Inputs!B5="Enterprise (5,001-50,000)",144000,480000))))*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)+Inputs!B${exportInputRows.dataStoredGb}*0.12*12+Inputs!B${exportInputRows.connectedApplications}*100*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)*12`, DOL);
-  note(KF, 73, 3, '[30] Baseline data transfer + entered stored-data and connected-system run cost. Validate against the selected cloud provider and measured pattern.');
+  fml(KF, 73, 2, `Inputs!B${exportInputRows.dataStoredGb}*0.12*12+Inputs!B${exportInputRows.connectedApplications}*100*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)*12`, DOL);
+  note(KF, 73, 3, '[30] Only entered stored-data and connected-system run cost is included. No company-wide egress charge is assumed without a measured data or connector scope.');
 
   // --- Archetype Detail Refinement Bridge (rows 75-82) ---
   sub(KF, 75, 'Archetype Detail Refinement', 3);
@@ -1526,8 +1557,11 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 87, 2, `Inputs!B${exportInputRows.employeesToRetrain}`, NUM);
   note(KF, 87, 3, 'Redeployed capacity; does not create a second hard headcount saving');
   val(KF, 88, 1, 'Employees to Make Redundant');
-  fml(KF, 88, 2, `Inputs!B${exportInputRows.employeesToMakeRedundant}`, NUM);
-  note(KF, 88, 3, 'Explicit hard headcount-savings input, capped at direct employees in B18');
+  fml(KF, 88, 2, 'B20', NUM);
+  note(KF, 88, 3, 'Selected direct employee action after the total-target and contractor-roll-off caps. This is the severance-bearing workforce action.');
+  val(KF, 89, 1, 'Contractors to Roll Off');
+  fml(KF, 89, 2, 'B19', NUM);
+  note(KF, 89, 3, 'Selected contractor action after the same total-target cap. It produces cash savings but no employee severance.');
 
   // --- Case Guardrails (rows 96-98) ---
   sub(KF, 96, 'Selected-Case Workload Guardrails', 3);
@@ -1567,6 +1601,9 @@ export async function generateExcelModel(formData, mcResults, results) {
   val(KF, 109, 1, 'Run-Cost Input Check');
   fml(KF, 109, 2, 'IF(B51<B47+B48,"REVIEW — entered annual run cost is below modeled access + consumption. Confirm a contracted all-in price, zero usage, or an input error.","OK")', null, calcFill);
   note(KF, 109, 3, '[M3] Guidance only: the DCF honors a validated explicit annual cost rather than silently replacing it.');
+  val(KF, 110, 1, 'Compliance Component Used in DCF');
+  fml(KF, 110, 2, 'IFERROR(B105*B51/B50,0)', DOL, calcFill);
+  note(KF, 110, 3, 'When a user enters an all-in annual cost, the compliance slice is scaled proportionally before applying the 8% annual compliance escalation. This keeps the DCF and entered total reconciled.');
 
   // --- Executive AI Cost Buckets (rows 90-95) ---
   sub(KF, 90, 'Executive AI Cost Buckets — Planning View', 3);
@@ -1615,7 +1652,7 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(SU, 11, 2, "'Key Formulas'!B64", DOL);
   val(SU, 12, 1, 'Contract Cancellation');
   fml(SU, 12, 2, "'Key Formulas'!B62", DOL);
-  val(SU, 13, 1, 'Severance (50% / 30% / 20% schedule)');
+  val(SU, 13, 1, 'Severance (equal selected-reduction phase)');
   fml(SU, 13, 2, "'Key Formulas'!B67", DOL);
   val(SU, 14, 1, 'Total Capital Deployed');
   fmlBold(SU, 14, 2, "'Key Formulas'!B68", DOL);
@@ -1703,7 +1740,12 @@ export async function generateExcelModel(formData, mcResults, results) {
   // annual run-cost estimate.  Reuse the exact expression in the DCF and the
   // scenario table so a validated `ongoingAnnualCost` is never overridden.
   const modeledOngoingCostFormula = (baseCostReference, year) =>
-    `(${baseCostReference}-'Key Formulas'!$B$105)*Lookups!$F$${103 + year}+'Key Formulas'!$B$105*(1+'Key Formulas'!$B$108)^${year - 1}`;
+    `(${baseCostReference}-'Key Formulas'!$B$110)*Lookups!$F$${103 + year}+'Key Formulas'!$B$110*(1+'Key Formulas'!$B$108)^${year - 1}`;
+  const headcountReductionYearsFormula = `MAX(1,MIN(5,Inputs!B${exportInputRows.headcountReductionYears}))`;
+  const annualHeadcountReductionFraction = (year) =>
+    `IF(${year}<=${headcountReductionYearsFormula},1/${headcountReductionYearsFormula},0)`;
+  const cumulativeHeadcountReductionFraction = (year) =>
+    `MIN(1,${year}/${headcountReductionYearsFormula})`;
 
   // --- Parameters (rows 4-10) ---
   sub(PL, 4, 'PARAMETERS', 7);
@@ -1712,9 +1754,9 @@ export async function generateExcelModel(formData, mcResults, results) {
   val(PL, 6, 1, 'Wage Growth Factor');
   for (let y = 1; y <= 5; y++) fml(PL, 6, y + 2, `(1+'Key Formulas'!$B$106)^${y - 1}`, DEC);
   val(PL, 7, 1, 'Severance Schedule (year)');
-  for (let y = 1; y <= 5; y++) fml(PL, 7, y + 2, `Lookups!B${103 + y}`, PCT);
+  for (let y = 1; y <= 5; y++) fml(PL, 7, y + 2, annualHeadcountReductionFraction(y), PCT);
   val(PL, 8, 1, 'Cumulative Workforce Savings');
-  for (let y = 1; y <= 5; y++) fml(PL, 8, y + 2, `Lookups!C${103 + y}`, PCT);
+  for (let y = 1; y <= 5; y++) fml(PL, 8, y + 2, cumulativeHeadcountReductionFraction(y), PCT);
   val(PL, 9, 1, 'Cost Escalation Factor');
   for (let y = 1; y <= 5; y++) fml(PL, 9, y + 2,
     `IF('Key Formulas'!$B$51<>0,(${modeledOngoingCostFormula("'Key Formulas'!$B$51", y)})/'Key Formulas'!$B$51,0)`, DEC);
@@ -1741,7 +1783,7 @@ export async function generateExcelModel(formData, mcResults, results) {
 
   // --- Cash Outflows (rows 16-18) ---
   sub(PL, 16, 'CASH OUTFLOWS', 7);
-  val(PL, 17, 1, 'Severance Cost (50% / 30% / 20%)');
+  val(PL, 17, 1, 'Severance Cost (equal selected-reduction phase)');
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
     fml(PL, 17, y + 2, `'Key Formulas'!B67*${c}7`, DOL, warnFill);
@@ -1843,8 +1885,8 @@ export async function generateExcelModel(formData, mcResults, results) {
       const m = `$${String.fromCharCode(66 + s)}$4`;
       const benefitGrowth = `*(1+'Key Formulas'!$B$106)^${y - 1}*(1-'Key Formulas'!$B$107)^${y - 1}`;
       const f = `('Key Formulas'!$B$58*Lookups!$D$${103 + y}*${m}${benefitGrowth}` +
-        `+'Key Formulas'!$B$54*Lookups!$C$${103 + y}*${m}${benefitGrowth})` +
-        `-'Key Formulas'!$B$67*Lookups!$B$${103 + y}` +
+        `+'Key Formulas'!$B$54*${cumulativeHeadcountReductionFraction(y)}*${m}${benefitGrowth})` +
+        `-'Key Formulas'!$B$67*${annualHeadcountReductionFraction(y)}` +
         `-${modeledOngoingCostFormula("'Key Formulas'!$B$51", y)}`;
       fml(SE, 7 + y, s + 2, f, DOL);
     }
@@ -2331,6 +2373,10 @@ export async function generateExcelModel(formData, mcResults, results) {
     '0% - 100%',
     `IF(AND(ISNUMBER(Inputs!B${exportInputRows.totalEfficiencyGainPct}),Inputs!B${exportInputRows.totalEfficiencyGainPct}>=0,Inputs!B${exportInputRows.totalEfficiencyGainPct}<=1),"ok","ERROR")`);
 
+  auditFml('Years to Achieve Selected Reductions', `Inputs!B${exportInputRows.headcountReductionYears}`, NUM,
+    '1 - 5 years',
+    `IF(AND(ISNUMBER(Inputs!B${exportInputRows.headcountReductionYears}),Inputs!B${exportInputRows.headcountReductionYears}>=1,Inputs!B${exportInputRows.headcountReductionYears}<=5),"ok","ERROR")`);
+
   auditFml('Implementation Budget', 'Inputs!B23', DOL,
     '> 0',
     'IF(AND(ISNUMBER(Inputs!B23),Inputs!B23>0),"ok","ERROR")');
@@ -2376,17 +2422,25 @@ export async function generateExcelModel(formData, mcResults, results) {
     '5% - 20%',
     "IF(AND(ISNUMBER('Key Formulas'!B69),'Key Formulas'!B69>=0.05,'Key Formulas'!B69<=0.2),\"ok\",\"ERROR\")");
 
-  auditFml('Hard Headcount Reductions', "'Key Formulas'!B20", '0',
-    '0 - min(direct employees, whole freed-capacity FTEs)',
-    "IF(AND(ISNUMBER('Key Formulas'!B20),'Key Formulas'!B20>=0,'Key Formulas'!B20<=Inputs!B40,'Key Formulas'!B20<=INT('Key Formulas'!B86/2080+0.000000001)),\"ok\",\"ERROR\")");
+  auditFml('Calculated Total Reduction Target', "'Key Formulas'!B18", '0',
+    '0 - whole measured freed-capacity FTEs',
+    "IF(AND(ISNUMBER('Key Formulas'!B18),'Key Formulas'!B18>=0,'Key Formulas'!B18<=Inputs!B11,'Key Formulas'!B18<=INT('Key Formulas'!B86/2080+0.000000001)),\"ok\",\"ERROR\")");
+
+  auditFml('Selected Contractor Roll-Off', "'Key Formulas'!B19", '0',
+    '0 - min(contractors, total target)',
+    "IF(AND(ISNUMBER('Key Formulas'!B19),'Key Formulas'!B19>=0,'Key Formulas'!B19<=Inputs!B42,'Key Formulas'!B19<='Key Formulas'!B18),\"ok\",\"ERROR\")");
+
+  auditFml('Selected Direct Employee Redundancies', "'Key Formulas'!B20", '0',
+    '0 - min(direct employees, target less contractor roll-off)',
+    "IF(AND(ISNUMBER('Key Formulas'!B20),'Key Formulas'!B20>=0,'Key Formulas'!B20<=Inputs!B40,'Key Formulas'!B20<=MAX(0,'Key Formulas'!B18-'Key Formulas'!B19)),\"ok\",\"ERROR\")");
 
   auditFml('Remaining Workforce', "'Key Formulas'!B21", '0',
     '>= 0',
     "IF(AND(ISNUMBER('Key Formulas'!B21),'Key Formulas'!B21>=0),\"ok\",\"ERROR\")");
 
-  auditFml('Reductions + Remaining = Team', "'Key Formulas'!B20+'Key Formulas'!B21", '0',
+  auditFml('Selected Actions + Remaining = Team', "'Key Formulas'!B19+'Key Formulas'!B20+'Key Formulas'!B21", '0',
     '= Team Size',
-    "IF(ABS('Key Formulas'!B20+'Key Formulas'!B21-Inputs!B11)<1,\"ok\",\"ERROR\")");
+    "IF(ABS('Key Formulas'!B19+'Key Formulas'!B20+'Key Formulas'!B21-Inputs!B11)<1,\"ok\",\"ERROR\")");
 
   auditFml('Impl Engineers', "'Key Formulas'!B29", '0',
     '>= 1',
@@ -2833,8 +2887,8 @@ export async function generateExcelModel(formData, mcResults, results) {
     },
     {
       id: '[W2]', element: 'Severance payment timing', taxonomy: 'M — explicit user/model schedule',
-      citation: '50% in Year 1, 30% in Year 2, and 20% in Year 3 is a transparent model schedule. It is not an external benchmark.',
-      location: 'Lookups B104:B108; P&L row 17',
+      citation: 'Selected direct-employee redundancies are spread evenly over the user-entered reduction period (1–5 years). This is a planning input, not an external benchmark. Contractor roll-off has no employee severance charge.',
+      location: 'Inputs B38/B55:B56; Calculation Detail B18:B22/B67/B89; P&L rows 7/8/17',
     },
     {
       id: '[C1]', element: 'AI cost-bucket planning shares', taxonomy: 'M — user planning framework',

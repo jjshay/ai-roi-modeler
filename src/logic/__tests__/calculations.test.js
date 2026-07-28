@@ -573,6 +573,59 @@ describe('AI Cost Model', () => {
     const yr4Escalation = r.aiCostModel.ongoingCostsByYear[4] / r.aiCostModel.ongoingCostsByYear[3];
     expect(yr4Escalation).toBeLessThan(yr2Escalation);
   });
+
+  it('reconciles a manual annual total to every displayed cost bucket and DCF', () => {
+    const annualOverride = 100000;
+    const r = runCalculations({
+      ...BASE_INPUTS,
+      ongoingAnnualCost: annualOverride,
+    });
+    const buckets = r.aiCostModel.costBuckets;
+    const breakdown = buckets.breakdown;
+
+    expect(r.aiCostModel.userProvidedOngoing).toBe(true);
+    expect(r.aiCostModel.baseOngoingCost).toBe(annualOverride);
+    expect(buckets.accessAnnual + buckets.consumptionAnnual + buckets.runAnnual)
+      .toBeCloseTo(annualOverride, 8);
+    expect(breakdown.categories.reduce((sum, category) => sum + category.amount, 0))
+      .toBeCloseTo(annualOverride, 8);
+    expect(breakdown.source).toBe('user-entered-total');
+    expect(breakdown.allocationIsEstimated).toBe(true);
+    expect(r.scenarios.base.projections[0].ongoingCost).toBeCloseTo(annualOverride, 8);
+    expect(r.aiCostModel.effectiveAnnualComplianceCost).toBeLessThanOrEqual(annualOverride);
+    expect(r.aiCostModel.annualCostSuggestion.annual.typical)
+      .toBeCloseTo(r.aiCostModel.computedOngoingCost, 8);
+    expect(r.aiCostModel.annualCostSuggestion.annual.annualTotal).toBe(annualOverride);
+  });
+
+  it('treats an invalid manual annual total as a guarded model-derived estimate', () => {
+    const r = runCalculations({
+      ...BASE_INPUTS,
+      ongoingAnnualCost: 'not-a-number',
+    });
+
+    expect(r.aiCostModel.userProvidedOngoing).toBe(false);
+    expect(r.aiCostModel.baseOngoingCost).toBe(r.aiCostModel.computedOngoingCost);
+    expect(r.inputWarnings.some((warning) => warning.field === 'ongoingAnnualCost'
+      && warning.severity === 'warning')).toBe(true);
+  });
+
+  it('treats a cleared custom field as model-derived while preserving an intentional zero', () => {
+    const cleared = runCalculations({
+      ...BASE_INPUTS,
+      ongoingAnnualCost: '   ',
+    });
+    const deliberateZero = runCalculations({
+      ...BASE_INPUTS,
+      ongoingAnnualCost: 0,
+    });
+
+    expect(cleared.aiCostModel.userProvidedOngoing).toBe(false);
+    expect(cleared.aiCostModel.baseOngoingCost).toBe(cleared.aiCostModel.computedOngoingCost);
+    expect(deliberateZero.aiCostModel.userProvidedOngoing).toBe(true);
+    expect(deliberateZero.aiCostModel.baseOngoingCost).toBe(0);
+    expect(deliberateZero.scenarios.base.projections[0].ongoingCost).toBe(0);
+  });
 });
 
 // =====================================================================
@@ -1202,15 +1255,27 @@ describe('Agentic Compute Multiplier (V4)', () => {
 });
 
 describe('Data Egress Costs (V4)', () => {
-  it('included in ongoing costs by company size', () => {
+  it('does not invent a company-wide data-egress charge with no measured scope', () => {
     const r = runCalculations(BASE_INPUTS);
-    expect(r.aiCostModel.dataTransferCostAnnual).toBe(3000 * 12); // Mid-Market
+    expect(r.aiCostModel.dataTransferBaselineMonthly).toBe(0);
+    expect(r.aiCostModel.dataTransferCostAnnual).toBe(0);
   });
 
-  it('larger companies have higher data transfer costs', () => {
-    const rStartup = runCalculations(STARTUP_INPUTS);
-    const rEnterprise = runCalculations(ENTERPRISE_INPUTS);
-    expect(rEnterprise.aiCostModel.dataTransferCostAnnual).toBeGreaterThan(rStartup.aiCostModel.dataTransferCostAnnual);
+  it('uses entered storage and connected-system meters in the ongoing cost', () => {
+    const base = runCalculations({
+      ...BASE_INPUTS,
+      dataStoredGb: 500,
+      connectedApplications: 4,
+    });
+    const largerScope = runCalculations({
+      ...BASE_INPUTS,
+      dataStoredGb: 1000,
+      connectedApplications: 8,
+    });
+
+    expect(base.aiCostModel.dataTransferCostAnnual).toBeGreaterThan(0);
+    expect(largerScope.aiCostModel.dataTransferCostAnnual)
+      .toBeGreaterThan(base.aiCostModel.dataTransferCostAnnual);
   });
 });
 
