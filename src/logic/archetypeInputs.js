@@ -16,6 +16,9 @@ function numInput(key, label, defaults) {
     default: defaults.default,
     min: defaults.min ?? 0,
     max: defaults.max ?? 10000000,
+    // The schema owns input precision so the UI and Excel keep the same
+    // valid values. A range control must never coerce its displayed default.
+    step: defaults.step ?? 1,
     format: defaults.format || '#,##0',
     note: defaults.note || '',
   };
@@ -66,7 +69,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
     },
     inputs: [
       numInput('processVolume', 'Process volume (transactions/month)', {
-        default: 5000, max: 1000000, note: 'Monthly volume of transactions processed',
+        default: 5000, max: 1000000, step: 100, note: 'Monthly volume of transactions processed',
       }),
       numInput('handlingTimeMin', 'Average time per process (minutes)', {
         default: 15, min: 1, max: 480, note: 'Hands-on minutes required to complete one process today',
@@ -89,8 +92,11 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'caseWorkloadHoursPerWeek',
-        jsMap: (i) => Math.round(i.processVolume * i.handlingTimeMin / 60 / 4.33),
-        excelFormula: 'ROUND({processVolume} * {handlingTimeMin} / 60 / 4.33, 0)',
+        // Keep the measured workload precise. Rounding here can turn a real,
+        // low-volume process into zero hours and bypass the coverage bumper.
+        // Presentation layers round only when they display the value.
+        jsMap: (i) => i.processVolume * i.handlingTimeMin / 60 / 4.33,
+        excelFormula: '{processVolume} * {handlingTimeMin} / 60 / 4.33',
       },
       {
         mapsTo: 'caseBuildComplexityMultiplier',
@@ -110,11 +116,11 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
     caseGuide: {
       calculation: 'Tickets × resolution time = workload. Eligible contacts × containment rate × fully loaded cost per contact = potential direct cost avoidance.',
       assumption: 'The customer-service cost baseline must be validated, and avoided contacts must reduce spend—not only free time—before direct savings enter the DCF.',
-      footnote: 'A human escalation floor remains in every containment calculation.',
+      footnote: 'The human escalation floor is a safety cap. It changes savings only when it is stricter than the remaining human share implied by your containment rate.',
     },
     inputs: [
       numInput('ticketsPerMonth', 'Support tickets/month', {
-        default: 3000, max: 5000000, note: 'Total inbound support volume',
+        default: 3000, max: 5000000, step: 100, note: 'Total inbound support volume',
       }),
       numInput('resolutionTimeMin', 'Avg resolution time (minutes)', {
         default: 25, min: 1, max: 120, note: 'Hands-on minutes to resolve one human-handled contact',
@@ -126,10 +132,10 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
         default: 0.35, max: 0.60, note: 'Share of eligible contacts fully resolved by AI. Above 60% needs pilot evidence.',
       }),
       numInput('costPerResolvedTicket', 'Fully loaded cost per human-resolved contact ($)', {
-        default: 12, max: 5000, format: '$#,##0', note: 'Measured support cost per resolved contact; use capacity only until Operations validates this value',
+        default: 12, max: 5000, step: 1, format: '$#,##0', note: 'Measured support cost per resolved contact; use capacity only until Operations validates this value',
       }),
       pctInput('humanEscalationPct', 'Human escalation floor', {
-        default: 0.20, min: 0.10, note: 'Minimum share of contacts that remain available for human escalation',
+        default: 0.20, min: 0.10, note: 'Minimum share of contacts that must remain with a human. It only limits the model when it is stricter than the remaining human share implied by the AI-containment rate.',
       }),
     ],
     computedMappings: [
@@ -140,8 +146,8 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'caseWorkloadHoursPerWeek',
-        jsMap: (i) => Math.round(i.ticketsPerMonth * i.resolutionTimeMin / 60 / 4.33),
-        excelFormula: 'ROUND({ticketsPerMonth} * {resolutionTimeMin} / 60 / 4.33, 0)',
+        jsMap: (i) => i.ticketsPerMonth * i.resolutionTimeMin / 60 / 4.33,
+        excelFormula: '{ticketsPerMonth} * {resolutionTimeMin} / 60 / 4.33',
       },
       {
         mapsTo: 'caseDirectSavings',
@@ -168,7 +174,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
         default: 40, max: 10000, note: 'Number of reports produced monthly',
       }),
       numInput('hoursPerReport', 'Hours per report', {
-        default: 6, min: 0.5, max: 200, format: '0.0', note: 'Analyst hours to produce one report',
+        default: 6, min: 0.5, max: 200, step: 0.5, format: '0.0', note: 'Analyst hours to produce one report',
       }),
       numInput('dataSources', 'Number of data sources', {
         default: 8, min: 1, max: 500, format: '0', note: 'Distinct data feeds/systems',
@@ -191,8 +197,8 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'caseWorkloadHoursPerWeek',
-        jsMap: (i) => Math.round(i.reportsPerMonth * i.hoursPerReport * i.analystUtilization / 4.33),
-        excelFormula: 'ROUND({reportsPerMonth} * {hoursPerReport} * {analystUtilization} / 4.33, 0)',
+        jsMap: (i) => i.reportsPerMonth * i.hoursPerReport * i.analystUtilization / 4.33,
+        excelFormula: '{reportsPerMonth} * {hoursPerReport} * {analystUtilization} / 4.33',
       },
       {
         mapsTo: 'errorRate',
@@ -224,7 +230,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
         default: 200, max: 100000, note: 'Monthly compliance review volume',
       }),
       numInput('hoursPerReview', 'Hours per review', {
-        default: 4, min: 0.25, max: 100, format: '0.0', note: 'Staff hours per review/audit',
+        default: 4, min: 0.25, max: 100, step: 0.25, format: '0.0', note: 'Staff hours per review/audit',
       }),
       pctInput('pctAutomatable', 'Share of review work automatable', {
         default: 0.35, max: 0.75, note: 'Share of review steps that can be automated while required human oversight remains in place',
@@ -233,7 +239,7 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
         default: 15, max: 10000, format: '0', note: 'Number of compliance findings per year',
       }),
       numInput('fineExposure', 'Historical remediation / loss per material finding ($)', {
-        default: 250000, max: 100000000, format: '$#,##0', note: 'Use realized remediation, settlement, service-credit, or loss data—not the statutory maximum fine',
+        default: 250000, max: 100000000, step: 100, format: '$#,##0', note: 'Use realized remediation, settlement, service-credit, or loss data—not the statutory maximum fine',
       }),
       pctInput('preventableFindingPct', 'Evidence-backed preventable finding share', {
         default: 0.20, max: 0.50, note: 'Share of realized findings a tested control could prevent. Above 50% requires pilot evidence.',
@@ -247,8 +253,8 @@ export const ARCHETYPE_INPUT_SCHEMAS = [
       },
       {
         mapsTo: 'caseWorkloadHoursPerWeek',
-        jsMap: (i) => Math.round(i.reviewsPerMonth * i.hoursPerReview / 4.33),
-        excelFormula: 'ROUND({reviewsPerMonth} * {hoursPerReview} / 4.33, 0)',
+        jsMap: (i) => i.reviewsPerMonth * i.hoursPerReview / 4.33,
+        excelFormula: '{reviewsPerMonth} * {hoursPerReview} / 4.33',
       },
       {
         mapsTo: 'caseRiskAvoidance',

@@ -172,7 +172,7 @@ describe('Break-Even Units: every archetype with inputs', () => {
       expect(typeof mapped).toBe('object');
 
       // If there are overrides, they should be finite numbers
-      for (const [key, val] of Object.entries(mapped)) {
+      for (const val of Object.values(mapped)) {
         if (typeof val === 'number') {
           expect(Number.isFinite(val)).toBe(true);
         }

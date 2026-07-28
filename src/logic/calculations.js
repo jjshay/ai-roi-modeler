@@ -180,13 +180,17 @@ export function runCalculations(inputs) {
   const workloadRatio = availableProcessHoursPerWeek > 0
     ? caseWorkloadHoursPerWeek / availableProcessHoursPerWeek
     : 0;
+  // A selected case with no measured work has no defensible basis for an ROI
+  // claim. Treat it as a blocker rather than a green "ready" status.
+  const workloadMissing = hasCaseInputs && caseWorkloadHoursPerWeek <= 0;
   const workloadExceedsCapacity = hasCaseInputs && workloadRatio > 1.25;
   const workloadTooSmallForRedundancy = hasCaseInputs && workloadRatio > 0 && workloadRatio < 0.10;
-  const caseEfficiencyCeilingPct = workloadExceedsCapacity ? 0 : automationPotential;
+  const workloadBlocked = workloadMissing || workloadExceedsCapacity;
+  const caseEfficiencyCeilingPct = workloadBlocked ? 0 : automationPotential;
   const requestedEfficiencyGainPct = inputs.totalEfficiencyGainPct == null
     ? caseEfficiencyCeilingPct
     : normalizePercent(inputs.totalEfficiencyGainPct, caseEfficiencyCeilingPct);
-  const effectiveEfficiencyGainPct = workloadExceedsCapacity
+  const effectiveEfficiencyGainPct = workloadBlocked
     ? 0
     : Math.min(requestedEfficiencyGainPct, caseEfficiencyCeilingPct);
   const eligibleAnnualHours = hasCaseInputs
@@ -203,7 +207,7 @@ export function runCalculations(inputs) {
   const caseDirectSavingsEnabled = inputs.projectArchetype === 'customer-facing-ai'
     && supportCostValidated
     && supportCostCashRealizable
-    && !workloadExceedsCapacity;
+    && !workloadBlocked;
   const caseDirectSavingsGross = caseDirectSavingsEnabled ? boundedCaseDirectSavings : 0;
   const caseRiskAvoidance = Math.max(0, Number(_archetypeOverrides.caseRiskAvoidance) || 0);
   const caseBuildComplexityMultiplier = Math.max(
@@ -227,7 +231,13 @@ export function runCalculations(inputs) {
       message: `${correction.label} ${correction.reason}; the model used ${correction.to}.`,
     });
   });
-  if (workloadExceedsCapacity) {
+  if (workloadMissing) {
+    caseBumpers.push({
+      field: 'caseWorkloadHoursPerWeek',
+      severity: 'blocking',
+      message: 'Enter a positive process volume and handling time before using this case. With no measured workload, the model turns off savings and workforce actions.',
+    });
+  } else if (workloadExceedsCapacity) {
     caseBumpers.push({
       field: 'caseWorkloadHoursPerWeek',
       severity: 'blocking',
@@ -367,7 +377,7 @@ export function runCalculations(inputs) {
     workforceMix,
     {
       eligibleAnnualHours,
-      allowRedundancies: !workloadExceedsCapacity && !workloadTooSmallForRedundancy,
+      allowRedundancies: !workloadBlocked && !workloadTooSmallForRedundancy,
     }
   );
   const hasExplicitWorkforcePlan = workforceMix.hasWorkforceMix
@@ -420,7 +430,7 @@ export function runCalculations(inputs) {
   const processAllocation = hasCaseInputs
     ? Math.min(1, workloadRatio)
     : hoursPerWeek / 40; // fraction of the entered workforce actually covered by this case
-  const legacyHeadcountFeasible = processAllocation >= 0.50 && !workloadExceedsCapacity;
+  const legacyHeadcountFeasible = processAllocation >= 0.50 && !workloadBlocked;
   const rawDisplacedFTEs = legacyHeadcountFeasible
     ? Math.round((eligibleAnnualHours / 2080) * automationPotential * adoptionRate)
     : 0; // no headcount reduction when <50% allocation
@@ -429,7 +439,7 @@ export function runCalculations(inputs) {
     eligibleAnnualHours / 2080,
   ));
   const usesExplicitRedundancyPlan = hasExplicitWorkforcePlan;
-  const totalEfficiencyGainPct = workloadExceedsCapacity
+  const totalEfficiencyGainPct = workloadBlocked
     ? 0
     : (usesExplicitRedundancyPlan
       ? workforceTransition.totalEfficiencyGainPct
@@ -548,11 +558,20 @@ export function runCalculations(inputs) {
 
   // Token-based cost model (activates when user provides token-level inputs or model tier)
   const explicitUseTokenModel = inputs.useTokenModel ?? assumptions.useTokenModel;
+  // A displayed or entered zero must not silently collapse a nonzero request
+  // volume to $0 consumption. Token costing is enabled by a chosen tier or a
+  // positive measured token count; otherwise the request-based estimate stays
+  // in force until the user supplies real token evidence.
+  const hasMeasuredTokenVolume = [
+    inputs.avgInputTokensPerRequest,
+    assumptions.avgInputTokensPerRequest,
+    inputs.avgOutputTokensPerRequest,
+    assumptions.avgOutputTokensPerRequest,
+  ].some((value) => asNonNegative(value) > 0);
   const useTokenModel = explicitUseTokenModel ?? (
     inputs.modelTier != null
     || assumptions.modelTier != null
-    || inputs.avgInputTokensPerRequest != null
-    || assumptions.avgInputTokensPerRequest != null
+    || hasMeasuredTokenVolume
   );
 
   const tokenProfile = TOKEN_PROFILES[processType] || TOKEN_PROFILES['Other'];
@@ -1017,7 +1036,7 @@ export function runCalculations(inputs) {
   const reworkReductionRate = usesExplicitRedundancyPlan
     ? totalEfficiencyGainPct
     : automationPotential;
-  const coreBenefitsEnabled = !isRetiredCase && !workloadExceedsCapacity;
+  const coreBenefitsEnabled = !isRetiredCase && !workloadBlocked;
   const errorReductionGross = coreBenefitsEnabled
     ? annualReworkCost * reworkReductionRate
     : 0;
@@ -2549,7 +2568,7 @@ export function runCalculations(inputs) {
 
   const workloadStatus = isRetiredCase
     ? 'retired'
-    : workloadExceedsCapacity
+    : workloadBlocked
       ? 'blocked'
       : workloadTooSmallForRedundancy
         ? 'capacity-only'
@@ -2564,7 +2583,7 @@ export function runCalculations(inputs) {
     availableProcessHoursPerWeek,
     workloadRatio,
     workloadStatus,
-    workloadBlocked: workloadExceedsCapacity || isRetiredCase,
+    workloadBlocked: workloadBlocked || isRetiredCase,
     workloadTooSmallForRedundancy,
     eligibleAnnualHours,
     eligibleCapacityFTEs: eligibleAnnualHours / 2080,

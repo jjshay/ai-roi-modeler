@@ -4,6 +4,7 @@ import SliderInput from '../inputs/SliderInput';
 import CurrencyInput from '../inputs/CurrencyInput';
 import NumberInput from '../inputs/NumberInput';
 import { ARCHETYPE_INPUT_MAP } from '../../logic/archetypeInputs';
+import { TOKEN_PROFILES } from '../../logic/benchmarks';
 import { runCalculations } from '../../logic/calculations';
 import {
   calculateContractExitCost,
@@ -153,6 +154,7 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
   const consumptionCost = costBuckets.consumptionAnnual ?? aiCostModel?.annualApiCost ?? 0;
   const runCost = costBuckets.runAnnual ?? aiCostModel?.computedOngoingCost ?? 0;
   const processVolumeDefault = defaultMonthlyVolume(formData.projectArchetype, formData.archetypeInputs);
+  const tokenProfile = TOKEN_PROFILES[formData.processType] || TOKEN_PROFILES.Other;
 
   const updatePlanField = useCallback((key, value) => {
     updateField(key, value);
@@ -380,19 +382,25 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
             />
             <NumberInput
               label="Average input tokens / request"
-              value={formData.avgInputTokensPerRequest ?? 0}
+              value={formData.avgInputTokensPerRequest}
               onChange={(value) => updatePlanField('avgInputTokensPerRequest', value)}
               min={0}
               max={10000000}
               suffix="tokens"
+              allowEmpty
+              placeholder={`e.g. ${tokenProfile.avgInput.toLocaleString()}`}
+              helperText="Optional. Leave blank to retain the request-based estimate. Enter a positive measured token count to use token pricing; entering 0 keeps the request-based estimate."
             />
             <NumberInput
               label="Average output tokens / request"
-              value={formData.avgOutputTokensPerRequest ?? 0}
+              value={formData.avgOutputTokensPerRequest}
               onChange={(value) => updatePlanField('avgOutputTokensPerRequest', value)}
               min={0}
               max={10000000}
               suffix="tokens"
+              allowEmpty
+              placeholder={`e.g. ${tokenProfile.avgOutput.toLocaleString()}`}
+              helperText="Optional. Leave blank to retain the request-based estimate. Enter a positive measured token count to use token pricing; entering 0 keeps the request-based estimate."
             />
             <NumberInput
               label="Agent workflows / month"
@@ -456,7 +464,7 @@ export default function CostTransitionPlan({ formData, updateField, onComplete }
         disabled={isEfficiencyBlocked}
         className={`rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-navy shadow-sm transition-all duration-150 hover:bg-sky focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 ${isEfficiencyBlocked ? 'cursor-not-allowed opacity-40 hover:bg-gold' : ''}`}
       >
-        {isEfficiencyBlocked ? 'Resolve workload check to continue' : 'Review complete'}
+        {isEfficiencyBlocked ? 'Resolve workload check to continue' : 'Calculate ROI'}
       </button>
     </div>
   );

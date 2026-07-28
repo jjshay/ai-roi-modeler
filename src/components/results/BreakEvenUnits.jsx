@@ -32,7 +32,6 @@ export default function BreakEvenUnits({ breakEvenUnits, delay = 0 }) {
       <div className="space-y-3">
         {breakEvenUnits.map((item, i) => {
           const pct = item.marginPct;
-          const isHealthy = isFloor ? pct > 20 : pct <= 0;
           const barWidth = Math.min(Math.abs(pct), 100);
 
           return (

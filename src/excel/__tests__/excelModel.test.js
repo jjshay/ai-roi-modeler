@@ -37,6 +37,65 @@ const PROCESS_TYPES = [
   'Research & Intelligence', 'Workflow Automation', 'Content Creation', 'Quality & Compliance', 'Other',
 ];
 
+// Regression vector for the formula-driven workbook. This mirrors a
+// mid-market Tech risk/compliance case with an explicit annual operating-cost
+// estimate; cached values are validated through native Excel in the QA step.
+const RISK_PARITY_INPUTS = {
+  industry: 'Technology / Software',
+  companySize: 'Mid-Market (501-5,000)',
+  companyState: 'California',
+  projectArchetype: 'risk-compliance-legal-ai',
+  processType: 'Quality & Compliance',
+  assumptions: { toolReplacementRate: 0.48 },
+  directEmployeeCount: 20,
+  employeeFullyBurdenedCost: 200000,
+  offshoreContractorCount: 0,
+  contractorFullyBurdenedCost: 0,
+  hoursPerWeek: 40,
+  currentToolCosts: 50000,
+  implementationBudget: 200000,
+  expectedTimeline: 6,
+  ongoingAnnualCost: 50000,
+  changeReadiness: 3,
+  dataReadiness: 3,
+  execSponsor: true,
+  cashRealizationPct: 0.40,
+  totalEfficiencyGainPct: 0.10,
+  employeesToRetrain: 0,
+  employeesToMakeRedundant: 0,
+  existingContractCount: 5,
+  annualCostPerContract: 100000,
+  contractNoticePeriodMonths: 6,
+  deliveryPace: 'standard',
+  aiLicensedUsers: 0,
+  monthlyAiRequests: 0,
+  avgInputTokensPerRequest: 0,
+  avgOutputTokensPerRequest: 0,
+  monthlyAgentWorkflows: 0,
+  documentsPerMonth: 0,
+  dataStoredGb: 0,
+  connectedApplications: 0,
+  errorCountEmployees: 0,
+  errorCountContracts: 0,
+  reworkFraction: 0,
+  reworkCostPerItem: 0,
+  archetypeInputs: {
+    'risk-compliance-legal-ai': {
+      reviewsPerMonth: 200,
+      hoursPerReview: 4,
+      pctAutomatable: 0.35,
+      findingsPerYear: 15,
+      fineExposure: 500000,
+      preventableFindingPct: 0.20,
+    },
+  },
+};
+
+const RISK_AUTO_ONGOING_INPUTS = {
+  ...RISK_PARITY_INPUTS,
+  ongoingAnnualCost: undefined,
+};
+
 // ── Tests ────────────────────────────────────────────────────────────
 describe('Excel Model: data consistency', () => {
   it('has the three supported delivery pace scenarios', () => {
@@ -97,6 +156,18 @@ describe('Excel Model: data consistency', () => {
     const lastRow = firstRow + count - 1;
     expect(lastRow).toBe(175);
   });
+
+  it('derives the same automatic ongoing-cost base for the risk regression vector', () => {
+    const results = runCalculations(RISK_AUTO_ONGOING_INPUTS);
+    expect(results.aiCostModel.userProvidedOngoing).toBe(false);
+    expect(results.aiCostModel.computedOngoingCost).toBeCloseTo(283160, 6);
+    expect(results.aiCostModel.baseOngoingCost).toBeCloseTo(283160, 6);
+    [283160, 305812.8, 319341.312, 322140.672, 316633.50144]
+      .forEach((expectedCost, index) => {
+        expect(results.scenarios.base.projections[index].ongoingCost).toBeCloseTo(expectedCost, 6);
+      });
+    expect(results.scenarios.base.npv).toBeCloseTo(-996007.857414439, 6);
+  });
 });
 
 describe('Excel Model: formula reference audit', () => {
@@ -133,11 +204,11 @@ describe('Excel Model: formula reference audit', () => {
     expect(source).toContain('Weighted workforce mix');
   });
 
-  it('matches core delivery pace multipliers for staffing/cost and duration', () => {
+  it('uses the web-model delivery pace cost multiplier without changing an explicit timeline', () => {
     expect(source).toContain("fml(I, 66, 2, 'IF(B65=\"Accelerated\",1.2,IF(B65=\"Extended\",0.8,1))'");
     expect(source).toContain("fml(I, 67, 2, 'IF(B65=\"Accelerated\",0.8,IF(B65=\"Extended\",1.25,1))'");
-    expect(source).toContain('exportInputRows.deliveryDurationMultiplier');
-    expect(source).toContain('*Inputs!B${exportInputRows.deliveryDurationMultiplier},1)/12');
+    expect(source).toContain('exportInputRows.deliveryCostMultiplier');
+    expect(source).not.toContain('*Inputs!B${exportInputRows.deliveryDurationMultiplier},1)/12');
   });
 
   it('removes legacy team-location and location-salary export fields', () => {
@@ -160,13 +231,16 @@ describe('Excel Model: formula reference audit', () => {
     expect(source).toContain("fml(KF, 12, 2, 'Inputs!B13/2080'");
     expect(source).toContain('INT(B86/2080+0.000000001)');
     expect(source).toContain("fml(KF, 54, 2, `B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}`");
-    expect(source).toContain("fml(KF, 58, 2, 'B56+B57+B61'");
+    expect(source).toContain('Customer Service evidence gate');
+    expect(source).toContain('Inputs!B78="Yes"');
+    expect(source).toContain('MIN(B79,Inputs!B11*Inputs!B12)*52*B98');
   });
 
   it('resolves both flat and nested archetype input payloads for the exported detail tabs', () => {
     expect(source).toContain('const resolveArchetypeInputValues');
-    expect(source.match(/resolveArchetypeInputValues\(schema\.id\)/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(source).toContain('const activeUserVals = resolveArchetypeInputValues(activeArchetypeId)');
+    expect(source.match(/resolveArchetypeInputValues\(schema\.id\)/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(source).toContain('const selectedCaseFormula');
+    expect(source).toContain('const caseMappingRef');
   });
 
   it('lets detailed measured rework counts override a stale legacy annual total', () => {
@@ -195,7 +269,7 @@ describe('Excel Model: formula reference audit', () => {
   it('removes Knowledge Management AI from workbook surfaces and presents Customer Service', () => {
     expect(source).not.toContain('knowledge-management-ai');
     expect(source).not.toContain('Assumptions - Knowledge');
-    expect(source).toContain("'customer-facing-ai':         'Assumptions - Customer'");
+    expect(source).toContain("'customer-facing-ai': 'Assumptions - Customer'");
     expect(PROJECT_ARCHETYPES.find(({ id }) => id === 'customer-facing-ai')?.label).toBe('Customer Service');
   });
 
@@ -330,9 +404,19 @@ describe('Excel Model: workforce-mix deployment basis', () => {
   });
 });
 
-describe('Excel Model: core-engine export snapshot', () => {
-  it('links P&L and scenario output to the passed runCalculations result', async () => {
-    const results = runCalculations(BASE_INPUTS);
+describe('Excel Model: live formula-driven workbook', () => {
+  it('links editable case tabs through Key Formulas, P&L, Summary, and sensitivity without a hidden snapshot', async () => {
+    // Optional QA hook: export an exact browser-model input vector, then let
+    // a native Excel calculation pass verify cached P&L parity. Normal tests
+    // keep using the shared base fixture.
+    const qaInputJson = globalThis.process?.env?.EXCEL_QA_INPUTS_JSON;
+    const qaVector = globalThis.process?.env?.EXCEL_QA_VECTOR;
+    const workbookInputs = qaInputJson
+      ? JSON.parse(qaInputJson)
+      : qaVector === 'risk-parity' ? RISK_PARITY_INPUTS
+        : qaVector === 'risk-auto-ongoing' ? RISK_AUTO_ONGOING_INPUTS
+          : BASE_INPUTS;
+    const results = runCalculations(workbookInputs);
     const originalDocument = globalThis.document;
     const originalURL = globalThis.URL;
     let exportedBlob;
@@ -353,7 +437,7 @@ describe('Excel Model: core-engine export snapshot', () => {
     };
 
     try {
-      await generateExcelModel(BASE_INPUTS, null, results);
+      await generateExcelModel(workbookInputs, null, results);
     } finally {
       globalThis.URL = originalURL;
       if (originalDocument === undefined) delete globalThis.document;
@@ -361,35 +445,103 @@ describe('Excel Model: core-engine export snapshot', () => {
     }
 
     expect(exportedBlob).toBeDefined();
+    // Opt-in artifact for the spreadsheet QA command. It is intentionally
+    // outside the repository and lets LibreOffice recalculate the exact
+    // workbook that this structural test inspected.
+    const qaOutputPath = globalThis.process?.env?.EXCEL_QA_OUTPUT;
+    if (qaOutputPath) {
+      const { writeFile } = await import('node:fs/promises');
+      const { Buffer } = await import('node:buffer');
+      await writeFile(qaOutputPath, Buffer.from(await exportedBlob.arrayBuffer()));
+    }
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await exportedBlob.arrayBuffer());
 
-    const engine = workbook.getWorksheet('Engine Results');
     const pnl = workbook.getWorksheet('P&L & Cash Flow');
     const sensitivity = workbook.getWorksheet('Sensitivity');
     const inputs = workbook.getWorksheet('Inputs');
+    const formulas = workbook.getWorksheet('Key Formulas');
     const lookups = workbook.getWorksheet('Lookups');
     const sources = workbook.getWorksheet('Sources & Footnotes');
     const glossary = workbook.getWorksheet('Glossary');
 
-    expect(engine.state).toBe('veryHidden');
-    expect(engine.getCell('C5').value).toBeCloseTo(results.scenarios.base.npv);
-    expect(engine.getCell('C6').value).toBeCloseTo(results.scenarios.base.irr);
-    expect(engine.getCell('C7').value).toBeCloseTo(results.scenarios.base.roic);
-    expect(engine.getCell('C8').value).toBe(results.scenarios.base.paybackMonths);
-    expect(engine.getCell('C22').value).toBeCloseTo(results.scenarios.base.projections[0].netCashFlow);
+    // Presentation contract: formulas remain live, while values, labels, and
+    // print layouts are deterministic and decision-ready after a round trip.
+    workbook.worksheets.forEach((sheet) => {
+      expect(sheet.pageSetup.fitToPage).toBe(true);
+      expect(sheet.pageSetup.fitToHeight).toBe(0);
+      expect(sheet.pageSetup.fitToWidth).toBeGreaterThanOrEqual(1);
+      expect(sheet.pageSetup.paperSize).toBe(9);
+      // ExcelJS only writes print-gridlines when true; omitted means Excel's
+      // default false. The explicit sheet view also keeps the on-screen model clean.
+      expect(sheet.pageSetup.showGridLines ?? false).toBe(false);
+      expect(sheet.views[0]?.showGridLines).toBe(false);
+      expect(sheet.pageSetup.printArea).toMatch(/^A1:[A-Z]+\d+$/);
+      expect(sheet.pageSetup.printTitlesRow).toMatch(/^\d+:\d+$/);
+      expect(sheet.pageSetup.margins).toMatchObject({
+        left: 0.3, right: 0.3, top: 0.5, bottom: 0.5,
+      });
+      expect(sheet.headerFooter.oddFooter).toContain('Page &P of &N');
+    });
+    expect(inputs.pageSetup.orientation).toBe('landscape');
+    expect(sensitivity.pageSetup.orientation).toBe('landscape');
+    expect(workbook.getWorksheet('Assumptions - Customer').pageSetup.orientation).toBe('landscape');
+    expect(sources.pageSetup.fitToWidth).toBe(2);
+    expect(glossary.pageSetup.fitToWidth).toBe(2);
 
-    expect(pnl.getCell('B21').formula).toBe("'Engine Results'!B22");
-    expect(pnl.getCell('C12').formula).toBe("'Engine Results'!C17");
-    expect(pnl.getCell('C21').formula).toBe("'Engine Results'!C22");
-    expect(pnl.getCell('B27').formula).toBe("'Engine Results'!C5");
-    expect(pnl.getCell('B28').formula).toBe("'Engine Results'!C6");
-    expect(pnl.getCell('B29').formula).toBe("'Engine Results'!C8");
-    expect(pnl.getCell('B30').formula).toBe("'Engine Results'!C7");
+    // Values are explicitly right aligned with standard financial formats;
+    // labels and explanatory text stay left aligned and wrapped.
+    expect(inputs.getCell('B41').numFmt).toBe('$#,##0;($#,##0);-');
+    expect(inputs.getCell('B41').alignment.horizontal).toBe('right');
+    expect(inputs.getCell('A41').alignment.horizontal).toBe('left');
+    expect(inputs.getCell('C41').alignment).toMatchObject({
+      horizontal: 'left', vertical: 'top', wrapText: true,
+    });
+    expect(formulas.getCell('B69').numFmt).toBe('0.0%;(0.0%);-');
+    expect(formulas.getCell('B42').alignment.horizontal).toBe('right');
+    expect(pnl.getCell('B27').numFmt).toBe('$#,##0;($#,##0);-');
+    expect(sensitivity.getCell('C14').alignment.horizontal).toBe('right');
+    workbook.worksheets.forEach((sheet) => {
+      sheet.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (cell) => {
+        if (typeof cell.value === 'number') {
+          expect(cell.numFmt).toBeTruthy();
+          expect(cell.numFmt).not.toBe('General');
+          expect(cell.alignment.horizontal).toBe('right');
+        }
+      }));
+    });
 
-    expect(sensitivity.getCell('B7').formula).toBe("'Engine Results'!B27");
-    expect(sensitivity.getCell('C14').formula).toBe("'Engine Results'!C5");
-    expect(sensitivity.getCell('D16').formula).toBe("'Engine Results'!D7");
+    expect(workbook.getWorksheet('Engine Results')).toBeUndefined();
+    expect(pnl.getCell('B21').formula).toBe("-'Key Formulas'!B64-'Key Formulas'!B62");
+    expect(pnl.getCell('C12').formula).toBe("'Key Formulas'!B58*C5*C6*C10");
+    expect(pnl.getCell('C18').formula).toContain("'Key Formulas'!$B$105");
+    expect(pnl.getCell('C21').formula).toBe('C14-C17-C18');
+    expect(pnl.getCell('B27').formula).toBe('SUM(B23:G23)');
+    expect(pnl.getCell('B28').formula).toContain('IRR(B21:G21)');
+    expect(pnl.getCell('B29').formula).toContain('C24');
+    expect(pnl.getCell('B30').formula).toContain("'Key Formulas'!B68");
+    expect(sensitivity.getCell('B7').formula).toBe("-'Key Formulas'!B64-'Key Formulas'!B62");
+    expect(sensitivity.getCell('C14').formula).toContain("NPV('Key Formulas'!B69,C8:C12)");
+
+    // The selected-case bridge is an ordinary nested IF over live case-tab
+    // formulas, so selecting another case does not require re-exporting.
+    expect(formulas.getCell('B4').formula).toContain('Inputs!$B$10');
+    expect(formulas.getCell('B77').formula).toContain("'Assumptions - Process'!$B$26");
+    expect(formulas.getCell('B79').formula).toContain("'Assumptions - Customer'!$B$28");
+    expect(formulas.getCell('B81').formula).toContain("'Assumptions - Customer'!$B$29");
+    expect(formulas.getCell('B82').formula).toContain("'Assumptions - Compliance'!$B$29");
+    expect(formulas.getCell('B83').formula).toContain("'Assumptions - Analytics'!$B$30");
+    expect(formulas.getCell('B98').formula).toContain('MIN(Inputs!B53,B77)');
+    expect(formulas.getCell('B97').formula).toContain('BLOCKED');
+    expect(formulas.getCell('B51').formula).toBe('IF(OR(ISBLANK(Inputs!B25),Inputs!B25=""),B50,Inputs!B25)');
+    expect(formulas.getCell('B80').formula).toContain('Lookups!A205:D208');
+    expect(formulas.getCell('B40').formula).toContain('B101:B104');
+
+    // Central workforce, contract, and evidence inputs are editable even if
+    // the workbook is protected by a recipient.
+    [40, 41, 42, 43, 48, 49, 50, 51, 53, 54, 55, 58, 59, 60, 65, 78].forEach((row) => {
+      expect(inputs.getCell(`B${row}`).protection.locked).toBe(false);
+    });
 
     // The source register includes the complete bibliography, so a footnote
     // ID remains traceable even when its related lookup is model context.
@@ -432,6 +584,26 @@ describe('Excel Model: core-engine export snapshot', () => {
           ? 'Average time per process (minutes)'
           : input.label;
         expect(tabText).toContain(displayLabel);
+      });
+      const firstInputRow = 13;
+      schema.inputs.forEach((input, index) => {
+        const cell = tab.getCell(`B${firstInputRow + index}`);
+        expect(cell.protection.locked).toBe(false);
+        expect(cell.formula).toBeUndefined();
+      });
+      const firstCalculatedRow = firstInputRow + schema.inputs.length + 8;
+      const calculatedFormulaText = [];
+      schema.computedMappings.forEach((mapping, index) => {
+        const cell = tab.getCell(`B${firstCalculatedRow + index}`);
+        expect(cell.formula).toBeTruthy();
+        expect(cell.formula).not.toContain('Engine Results');
+        calculatedFormulaText.push(cell.formula);
+      });
+      // Cell-by-cell proof that no blue case input is decorative: every case
+      // input is consumed by at least one live formula on its own case tab.
+      const caseFormulaText = calculatedFormulaText.join(' ');
+      schema.inputs.forEach((_input, index) => {
+        expect(caseFormulaText).toContain(`B${firstInputRow + index}`);
       });
     });
     expect(workbook.getWorksheet('Assumptions - Knowledge')).toBeUndefined();

@@ -84,11 +84,6 @@ function formatDate() {
   });
 }
 
-function readinessLabel(v) {
-  const labels = { 1: 'Very Low', 2: 'Low', 3: 'Moderate', 4: 'High', 5: 'Very High' };
-  return labels[v] || 'N/A';
-}
-
 function readinessRisk(v) {
   if (v >= 4) return 'LOW RISK';
   if (v === 3) return 'MODERATE';
@@ -753,7 +748,7 @@ function slide5_CashFlow(pptx, results, footerText) {
 
   // RIGHT: Chart — cumulative cash flow line chart
   let chartCumulative = -results.upfrontInvestment;
-  const chartData = proj.map((yr, i) => {
+  const chartData = proj.map((yr) => {
     chartCumulative += yr.netCashFlow || 0;
     return chartCumulative;
   });
@@ -1231,7 +1226,6 @@ function slide8_CapitalAllocation(pptx, results, footerText) {
 function slide9_PeerComparison(pptx, formData, results, footerText) {
   const slide = contentSlide(pptx, 'Industry Peer Comparison & Confidence Intervals', footerText);
   const peer = results.peerComparison || {};
-  const ci = results.confidenceIntervals || {};
   const base = results.scenarios?.base || {};
   const cons = results.scenarios?.conservative || {};
   const opt = results.scenarios?.optimistic || {};
@@ -1355,7 +1349,7 @@ function slide9_PeerComparison(pptx, formData, results, footerText) {
 // ---------------------------------------------------------------------------
 // SLIDE 10: Recommendations & Next Steps
 // ---------------------------------------------------------------------------
-function slide10_Recommendations(pptx, formData, results, recommendation, footerText) {
+function slide10_Recommendations(pptx, formData, results, recommendation, _footerText) {
   const slide = pptx.addSlide();
   slide.background = { color: C.white };
 
@@ -1476,7 +1470,7 @@ function slide10_Recommendations(pptx, formData, results, recommendation, footer
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
-export default function generateExecutiveReport(formData, results, recommendation, mcResults) {
+export default function generateExecutiveReport(formData, results, recommendation, _mcResults) {
   const pptx = new PptxGenJS();
   pptx.title = 'AI Implementation ROI Analysis';
   pptx.subject = 'Risk-Adjusted ROI Assessment';

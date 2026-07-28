@@ -2175,9 +2175,6 @@ function page10_AppendixMethodology(doc, formData, results) {
   y += 6;
 
   const base = results.scenarios.base;
-  const netSavings = results.savings.netAnnualSavings;
-  const grossSavings = results.savings.grossAnnualSavings;
-  const riskAdj = results.savings.riskAdjustedSavings;
   const amortization = results.totalInvestment / DCF_YEARS;
 
   // Use the actual year-by-year cash flows from the base scenario

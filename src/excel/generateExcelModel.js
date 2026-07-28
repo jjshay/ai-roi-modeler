@@ -2,15 +2,15 @@
  * AI ROI Calculator — Presentation-Ready Excel Model
  * Core tabs: Inputs, Archetype Detail, Key Formulas, Summary, P&L & Cash Flow,
  * Sensitivity, V5 Analysis, Lookups, Model Audit, Glossary, Sources & Footnotes.
- * Headline financial output is linked to an export snapshot of the core
- * calculation engine rather than recreated in a second DCF implementation.
+ * The workbook is a live, formula-driven model: editable blue cells flow
+ * through the selected-case engine into the visible DCF and executive output.
  * Color coded: Blue=Inputs, Green=Formulas, Black=Results
  * All calculated cells use real Excel formulas.
  */
 import ExcelJS from 'exceljs';
 import { getOutputTier, EXCEL_TABS } from '../utils/outputTier';
 import { ARCHETYPE_INPUT_SCHEMAS, ARCHETYPE_INPUT_MAP, CLASSIFICATION_PROFILES, CLASSIFICATION_QUESTIONS, getArchetypeInputDefaults } from '../logic/archetypeInputs';
-import { PROJECT_ARCHETYPES, isRetiredArchetype } from '../logic/archetypes';
+import { PROJECT_ARCHETYPES, getArchetypeDefaults, isRetiredArchetype } from '../logic/archetypes';
 import { BENCHMARK_SOURCES } from '../logic/benchmarks';
 
 // --- Styles ---
@@ -39,14 +39,63 @@ const outputFont10 = { name: 'Calibri', size: 10, color: { argb: 'FFFFFFFF' } };
 const inputFont = { name: 'Calibri', size: 10, color: { argb: 'FF0000FF' } };
 const greenFont = { name: 'Calibri', size: 10, color: { argb: 'FF2E7D32' } };
 const greenFontBold = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
-const PCT = '0.0%', DOL = '$#,##0', DOL2 = '$#,##0.00', NUM = '#,##0', DEC = '0.000';
+// Use financial-model formats consistently: negatives in parentheses and
+// zeros as dashes.  This makes the printed statements easy to scan without
+// changing any underlying values or formulas.
+const PCT = '0.0%;(0.0%);-';
+const DOL = '$#,##0;($#,##0);-';
+const DOL2 = '$#,##0.00;($#,##0.00);-';
+const NUM = '#,##0;(#,##0);-';
+const DEC = '0.000;(0.000);-';
+const ONE_DEC = '0.0;(0.0);-';
+
+const LEGACY_NUMBER_FORMATS = Object.freeze({
+  '$#,##0': DOL,
+  '$#,##0.00': DOL2,
+  '0.0%': PCT,
+  '#,##0': NUM,
+  '0': NUM,
+  '0.0': ONE_DEC,
+  '0.000': DEC,
+});
 
 // --- Helpers ---
 function cols(ws, w) { w.forEach((v, i) => { ws.getColumn(i + 1).width = v; }); }
 
+function setAlignment(cell, horizontal, defaultVertical = 'middle') {
+  const existing = cell.alignment || {};
+  cell.alignment = {
+    ...existing,
+    horizontal,
+    vertical: existing.vertical || defaultVertical,
+  };
+}
+
+function isFormulaCell(cell) {
+  return Boolean(cell.value && typeof cell.value === 'object' && cell.value.formula);
+}
+
+function isNumericCell(cell) {
+  return typeof cell.value === 'number'
+    || (isFormulaCell(cell) && Boolean(cell.numFmt && cell.numFmt !== 'General'));
+}
+
+function normalizeNumberFormat(cell) {
+  if (LEGACY_NUMBER_FORMATS[cell.numFmt]) {
+    cell.numFmt = LEGACY_NUMBER_FORMATS[cell.numFmt];
+  }
+  if (typeof cell.value === 'number' && (!cell.numFmt || cell.numFmt === 'General')) {
+    cell.numFmt = NUM;
+  }
+}
+
 function hdr(ws, r, text, n) {
   const row = ws.getRow(r);
-  for (let c = 1; c <= n; c++) { row.getCell(c).fill = headerFill; row.getCell(c).font = headerFont; }
+  for (let c = 1; c <= n; c++) {
+    row.getCell(c).fill = headerFill;
+    row.getCell(c).font = headerFont;
+    setAlignment(row.getCell(c), 'left');
+  }
   row.getCell(1).value = text;
   ws.mergeCells(r, 1, r, n);
   row.height = 22;
@@ -54,7 +103,11 @@ function hdr(ws, r, text, n) {
 
 function sub(ws, r, text, n) {
   const row = ws.getRow(r);
-  for (let c = 1; c <= n; c++) { row.getCell(c).fill = subFill; row.getCell(c).font = subFont; }
+  for (let c = 1; c <= n; c++) {
+    row.getCell(c).fill = subFill;
+    row.getCell(c).font = subFont;
+    setAlignment(row.getCell(c), 'left');
+  }
   row.getCell(1).value = text;
   ws.mergeCells(r, 1, r, n);
 }
@@ -65,6 +118,7 @@ function val(ws, r, c, v, fmt, fill) {
   cell.font = fill === inputFill ? inputFont : font10;
   if (fmt) cell.numFmt = fmt;
   if (fill) cell.fill = fill;
+  setAlignment(cell, (fmt || typeof v === 'number') ? 'right' : 'left');
 }
 
 function fml(ws, r, c, formula, fmt, fill) {
@@ -73,6 +127,7 @@ function fml(ws, r, c, formula, fmt, fill) {
   cell.font = fill === resultFill ? outputFont10 : greenFont;
   if (fmt) cell.numFmt = fmt;
   cell.fill = fill || calcFill;
+  setAlignment(cell, fmt ? 'right' : 'left');
 }
 
 function fmlBold(ws, r, c, formula, fmt, fill) {
@@ -81,11 +136,14 @@ function fmlBold(ws, r, c, formula, fmt, fill) {
   cell.font = (fill || resultFill) === resultFill ? outputFont : greenFontBold;
   if (fmt) cell.numFmt = fmt;
   cell.fill = fill || resultFill;
+  setAlignment(cell, fmt ? 'right' : 'left');
 }
 
 function note(ws, r, c, text) {
-  ws.getRow(r).getCell(c).value = text;
-  ws.getRow(r).getCell(c).font = font9i;
+  const cell = ws.getRow(r).getCell(c);
+  cell.value = text;
+  cell.font = font9i;
+  cell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
 }
 
 function tableHeaders(ws, r, headers) {
@@ -94,7 +152,7 @@ function tableHeaders(ws, r, headers) {
     row.getCell(i + 1).value = h;
     row.getCell(i + 1).font = { bold: true, size: 9, name: 'Calibri' };
     row.getCell(i + 1).fill = subFill;
-    row.getCell(i + 1).alignment = { wrapText: true };
+    row.getCell(i + 1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
   });
 }
 
@@ -118,11 +176,93 @@ function dataRow(ws, r, values, fmts) {
     cell.value = v;
     cell.font = { size: 9, name: 'Calibri' };
     if (fmts && fmts[i]) cell.numFmt = fmts[i];
+    setAlignment(cell, (typeof v === 'number' || (fmts && fmts[i])) ? 'right' : 'left');
   });
 }
 
+function columnLetter(column) {
+  let value = column;
+  let result = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result || 'A';
+}
+
+function printLayoutFor(ws) {
+  const landscape = new Set([
+    'Inputs', 'Archetype Detail', 'Key Formulas', 'P&L & Cash Flow',
+    'Sensitivity', 'V5 Analysis', 'Lookups', 'Glossary', 'Sources & Footnotes',
+  ]);
+  const useLandscape = landscape.has(ws.name) || ws.name.startsWith('Assumptions -');
+  // Do not shrink wide, narrative-heavy pages into unreadably small type.
+  // These three sheets deliberately use two horizontal printed pages while
+  // retaining repeated title rows on each page.
+  const twoPagesWide = new Set(['Glossary', 'Sources & Footnotes']);
+  const repeatRows = {
+    Inputs: '1:3',
+    'Archetype Detail': '1:3',
+    'Key Formulas': '1:3',
+    Summary: '1:3',
+    'P&L & Cash Flow': '1:4',
+    Sensitivity: '1:4',
+    'V5 Analysis': '1:4',
+    Lookups: '1:2',
+    'Model Audit': '1:2',
+    Glossary: '1:4',
+    'Sources & Footnotes': '1:4',
+  };
+  return {
+    orientation: useLandscape ? 'landscape' : 'portrait',
+    fitToWidth: twoPagesWide.has(ws.name) ? 2 : 1,
+    printTitlesRow: repeatRows[ws.name] || '1:3',
+  };
+}
+
 function printSetup(ws) {
-  ws.pageSetup = { fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  // actualRowCount is a count, not the final populated row number. A sparse
+  // sheet (such as Inputs, which deliberately preserves legacy row addresses)
+  // can therefore have real content below that count. Use worksheet
+  // dimensions so the print area never clips the selected-case bridge.
+  const dimension = ws.dimensions?.model || {};
+  const lastRow = Math.max(1, dimension.bottom || 0, ws.actualRowCount || 0);
+  const lastColumn = Math.max(1, dimension.right || 0, ws.actualColumnCount || 0, ws.columnCount || 0);
+  const layout = printLayoutFor(ws);
+  ws.properties.pageSetup = { ...(ws.properties.pageSetup || {}), fitToPage: true };
+  ws.pageSetup = {
+    ...(ws.pageSetup || {}),
+    ...layout,
+    fitToPage: true,
+    fitToWidth: layout.fitToWidth,
+    fitToHeight: 0,
+    paperSize: 9, // A4
+    horizontalCentered: false,
+    verticalCentered: false,
+    showGridLines: false,
+    margins: { left: 0.30, right: 0.30, top: 0.50, bottom: 0.50, header: 0.20, footer: 0.25 },
+    printArea: `A1:${columnLetter(lastColumn)}${lastRow}`,
+  };
+  ws.headerFooter.oddFooter = `&LAI ROI Model&C${ws.name}&RPage &P of &N`;
+}
+
+function normalizeWorksheetPresentation(ws) {
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      normalizeNumberFormat(cell);
+      // Retain explicit centered status/check cells, but align numeric values
+      // right and explanatory text left throughout the workbook.
+      if (cell.alignment?.horizontal === 'center') return;
+      setAlignment(cell, isNumericCell(cell) ? 'right' : 'left', cell.alignment?.wrapText ? 'top' : 'middle');
+    });
+  });
+  // ExcelJS only serializes print-gridlines when they are true; its absence
+  // means the Excel default of not printing them. Set the sheet-view flag as
+  // well so the on-screen model is as clean as its printed counterpart.
+  const views = ws.views?.length ? ws.views : [{}];
+  ws.views = views.map((view) => ({ ...view, showGridLines: false }));
+  printSetup(ws);
 }
 
 function mappingNumberFormat(mapsTo) {
@@ -148,6 +288,17 @@ const SIZES = [
   'Enterprise (5,001-50,000)', 'Large Enterprise (50,000+)',
 ];
 
+// These sheet names are a part of the workbook's calculation contract.  The
+// selected-case engine below links the selected row on Inputs directly to the
+// editable blue cells on these tabs; no export-time result snapshot sits in
+// between the user and the financial statements.
+const ARCHETYPE_TAB_NAMES = {
+  'internal-process-automation': 'Assumptions - Process',
+  'customer-facing-ai': 'Assumptions - Customer',
+  'data-analytics-automation': 'Assumptions - Analytics',
+  'risk-compliance-legal-ai': 'Assumptions - Compliance',
+};
+
 // =====================================================================
 export async function generateExcelModel(formData, mcResults, results) {
   // Keep the export compatible with saved models while giving the workbook
@@ -158,6 +309,9 @@ export async function generateExcelModel(formData, mcResults, results) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
   };
+  const optionalNonNegative = (value) => (
+    value === undefined || value === null || value === '' ? null : nonNegative(value)
+  );
   const fraction = (value, fallback = 0) => {
     const normalized = nonNegative(value, fallback);
     return Math.min(1, normalized > 1 ? normalized / 100 : normalized);
@@ -276,6 +430,42 @@ export async function generateExcelModel(formData, mcResults, results) {
     : null;
   const supportedArchetypeSchemas = ARCHETYPE_INPUT_SCHEMAS
     .filter(({ id }) => supportedArchetypeIds.has(id));
+
+  // The four case tabs use a deliberately stable layout.  Keeping the row
+  // map here allows the selected-case engine to use ordinary Excel formulas
+  // (rather than a hidden export snapshot or JavaScript-calculated values).
+  const CASE_INPUT_START_ROW = 13;
+  const CASE_ASSUMPTION_ROW_COUNT = 2;
+  const caseInputRef = (schema, key) => {
+    const inputIndex = schema.inputs.findIndex((input) => input.key === key);
+    if (inputIndex < 0) return null;
+    return `'${ARCHETYPE_TAB_NAMES[schema.id]}'!$B$${CASE_INPUT_START_ROW + inputIndex}`;
+  };
+  const caseMappingRef = (schema, mapsTo) => {
+    const mappingIndex = schema.computedMappings.findIndex((mapping) => mapping.mapsTo === mapsTo);
+    if (mappingIndex < 0) return null;
+    // Header / definition / input rows plus the two plain-English assumption
+    // rows precede calculated outputs on every case tab.
+    const calculationStartRow = CASE_INPUT_START_ROW + schema.inputs.length
+      + 1 + 1 + 1 + CASE_ASSUMPTION_ROW_COUNT + 1 + 1 + 1;
+    return `'${ARCHETYPE_TAB_NAMES[schema.id]}'!$B$${calculationStartRow + mappingIndex}`;
+  };
+  const selectedCaseFormula = (mapsTo, fallback = '0') => {
+    let formula = fallback;
+    [...supportedArchetypeSchemas].reverse().forEach((schema) => {
+      const reference = caseMappingRef(schema, mapsTo);
+      if (reference) formula = `IF(Inputs!$B$10="${schema.id}",${reference},${formula})`;
+    });
+    return formula;
+  };
+  const selectedCasePrimaryVolumeFormula = (fallback = '0') => {
+    let formula = fallback;
+    [...supportedArchetypeSchemas].reverse().forEach((schema) => {
+      const reference = caseInputRef(schema, schema.inputs[0]?.key);
+      if (reference) formula = `IF(Inputs!$B$10="${schema.id}",${reference},${formula})`;
+    });
+    return formula;
+  };
   const rawArchetypeInputs = formData.archetypeInputs && typeof formData.archetypeInputs === 'object'
     ? formData.archetypeInputs
     : {};
@@ -314,134 +504,10 @@ export async function generateExcelModel(formData, mcResults, results) {
   const AU = wb.addWorksheet('Model Audit', { tabColor: { argb: 'FFE53935' } });
   const GL = wb.addWorksheet('Glossary', { tabColor: { argb: 'FF6A1B9A' } });
   const SF = wb.addWorksheet('Sources & Footnotes', { tabColor: { argb: 'FF6A1B9A' } });
-  // This sheet is intentionally hidden: it is the exact result returned by
-  // runCalculations when the user exported the workbook. Visible executive
-  // tabs link here, preventing the Excel formulas from becoming a competing
-  // source of truth for NPV, ROIC, payback, and cash flow.
-  const ER = wb.addWorksheet('Engine Results', { tabColor: { argb: 'FF455A64' } });
-
-  const engineScenarioKeys = ['conservative', 'base', 'optimistic'];
-  const hasEngineSnapshot = engineScenarioKeys.every((key) => {
-    const scenario = results?.scenarios?.[key];
-    return scenario && Array.isArray(scenario.projections) && scenario.projections.length >= 5;
-  });
-  const engineScenarioColumns = { conservative: 2, base: 3, optimistic: 4 };
-  const engineSnapshotRows = {
-    npv: 5,
-    irr: 6,
-    roic: 7,
-    payback: 8,
-    totalNetCashFlow: 9,
-    upfrontInvestment: 10,
-    totalInvestment: 11,
-    netReturn: 12,
-    expectedNpv: 13,
-    baseEnhancementSavings: 17,
-    baseHeadcountSavings: 18,
-    baseGrossSavings: 19,
-    baseSeveranceCost: 20,
-    baseOngoingCost: 21,
-    baseNetCashFlow: 22,
-    baseCumulativeCashFlow: 23,
-    scenarioConservativeCashFlow: 27,
-    scenarioBaseCashFlow: 28,
-    scenarioOptimisticCashFlow: 29,
-  };
-  const engineColumnLetter = (column) => String.fromCharCode(64 + column);
-  const engineRef = (row, column) => `'Engine Results'!${engineColumnLetter(column)}${row}`;
-  const engineScenarioRef = (row, scenario) => engineRef(row, engineScenarioColumns[scenario]);
-  const engineBaseCashFlowRef = (row, year) => engineRef(row, year + 2);
-  const engineScenarioCashFlowRef = (scenario, year) => {
-    const row = scenario === 'conservative'
-      ? engineSnapshotRows.scenarioConservativeCashFlow
-      : scenario === 'optimistic'
-        ? engineSnapshotRows.scenarioOptimisticCashFlow
-        : engineSnapshotRows.scenarioBaseCashFlow;
-    return engineRef(row, year + 2);
-  };
-  const engineNumber = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
-
-  cols(ER, [34, 18, 18, 18, 18, 18, 18]);
-  hdr(ER, 1, 'CORE CALCULATION ENGINE — EXPORT SNAPSHOT', 7);
-  if (hasEngineSnapshot) {
-    note(ER, 2, 1, 'Values in this hidden sheet are copied from runCalculations at export time. Update inputs in the web model and re-export to refresh executive results.');
-    ER.mergeCells(2, 1, 2, 7);
-
-    sub(ER, 3, 'Scenario Metrics — Source: runCalculations()', 4);
-    tableHeaders(ER, 4, ['Metric', 'Conservative', 'Base Case', 'Optimistic']);
-    const scenarioMetricRows = [
-      ['Net Present Value (NPV)', engineSnapshotRows.npv, 'npv', DOL],
-      ['Internal Rate of Return', engineSnapshotRows.irr, 'irr', PCT],
-      ['ROIC', engineSnapshotRows.roic, 'roic', PCT],
-      ['Payback (months)', engineSnapshotRows.payback, 'paybackMonths', NUM],
-      ['5-Year Net Cash Flow', engineSnapshotRows.totalNetCashFlow, null, DOL],
-      ['Upfront Investment', engineSnapshotRows.upfrontInvestment, null, DOL],
-      ['Total Investment', engineSnapshotRows.totalInvestment, null, DOL],
-      ['Net Return', engineSnapshotRows.netReturn, null, DOL],
-    ];
-    scenarioMetricRows.forEach(([label, row, metric, format]) => {
-      val(ER, row, 1, label);
-      engineScenarioKeys.forEach((scenario, index) => {
-        const output = results.scenarios[scenario];
-        let value;
-        if (metric) {
-          value = metric === 'irr'
-            ? (Number.isFinite(output[metric]) ? output[metric] : 'N/A')
-            : engineNumber(output[metric]);
-        } else if (row === engineSnapshotRows.totalNetCashFlow) {
-          value = output.projections.reduce((sum, projection) => sum + engineNumber(projection.netCashFlow), 0);
-        } else if (row === engineSnapshotRows.upfrontInvestment) {
-          value = engineNumber(results.upfrontInvestment);
-        } else if (row === engineSnapshotRows.totalInvestment) {
-          value = engineNumber(results.totalInvestment);
-        } else {
-          value = output.projections.reduce((sum, projection) => sum + engineNumber(projection.netCashFlow), 0)
-            - engineNumber(results.upfrontInvestment);
-        }
-        val(ER, row, index + 2, value, format, calcFill);
-      });
-    });
-    val(ER, engineSnapshotRows.expectedNpv, 1, 'Expected NPV (25 / 50 / 25)');
-    val(ER, engineSnapshotRows.expectedNpv, 2, engineNumber(results.expectedNPV), DOL, calcFill);
-
-    sub(ER, 15, 'Base Case P&L Source Values — Source: runCalculations()', 7);
-    tableHeaders(ER, 16, ['Metric', 'FY 0', 'FY 1', 'FY 2', 'FY 3', 'FY 4', 'FY 5']);
-    const baseProjections = results.scenarios.base.projections;
-    const baseFlowRows = [
-      ['Enhancement Savings', engineSnapshotRows.baseEnhancementSavings, 'enhancementSavings'],
-      ['Headcount Savings', engineSnapshotRows.baseHeadcountSavings, 'headcountSavings'],
-      ['Gross Savings', engineSnapshotRows.baseGrossSavings, 'grossSavings'],
-      ['Severance Cost', engineSnapshotRows.baseSeveranceCost, 'separationCost'],
-      ['Ongoing AI Cost', engineSnapshotRows.baseOngoingCost, 'ongoingCost'],
-      ['Net Cash Flow', engineSnapshotRows.baseNetCashFlow, 'netCashFlow'],
-      ['Cumulative Cash Flow', engineSnapshotRows.baseCumulativeCashFlow, 'netCumulative'],
-    ];
-    baseFlowRows.forEach(([label, row, metric]) => {
-      val(ER, row, 1, label);
-      const fy0 = metric === 'netCashFlow' || metric === 'netCumulative'
-        ? -engineNumber(results.upfrontInvestment)
-        : 0;
-      val(ER, row, 2, fy0, DOL, calcFill);
-      baseProjections.forEach((projection, index) => {
-        val(ER, row, index + 3, engineNumber(projection[metric]), DOL, calcFill);
-      });
-    });
-
-    sub(ER, 25, 'Scenario Net Cash Flows — Source: runCalculations()', 7);
-    tableHeaders(ER, 26, ['Scenario', 'FY 0', 'FY 1', 'FY 2', 'FY 3', 'FY 4', 'FY 5']);
-    engineScenarioKeys.forEach((scenario, index) => {
-      const row = engineSnapshotRows.scenarioConservativeCashFlow + index;
-      val(ER, row, 1, results.scenarios[scenario].label || scenario);
-      val(ER, row, 2, -engineNumber(results.upfrontInvestment), DOL, calcFill);
-      results.scenarios[scenario].projections.forEach((projection, yearIndex) => {
-        val(ER, row, yearIndex + 3, engineNumber(projection.netCashFlow), DOL, calcFill);
-      });
-    });
-  } else {
-    note(ER, 2, 1, 'No runCalculations result was supplied to this export. Legacy workbook formulas are used as a fallback; export from the results screen to preserve one source of truth.');
-    ER.mergeCells(2, 1, 2, 7);
-  }
-  ER.state = 'veryHidden';
+  // The workbook intentionally does not copy runCalculations results into a
+  // hidden sheet.  The blue cells and formula chain in this file are the
+  // source of the exported result, so an analyst can edit a cell and trace
+  // the impact through Key Formulas, P&L, Summary, and sensitivity tables.
 
   // ===================================================================
   // TAB 6: LOOKUPS — All reference tables (EXACT same cell positions)
@@ -468,17 +534,17 @@ export async function generateExcelModel(formData, mcResults, results) {
   });
 
   // Industry planning envelope (R14-R25)
-  hdr(L, 14, 'INDUSTRY PLANNING ENVELOPE [M1]', 7);
-  tableHeaders(L, 15, ['Industry', 'Success Rate', 'Comp Penalty', 'Compl Risk', 'Rev:TTM', 'Rev:CX', 'Rev:NewCap']);
+  hdr(L, 14, 'INDUSTRY PLANNING ENVELOPE [M1]', 9);
+  tableHeaders(L, 15, ['Industry', 'Success Rate', 'Comp Penalty', 'Compl Risk', 'Rev:TTM', 'Rev:CX', 'Rev:NewCap', 'Wage Growth', 'AI Cost Mult']);
   const IB = [
-    [0.72,0.05,0.02,0.08,0.05,0.04],[0.65,0.04,0.05,0.05,0.06,0.03],
-    [0.58,0.02,0.06,0.04,0.03,0.05],[0.62,0.03,0.03,0.06,0.03,0.03],
-    [0.68,0.05,0.02,0.07,0.08,0.04],[0.64,0.04,0.03,0.05,0.04,0.04],
-    [0.60,0.04,0.02,0.08,0.06,0.05],[0.55,0.02,0.04,0.03,0.03,0.02],
-    [0.45,0.01,0.04,0.02,0.02,0.01],[0.55,0.03,0.02,0.04,0.04,0.03],
+    [0.72,0.05,0.02,0.08,0.05,0.04,0.045,1.00], [0.65,0.04,0.05,0.05,0.06,0.03,0.040,1.30],
+    [0.58,0.02,0.06,0.04,0.03,0.05,0.050,1.35], [0.62,0.03,0.03,0.06,0.03,0.03,0.035,1.15],
+    [0.68,0.05,0.02,0.07,0.08,0.04,0.035,1.00], [0.64,0.04,0.03,0.05,0.04,0.04,0.040,1.10],
+    [0.60,0.04,0.02,0.08,0.06,0.05,0.035,1.00], [0.55,0.02,0.04,0.03,0.03,0.02,0.030,1.20],
+    [0.45,0.01,0.04,0.02,0.02,0.01,0.030,1.40], [0.55,0.03,0.02,0.04,0.04,0.03,0.040,1.05],
   ];
   INDUSTRIES.forEach((ind, i) => {
-    dataRow(L, 16 + i, [ind, ...IB[i]], [null, PCT, PCT, PCT, PCT, PCT, PCT]);
+    dataRow(L, 16 + i, [ind, ...IB[i]], [null, PCT, PCT, PCT, PCT, PCT, PCT, PCT, DEC]);
   });
 
   // Readiness Multipliers (R27-R33)
@@ -489,17 +555,17 @@ export async function generateExcelModel(formData, mcResults, results) {
   });
 
   // Company Size Master (R35-R41)
-  hdr(L, 35, 'COMPANY-SIZE PLANNING ENVELOPE [M1]', 11);
-  tableHeaders(L, 36, ['Size','Size Mult','Disc Rate','Max Team','Sep Mult','License','Legal','Security','Compliance','Cyber Ins','Vendor Switch']);
+  hdr(L, 35, 'COMPANY-SIZE PLANNING ENVELOPE [M1]', 14);
+  tableHeaders(L, 36, ['Size','Size Mult','Disc Rate','Max Team','Sep Mult','License','Legal','Security','Compliance','Cyber Ins','Vendor Switch','Dip Months','Dip Rate','Agent Infra / Mo']);
   const SM = [
-    ['Startup (1-50)',0.70,0.18,3,0.70,12000,25000,20000,8000,2000,0.30],
-    ['SMB (51-500)',0.85,0.14,5,1.00,24000,50000,40000,15000,5000,0.35],
-    ['Mid-Market (501-5,000)',1.00,0.10,10,1.15,48000,100000,75000,30000,12000,0.40],
-    ['Enterprise (5,001-50,000)',1.30,0.09,15,1.30,96000,175000,125000,60000,25000,0.50],
-    ['Large Enterprise (50,000+)',1.60,0.08,25,1.50,180000,300000,200000,100000,50000,0.60],
+    ['Startup (1-50)',0.70,0.18,3,0.70,12000,10000,8000,8000,2000,0.30,1.0,0.10,200],
+    ['SMB (51-500)',0.85,0.14,5,1.00,24000,20000,15000,15000,5000,0.35,1.5,0.12,700],
+    ['Mid-Market (501-5,000)',1.00,0.10,10,1.15,48000,40000,30000,30000,12000,0.40,2.0,0.15,1850],
+    ['Enterprise (5,001-50,000)',1.30,0.09,15,1.30,96000,75000,60000,60000,25000,0.50,2.5,0.18,4500],
+    ['Large Enterprise (50,000+)',1.60,0.08,25,1.50,180000,120000,100000,100000,50000,0.60,3.0,0.20,11500],
   ];
   SM.forEach((d, i) => {
-    dataRow(L, 37 + i, d, [null, DEC, PCT, '0', DEC, DOL, DOL, DOL, DOL, DOL, PCT]);
+    dataRow(L, 37 + i, d, [null, DEC, PCT, '0', DEC, DOL, DOL, DOL, DOL, DOL, PCT, DEC, PCT, DOL]);
   });
 
   // Delivery pace (R43-R47). These are transparent model scenarios tied to
@@ -531,14 +597,14 @@ export async function generateExcelModel(formData, mcResults, results) {
   // Constants (R81-R100)
   hdr(L, 81, 'MODEL CONSTANTS', 2);
   const CONSTS = [
-    ['DCF Years',5,'0'],['Max Headcount Reduction',0.75,PCT],['Contingency Rate',0.20,PCT],
-    ['Cultural Resistance Rate',0.12,PCT],['Wage Inflation Rate',0.04,PCT],
-    ['Legacy Maintenance Creep',0.07,PCT],['Model Retraining Rate',0.07,PCT],
-    ['Retained Retraining Rate',0.03,PCT],['Tech Debt Rate',0.05,PCT],
+    ['DCF Years',5,'0'],['Max Headcount Reduction',0.75,PCT],['Contingency Rate',0.10,PCT],
+    ['Cultural Resistance Rate',0.04,PCT],['Wage Inflation Rate',0.04,PCT],
+    ['Legacy Maintenance Creep',0.07,PCT],['Model Retraining Rate',0.05,PCT],
+    ['Retained Retraining Rate',0.03,PCT],['Tech Debt Rate',0.03,PCT],
     ['Adjacent Product Rate',0.25,PCT],['Revenue Risk Discount',0.50,PCT],
     ['R&D Qualification Rate',0.65,PCT],['Federal R&D Rate',0.065,PCT],
     ['Max ROIC Cap',1.00,PCT],['Max IRR Cap',2.00,PCT],
-    ['Change Mgmt Rate',0.15,PCT],['Infra Cost Rate',0.12,PCT],
+    ['Change Mgmt Rate',0.08,PCT],['Infra Cost Rate',0.12,PCT],
     ['Training Cost Rate',0.08,PCT],['PM Salary Factor',0.85,DEC],
   ];
   CONSTS.forEach((c, i) => { val(L, 82 + i, 1, c[0]); val(L, 82 + i, 2, c[1], c[2], inputFill); });
@@ -547,8 +613,8 @@ export async function generateExcelModel(formData, mcResults, results) {
   hdr(L, 102, 'YEAR-BY-YEAR SCHEDULES', 6);
   tableHeaders(L, 103, ['Year', 'Severance Schedule', 'Cum. Workforce Savings', 'Adoption Ramp', 'Cost Escalation', 'Cum Escalation']);
   const SCHED = [
-    [1,0.50,0.50,0.75,0,1.000],[2,0.30,0.80,0.90,0.12,1.120],
-    [3,0.20,1.00,1.00,0.12,1.2544],[4,0,1.00,1.00,0.07,1.342208],[5,0,1.00,1.00,0.07,1.436163],
+    [1,0.50,0.50,0.75,0,1.000000],[2,0.30,0.80,0.90,0.08,1.080000],
+    [3,0.20,1.00,1.00,0.04,1.123200],[4,0,1.00,1.00,0,1.123200],[5,0,1.00,1.00,-0.03,1.089504],
   ];
   SCHED.forEach((s, i) => {
     dataRow(L, 104 + i, s, ['0', PCT, PCT, PCT, PCT, DEC]);
@@ -612,10 +678,19 @@ export async function generateExcelModel(formData, mcResults, results) {
 
   // Archetype List (R203-R208) — for dropdown on Inputs tab + Archetype Detail
   // Column C = primary process type — used to translate archetype ID → process type for MATCH
-  hdr(L, 203, 'ARCHETYPE LIST', 3);
-  tableHeaders(L, 204, ['Archetype ID', 'Label', 'Primary Process Type']);
+  hdr(L, 203, 'ARCHETYPE LIST', 4);
+  tableHeaders(L, 204, ['Archetype ID', 'Label', 'Primary Process Type', 'Tool Replacement Rate']);
   PROJECT_ARCHETYPES.forEach((a, i) => {
-    dataRow(L, 205 + i, [a.id, a.label, a.sourceProcessTypes[0] || 'Other']);
+    const defaults = getArchetypeDefaults(a.id, formData.industry || 'Technology / Software');
+    const exportedOverride = a.id === selectedArchetypeId
+      ? Number(formData.assumptions?.toolReplacementRate)
+      : NaN;
+    dataRow(L, 205 + i, [
+      a.id,
+      a.label,
+      a.sourceProcessTypes[0] || 'Other',
+      Number.isFinite(exportedOverride) ? exportedOverride : (defaults?.toolReplacementRate ?? 0.40),
+    ], [null, null, null, PCT]);
   });
 
   // Classification Scoring Matrix (R218-R231)
@@ -651,49 +726,140 @@ export async function generateExcelModel(formData, mcResults, results) {
   const stdFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF4F9' } }; // very light blue for standard
   const keyFont = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0000FF' } };  // bold blue
   const stdInputFont = { name: 'Calibri', size: 10, color: { argb: 'FF0000FF' } };          // blue
-  const idFont  = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF546E7A' } };
+  const inputLabelFont = { name: 'Calibri', size: 10, bold: true, color: { argb: `FF${NAVY}` } };
+  const keyLabelFont = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0D47A1' } };
   const descFont = { name: 'Calibri', size: 9, color: { argb: 'FF757575' } };
   const impactKeyFont = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF0000FF' } };
   const impactStdFont = { name: 'Calibri', size: 9, color: { argb: 'FF90A4AE' } };
+  const inputDivider = { bottom: { style: 'hair', color: { argb: 'FFD9E2F3' } } };
 
-  // Helper: write an input row with ID, value, description, impact
+  // The previous presentation exposed audit IDs ("1a", "6b") without the
+  // actual input names. Keep those IDs in code and the formula map, but give
+  // the operator a plain-English label in the visible sheet.
+  const INPUT_LABELS = {
+    '1a': 'Industry',
+    '1b': 'Company size',
+    '1c': 'State for R&D credit',
+    '2a': 'AI use case',
+    '2b': 'Current process workforce',
+    '2c': 'Hours per person / week',
+    '2d': 'Blended fully burdened cost',
+    '2e': 'Legacy error rate (not used)',
+    '2f': 'Current tool spend',
+    '3a': 'Change readiness',
+    '3b': 'Data readiness',
+    '3c': 'Executive sponsor',
+    '4a': 'Implementation budget',
+    '4b': 'Expected timeline (months)',
+    '4c': 'Annual AI run-cost override',
+    '4d': 'Existing contracts (linked)',
+    '4e': 'Annual cost per contract (linked)',
+    '5a': 'Cash-realization context',
+    '5b': 'Legacy annual revenue (not used)',
+    '5c': 'Legacy contribution margin (not used)',
+    '5d': 'Freed capacity context (not used)',
+    '5e': 'Include risk avoidance (context)',
+    '5f': 'Legacy revenue acceleration (not used)',
+    '5g': 'Retained-talent premium',
+    '5h': 'Multi-step agent workflow',
+    '6a': 'Direct employees',
+    '6b': 'Direct employee fully burdened cost',
+    '6c': 'Offshore contractors',
+    '6d': 'Contractor fully burdened cost',
+    '6e': 'Total annual headcount cost',
+    '6f': 'Blended annual cost per person',
+    '7a': 'Employee errors / year',
+    '7b': 'Contractor errors / year',
+    '7c': 'Errors requiring rework',
+    '7d': 'Rework cost / item',
+    '7e': 'Annual measured rework cost',
+    '7f': 'Total efficiency gain',
+    '7g': 'Employees to retrain',
+    '7h': 'Employees to make redundant',
+    '8a': 'Existing contracts to cancel',
+    '8b': 'Annual cost per contract',
+    '8c': 'Notice period (months)',
+    '8d': 'Annual contract spend',
+    '8e': 'Estimated contract cancellation cost',
+    legacy: 'Legacy fixed exit cost (fallback only)',
+    '9a': 'Delivery pace',
+    '9b': 'Deployment cost adjustment',
+    '9c': 'Deployment duration adjustment',
+    '10a': 'Licensed AI users / seats',
+    '10b': 'Monthly AI requests',
+    '10c': 'Average input tokens / request',
+    '10d': 'Average output tokens / request',
+    '10e': 'Monthly agent workflows',
+    '10f': 'Documents processed / month',
+    '10g': 'Data stored (GB)',
+    '10h': 'Connected applications',
+    '10i': 'Modeled monthly usage volume',
+    '10j': 'Customer Service cash-savings evidence',
+  };
+
+  function inputRowHeight(label, description) {
+    // Excel does not auto-fit wrapped content on generated worksheets. Size
+    // rows deliberately so a printed copy never crops the plain-English note.
+    const labelLines = Math.ceil((label || '').length / 34);
+    const noteLines = Math.ceil((description || '').length / 78);
+    return Math.min(60, Math.max(24, 12 + Math.max(labelLines, noteLines) * 11));
+  }
+
+  // Helper: write an input row with a readable label, value, guidance, and
+  // model role. Column B addresses never change because the formula engine
+  // continues to depend on them.
   function inp(ws, r, id, v, fmt, isKey, desc, impact) {
     const fill = isKey ? keyFill : stdFill;
     const vFont = isKey ? keyFont : stdInputFont;
-    // Col A: ID
-    ws.getRow(r).getCell(1).value = id;
-    ws.getRow(r).getCell(1).font = idFont;
+    const row = ws.getRow(r);
+    const label = INPUT_LABELS[id] || id;
+    // Col A: plain-English input name (audit IDs remain in source/formulas).
+    const labelCell = row.getCell(1);
+    labelCell.value = label;
+    labelCell.font = isKey ? keyLabelFont : inputLabelFont;
+    labelCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    labelCell.border = inputDivider;
     // Col B: Value
-    const cell = ws.getRow(r).getCell(2);
+    const cell = row.getCell(2);
     cell.value = v;
     cell.font = vFont;
     cell.fill = fill;
+    cell.border = thinBorder;
+    // These are the only cells a user is meant to type into on the Inputs
+    // tab.  They must remain editable even when worksheet protection is
+    // enabled by a downstream user or template process.
+    cell.protection = { locked: false };
     if (fmt) cell.numFmt = fmt;
+    setAlignment(cell, (fmt || typeof v === 'number') ? 'right' : 'left');
     // Col C: Description
-    ws.getRow(r).getCell(3).value = desc || '';
-    ws.getRow(r).getCell(3).font = descFont;
+    const descriptionCell = row.getCell(3);
+    descriptionCell.value = desc || '';
+    descriptionCell.font = descFont;
+    descriptionCell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+    descriptionCell.border = inputDivider;
     // Col D: Impact
+    const impactCell = row.getCell(4);
+    impactCell.border = inputDivider;
     if (impact) {
-      ws.getRow(r).getCell(4).value = impact;
-      ws.getRow(r).getCell(4).font = isKey ? impactKeyFont : impactStdFont;
+      impactCell.value = impact;
+      impactCell.font = isKey ? impactKeyFont : impactStdFont;
+      impactCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
     }
+    row.height = inputRowHeight(label, desc);
   }
 
-  cols(I, [8, 28, 52, 18, 4, 34, 22, 46]);
-  hdr(I, 1, 'INPUTS — TIERED MODEL MOVERS', 4);
-
-  // Legend row
-  {
-    const lr = I.getRow(2);
-    lr.height = 18;
-    lr.getCell(1).value = 'KEY DRIVER';
-    lr.getCell(1).fill = keyFill;
-    lr.getCell(1).font = { ...idFont, bold: true, color: { argb: 'FF0000FF' } };
-    I.mergeCells(2, 1, 2, 2);
-    lr.getCell(3).value = 'Blue text = editable input. Highlighted = biggest impact on your ROI. Change any value to recalculate.';
-    lr.getCell(3).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF546E7A' } };
-    I.mergeCells(2, 3, 2, 4);
-  }
+  // One compact four-column table: input name, editable/calculated value,
+  // plain-English guidance, and role. This prints on one landscape page wide
+  // instead of splitting a disconnected "start here" panel onto page two.
+  cols(I, [34, 24, 58, 18]);
+  hdr(I, 1, 'INPUTS — DECISION-GRADE ROI MODEL', 4);
+  tableHeaders(I, 2, [
+    'INPUT',
+    'VALUE\nBlue = editable | Green = calculated',
+    'WHAT TO ENTER OR VALIDATE',
+    'MODEL ROLE',
+  ]);
+  I.getRow(2).height = 30;
 
   // ---------------------------------------------------------------
   // 1. THE BIG THREE — Key Drivers (highlighted)
@@ -765,8 +931,10 @@ export async function generateExcelModel(formData, mcResults, results) {
   inp(I, 24, '4b', formData.expectedTimeline || 4.5, '0.0', false,
     'How many months to go live? Shorter timelines increase engineering cost', '');
 
-  inp(I, 25, '4c', formData.ongoingAnnualCost || 25000, DOL, false,
-    'Annual cost to run the AI after launch (API fees, hosting, maintenance, monitoring)', '');
+  const hasExplicitOngoingAnnualCost = formData.ongoingAnnualCost !== undefined
+    && formData.ongoingAnnualCost !== null;
+  inp(I, 25, '4c', hasExplicitOngoingAnnualCost ? formData.ongoingAnnualCost : null, DOL, false,
+    'Annual cost to run the AI after launch (API fees, hosting, maintenance, monitoring). Leave blank to use the model-derived operating-cost build-up.', '');
 
   inp(I, 26, '4d', existingContractCount, '0', false,
     'Calculated link to the existing-contract count in section 8', '');
@@ -864,40 +1032,6 @@ export async function generateExcelModel(formData, mcResults, results) {
     monthlyUsageVolume: 77,
   };
 
-  // A decision-first panel keeps the model movers visible without shifting
-  // any legacy input addresses used by the calculation sheets.
-  for (let c = 6; c <= 8; c++) {
-    I.getRow(1).getCell(c).fill = headerFill;
-    I.getRow(1).getCell(c).font = headerFont;
-  }
-  I.getRow(1).getCell(6).value = 'TIER 1 MODEL MOVERS — START HERE';
-  I.mergeCells(1, 6, 1, 8);
-  I.getRow(2).getCell(6).value = 'These linked values are the first assumptions to validate with Operations, Finance, and HR.';
-  I.getRow(2).getCell(6).font = font9i;
-  I.getRow(2).getCell(6).alignment = { vertical: 'middle', wrapText: true };
-  I.mergeCells(2, 6, 2, 8);
-  I.getRow(2).height = Math.max(I.getRow(2).height || 0, 28);
-
-  const tierOneRows = [
-    ['Total workforce', 'B11', NUM, 'Direct employees + offshore contractors'],
-    ['Total ongoing headcount cost', `B${exportInputRows.totalAnnualHeadcountCost}`, DOL, 'Calculated from the workforce mix'],
-    ['Hours / person / week', 'B12', NUM, 'Use 40 for a full-time role'],
-    ['Total efficiency gain', `B${exportInputRows.totalEfficiencyGainPct}`, PCT, 'Final efficiency assumption'],
-    ['Employees to make redundant', `B${exportInputRows.employeesToMakeRedundant}`, NUM, 'Explicit hard headcount-savings input'],
-    ['Employees to retrain', `B${exportInputRows.employeesToRetrain}`, NUM, 'Capacity redeployment, not automatic cash savings'],
-    ['Existing contracts', `B${exportInputRows.existingContractCount}`, NUM, 'Annual recurring spend becomes a savings line after cancellation'],
-    ['Annual contract spend', `B${exportInputRows.annualContractSpend}`, DOL, 'Contracts × annual cost / contract'],
-    ['Contract cancellation estimate', `B${exportInputRows.estimatedContractExitCost}`, DOL, 'Annual spend × notice period ÷ 12'],
-    ['Delivery pace', `B${exportInputRows.deliveryPace}`, null, 'Accelerated +20%; Extended −20% deployment staffing/cost'],
-  ];
-  tierOneRows.forEach(([label, sourceCell, format, explanation], index) => {
-    const row = index + 3;
-    val(I, row, 6, label);
-    I.getRow(row).getCell(6).font = fontBold;
-    fml(I, row, 7, sourceCell, format, calcFill);
-    note(I, row, 8, explanation);
-  });
-
   sub(I, 39, '6. WORKFORCE MIX & PRODUCTIVITY — Who does this work today?', 4);
   inp(I, 40, '6a', directEmployeeCount, NUM, true,
     'Number of direct employees currently doing this work', 'KEY DRIVER #1');
@@ -964,102 +1098,78 @@ export async function generateExcelModel(formData, mcResults, results) {
   // 10. AI USAGE METERING — Optional overrides for the cost model
   // ---------------------------------------------------------------
   sub(I, 68, '10. AI USAGE METERING — Optional usage overrides', 4);
-  inp(I, 69, '10a', nonNegative(formData.aiLicensedUsers), NUM, false,
-    '[C2] User-entered/measured licensed AI users or seats. Leave at 0 to use the model workload proxy; it is not an external benchmark.', '');
-  inp(I, 70, '10b', nonNegative(formData.monthlyAiRequests), NUM, false,
-    '[C2] User-entered/measured monthly AI requests. Leave at 0 to use the selected archetype’s model workload proxy.', '');
-  inp(I, 71, '10c', nonNegative(formData.avgInputTokensPerRequest), NUM, false,
+  inp(I, 69, '10a', optionalNonNegative(formData.aiLicensedUsers), NUM, false,
+    '[C2] User-entered/measured licensed AI users or seats. The web model applies a one-seat minimum when this is 0; clear the cell only to use a model fallback.', '');
+  inp(I, 70, '10b', optionalNonNegative(formData.monthlyAiRequests), NUM, false,
+    '[C2] User-entered/measured monthly AI requests. A entered 0 is treated as zero request consumption; clear the cell only to use the selected-case workload proxy.', '');
+  inp(I, 71, '10c', optionalNonNegative(formData.avgInputTokensPerRequest), NUM, false,
     '[C2] User-entered/measured average input tokens per request (optional usage-meter override)', '');
-  inp(I, 72, '10d', nonNegative(formData.avgOutputTokensPerRequest), NUM, false,
+  inp(I, 72, '10d', optionalNonNegative(formData.avgOutputTokensPerRequest), NUM, false,
     '[C2] User-entered/measured average output tokens per request (optional usage-meter override)', '');
-  inp(I, 73, '10e', nonNegative(formData.monthlyAgentWorkflows), NUM, false,
+  inp(I, 73, '10e', optionalNonNegative(formData.monthlyAgentWorkflows), NUM, false,
     '[C2] User-entered/measured monthly multi-step agent workflows. Modeled as additional variable consumption, not a user seat.', '');
-  inp(I, 74, '10f', nonNegative(formData.documentsPerMonth), NUM, false,
+  inp(I, 74, '10f', optionalNonNegative(formData.documentsPerMonth), NUM, false,
     'Documents processed per month (optional usage-meter override)', '');
-  inp(I, 75, '10g', nonNegative(formData.dataStoredGb), NUM, false,
+  inp(I, 75, '10g', optionalNonNegative(formData.dataStoredGb), NUM, false,
     'Data stored in GB (planning context for run/governance sizing)', '');
-  inp(I, 76, '10h', nonNegative(formData.connectedApplications), NUM, false,
+  inp(I, 76, '10h', optionalNonNegative(formData.connectedApplications), NUM, false,
     'Connected applications (planning context for integration and governance sizing)', '');
   inp(I, 77, '10i', 0, NUM, false,
     'Calculated monthly workload volume from the selected archetype; requests/documents override it when supplied', '');
 
   // ---------------------------------------------------------------
-  // 11. ARCHETYPE FINE-TUNING — Active archetype inputs surfaced here
+  // 11. SELECTED-CASE ENGINE — live formula links, not duplicate inputs
   // ---------------------------------------------------------------
-  {
-    const activeId = selectedArchetypeId;
-    const archInfo = PROJECT_ARCHETYPES.find(a => a.id === activeId);
-    const archSchema = ARCHETYPE_INPUT_MAP[activeId];
-    const archDefaults = archSchema ? getArchetypeInputDefaults(activeId) : {};
-    const archUserVals = resolveArchetypeInputValues(activeId);
+  sub(I, 79, '11. SELECTED-CASE ENGINE — edit blue cells on the matching case tab', 4);
+  const selectedCaseEngineRows = [
+    ['Selected use case', 'B10', null, 'Choose one of the four cases above. Its blue case-tab inputs drive the financial model.'],
+    ['Automation ceiling', selectedCaseFormula('automationPotential', '0'), PCT, 'Live case calculation; caps the requested efficiency gain.'],
+    ['Weekly case workload', selectedCaseFormula('caseWorkloadHoursPerWeek', '0'), NUM, 'Live workload used by the capacity guardrail.'],
+    ['Build complexity', selectedCaseFormula('caseBuildComplexityMultiplier', '1'), DEC, 'Live multiplier applied to deployment cost only.'],
+    ['Customer direct savings', selectedCaseFormula('caseDirectSavings', '0'), DOL, 'Included in cash flow only after the explicit Customer Service evidence gate.'],
+    ['Risk avoidance (context)', selectedCaseFormula('caseRiskAvoidance', '0'), DOL, 'Shown for diligence only; excluded from core NPV, IRR, ROIC, and payback.'],
+  ];
+  selectedCaseEngineRows.forEach(([label, formula, format, explanation], index) => {
+    const row = 80 + index;
+    val(I, row, 1, label);
+    I.getRow(row).getCell(1).font = inputLabelFont;
+    I.getRow(row).getCell(1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    I.getRow(row).getCell(1).border = inputDivider;
+    fml(I, row, 2, formula, format, calcFill);
+    I.getRow(row).getCell(2).border = thinBorder;
+    I.getRow(row).getCell(3).value = explanation;
+    I.getRow(row).getCell(3).font = descFont;
+    I.getRow(row).getCell(3).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+    I.getRow(row).getCell(3).border = inputDivider;
+    I.getRow(row).getCell(4).value = 'CALCULATED';
+    I.getRow(row).getCell(4).font = greenFontBold;
+    I.getRow(row).getCell(4).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    I.getRow(row).getCell(4).border = inputDivider;
+    I.getRow(row).height = inputRowHeight(label, explanation);
+  });
 
-    sub(I, 79, `11. ARCHETYPE FINE-TUNING — ${archInfo?.label || activeId}`, 4);
+  // Formula rows use the same visual language as the editable input rows,
+  // but state plainly that their green values are calculated. This prevents a
+  // user from mistaking linked totals for another data-entry field.
+  [11, 13, 26, 27, 44, 45, 52, 61, 62, 66, 67, 77].forEach((rowNumber) => {
+    const row = I.getRow(rowNumber);
+    row.getCell(1).font = inputLabelFont;
+    row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    row.getCell(4).value = 'CALCULATED';
+    row.getCell(4).font = greenFontBold;
+    row.getCell(4).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    row.getCell(4).border = inputDivider;
+  });
 
-    let atRow = 80;
-    let atIdx = 0;
-    if (archSchema) {
-      for (const input of archSchema.inputs) {
-        const cellValue = archUserVals[input.key] ?? archDefaults[input.key] ?? input.default;
-        const letter = String.fromCharCode(97 + atIdx); // a, b, c, ...
-        const fmt = input.type === 'percent' ? PCT : input.format === '$#,##0' ? DOL : input.format || NUM;
-        inp(I, atRow, `11${letter}`, cellValue, fmt, false, input.note || displayArchetypeInputLabel(input), '');
-        atIdx++;
-        atRow++;
-      }
-
-      // Computed outputs from archetype
-      for (const mapping of archSchema.computedMappings) {
-        const merged = { ...archDefaults, ...archUserVals };
-        let computed;
-        try { computed = mapping.jsMap(merged); } catch { computed = 'N/A'; }
-        const mFmt = mappingNumberFormat(mapping.mapsTo);
-        val(I, atRow, 1, '');
-        const cCell = I.getRow(atRow).getCell(2);
-        if (typeof computed === 'number') {
-          cCell.value = computed;
-          cCell.numFmt = mFmt;
-        } else {
-          cCell.value = computed;
-        }
-        cCell.fill = calcFill;
-        cCell.font = greenFontBold;
-        I.getRow(atRow).getCell(3).value = `Computed: ${mapping.mapsTo} (feeds into DCF engine)`;
-        I.getRow(atRow).getCell(3).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF2E7D32' } };
-        atRow++;
-      }
-    } else {
-      val(I, atRow, 1, '');
-      I.getRow(atRow).getCell(3).value = 'Select a project archetype above to see fine-tuning inputs.';
-      I.getRow(atRow).getCell(3).font = descFont;
-      atRow++;
-    }
-
-    // Footer
-    atRow += 1;
-    I.getRow(atRow).getCell(1).value = 'HOW TO READ THIS TAB';
-    I.getRow(atRow).getCell(1).font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF546E7A' } };
-    atRow++;
-    I.getRow(atRow).getCell(1).value = '';
-    I.getRow(atRow).getCell(2).value = 'KEY DRIVER';
-    I.getRow(atRow).getCell(2).fill = keyFill;
-    I.getRow(atRow).getCell(2).font = impactKeyFont;
-    I.getRow(atRow).getCell(3).value = 'These 3 inputs drive 80%+ of your ROI. Start here.';
-    I.getRow(atRow).getCell(3).font = descFont;
-    atRow++;
-    I.getRow(atRow).getCell(1).value = '';
-    I.getRow(atRow).getCell(2).value = 'Standard Input';
-    I.getRow(atRow).getCell(2).fill = stdFill;
-    I.getRow(atRow).getCell(2).font = stdInputFont;
-    I.getRow(atRow).getCell(3).value = 'These inputs matter but have less impact. Defaults are reasonable for most cases.';
-    I.getRow(atRow).getCell(3).font = descFont;
-    atRow++;
-    I.getRow(atRow).getCell(1).value = '';
-    I.getRow(atRow).getCell(2).value = 'Computed';
-    I.getRow(atRow).getCell(2).fill = calcFill;
-    I.getRow(atRow).getCell(2).font = greenFontBold;
-    I.getRow(atRow).getCell(3).value = 'Calculated by the model — not editable. Shows how your inputs feed the engine.';
-    I.getRow(atRow).getCell(3).font = descFont;
-  }
+  // Preserve the existing row numbers (they are referenced across the model)
+  // while making blank separators deliberate and section breaks scannable.
+  [3, 9, 17, 22, 29, 39, 47, 57, 64, 68, 79].forEach((rowNumber) => {
+    I.getRow(rowNumber).height = 20;
+  });
+  [6, 8, 16, 21, 28, 38, 46, 56].forEach((rowNumber) => {
+    I.getRow(rowNumber).height = 7;
+  });
+  I.getCell('B2').alignment = { horizontal: 'right', vertical: 'middle', wrapText: true };
 
   printSetup(I);
 
@@ -1095,14 +1205,11 @@ export async function generateExcelModel(formData, mcResults, results) {
     adRow++;
 
     // Input rows
-    const inputDefaults = getArchetypeInputDefaults(schema.id);
-    const userValues = resolveArchetypeInputValues(schema.id);
-
-    for (const input of schema.inputs) {
-      const cellValue = userValues[input.key] ?? inputDefaults[input.key] ?? input.default;
+    for (const [inputIndex, input] of schema.inputs.entries()) {
       const fill = isActive ? inputFill : inactiveInputFill;
       val(AD, adRow, 1, displayArchetypeInputLabel(input));
-      val(AD, adRow, 2, cellValue, input.format === '$#,##0' ? DOL : input.format === '0.0%' || input.type === 'percent' ? PCT : input.format || NUM, fill);
+      fml(AD, adRow, 2, `'${ARCHETYPE_TAB_NAMES[schema.id]}'!B${CASE_INPUT_START_ROW + inputIndex}`,
+        input.format === '$#,##0' ? DOL : input.format === '0.0%' || input.type === 'percent' ? PCT : input.format || NUM, fill);
       note(AD, adRow, 3, input.note);
       if (!isActive) {
         AD.getRow(adRow).getCell(1).font = inactiveFont;
@@ -1115,18 +1222,9 @@ export async function generateExcelModel(formData, mcResults, results) {
     for (const mapping of schema.computedMappings) {
       val(AD, adRow, 1, `→ ${mapping.mapsTo}`);
       AD.getRow(adRow).getCell(1).font = isActive ? greenFontBold : inactiveFont;
-      // Compute the value from defaults if active
-      if (isActive) {
-        const vals = { ...inputDefaults, ...userValues };
-        try {
-          const computed = mapping.jsMap(vals);
-          val(AD, adRow, 2, computed, mappingNumberFormat(mapping.mapsTo), calcFill);
-        } catch {
-          val(AD, adRow, 2, 'N/A', null, calcFill);
-        }
-      } else {
-        val(AD, adRow, 2, '', null, inactiveInputFill);
-      }
+      const mappingIndex = schema.computedMappings.findIndex((candidate) => candidate.mapsTo === mapping.mapsTo);
+      fml(AD, adRow, 2, `'${ARCHETYPE_TAB_NAMES[schema.id]}'!B${CASE_INPUT_START_ROW + schema.inputs.length + 8 + mappingIndex}`,
+        mappingNumberFormat(mapping.mapsTo), isActive ? calcFill : inactiveInputFill);
       note(AD, adRow, 3, mapping.note || `Refines ${mapping.mapsTo} in DCF`);
       if (!isActive) AD.getRow(adRow).getCell(3).font = { ...font9i, color: { argb: 'FFBBBBBB' } };
       adRow++;
@@ -1138,15 +1236,11 @@ export async function generateExcelModel(formData, mcResults, results) {
   }
 
   // --- Mapping Summary (bottom of Archetype Detail tab) ---
-  const summaryStart = adRow;
   sub(AD, adRow, 'MAPPING SUMMARY — Active Archetype Overrides', 3);
   adRow++;
 
   // Pre-compute mapping values from the active archetype
   const activeSchema = ARCHETYPE_INPUT_MAP[activeArchetypeId];
-  const activeDefaults = activeSchema ? getArchetypeInputDefaults(activeArchetypeId) : {};
-  const activeUserVals = resolveArchetypeInputValues(activeArchetypeId);
-  const activeMerged = { ...activeDefaults, ...activeUserVals };
 
   // Keep the bridge readable even though the selected use case has different
   // operating levers. Direct customer-cost savings and avoided-loss estimates
@@ -1164,59 +1258,30 @@ export async function generateExcelModel(formData, mcResults, results) {
 
   for (const targetVar of summaryMappings) {
     val(AD, adRow, 1, `Adjusted ${targetVar}`);
-    if (activeSchema) {
-      const mapping = activeSchema.computedMappings.find(m => m.mapsTo === targetVar);
-      if (mapping) {
-        try {
-          const computed = mapping.jsMap(activeMerged);
-          const fmt = mappingNumberFormat(targetVar);
-          val(AD, adRow, 2, computed, fmt, calcFill);
-          note(AD, adRow, 3, 'From archetype detail inputs');
-        } catch {
-          val(AD, adRow, 2, 'N/A', null, calcFill);
-          note(AD, adRow, 3, 'Not available for this archetype');
-        }
-      } else {
-        val(AD, adRow, 2, 'N/A', null, inactiveInputFill);
-        note(AD, adRow, 3, 'Not applicable to this archetype');
-      }
-    } else {
-      val(AD, adRow, 2, 'N/A', null, inactiveInputFill);
-    }
+    const fallback = targetVar === 'toolReplacementRate'
+      ? "VLOOKUP('Key Formulas'!B10,Lookups!A56:D63,4,FALSE)"
+      : targetVar === 'caseBuildComplexityMultiplier' ? '1' : '0';
+    fml(AD, adRow, 2, selectedCaseFormula(targetVar, fallback), mappingNumberFormat(targetVar), calcFill);
+    note(AD, adRow, 3, 'Live selected-case link; edit blue cells on the matching case tab.');
     adRow++;
   }
 
-  // Store the summary row numbers for bridge formulas
-  const adSummaryRow = summaryStart + 1; // first data row of summary
-
-  // Convert the selected archetype's operating-volume input into a transparent
-  // monthly usage driver for variable model consumption. This keeps API/model
-  // use distinct from annual license seats and support headcount.
+  // The selected-case tab remains the source for its operating inputs.  This
+  // helper is only used for the optional process unit-economics display below.
   const activeInputRow = (key) => {
     const inputIndex = activeSchema?.inputs.findIndex(input => input.key === key) ?? -1;
     return inputIndex >= 0 ? archetypeSectionRows[activeArchetypeId].start + 1 + inputIndex : null;
   };
-  const archetypeCell = (key) => {
-    const row = activeInputRow(key);
-    return row ? `'Archetype Detail'!B${row}` : null;
-  };
-  const monthlyConsumptionVolumeFormula = (() => {
-    switch (activeArchetypeId) {
-      case 'internal-process-automation':
-        return `MAX(1,${archetypeCell('processVolume') || 'Inputs!B11*Inputs!B12*4.33'})`;
-      case 'customer-facing-ai':
-        return `MAX(1,${archetypeCell('ticketsPerMonth') || 'Inputs!B11*Inputs!B12*4.33'})`;
-      case 'data-analytics-automation':
-        return `MAX(1,${archetypeCell('reportsPerMonth') || 'Inputs!B11*Inputs!B12*4.33'})`;
-      case 'risk-compliance-legal-ai':
-        return `MAX(1,${archetypeCell('reviewsPerMonth') || 'Inputs!B11*Inputs!B12*4.33'})`;
-      default:
-        return 'MAX(1,Inputs!B11*Inputs!B12*4.33)';
-    }
-  })();
   fml(I, exportInputRows.monthlyUsageVolume, 2,
-    `IF(B${exportInputRows.monthlyAiRequests}>0,B${exportInputRows.monthlyAiRequests},IF(B${exportInputRows.documentsPerMonth}>0,B${exportInputRows.documentsPerMonth},${monthlyConsumptionVolumeFormula}))`,
+    `IF(B${exportInputRows.monthlyAiRequests}>0,B${exportInputRows.monthlyAiRequests},IF(B${exportInputRows.documentsPerMonth}>0,B${exportInputRows.documentsPerMonth},${selectedCasePrimaryVolumeFormula('MAX(1,Inputs!B11*Inputs!B12*4.33)')}))`,
     NUM, calcFill);
+
+  // Customer Service direct-cost avoidance is a valid cash-flow input only
+  // after both the operating baseline and Finance realization have been
+  // confirmed.  Keep the evidence decision editable and explicit in Excel.
+  inp(I, 78, '10j', formData.customerServiceSavingsValidated ? 'Yes' : 'No', null, false,
+    'Customer Service only: have Operations validated cost/contact and has Finance confirmed the avoided contacts reduce spend (not just free time)?', 'EVIDENCE GATE');
+  I.getRow(78).getCell(2).dataValidation = { type: 'list', formulae: ['"Yes,No"'] };
 
   if (activeArchetypeId === 'internal-process-automation') {
     const processVolumeRow = activeInputRow('processVolume');
@@ -1247,8 +1312,8 @@ export async function generateExcelModel(formData, mcResults, results) {
   // --- Industry & Readiness (rows 3-9) ---
   sub(KF, 3, 'Industry & Readiness', 3);
   val(KF, 4, 1, 'Automation Potential');
-  fml(KF, 4, 2, 'INDEX(Lookups!B3:I12,MATCH(Inputs!B4,Lookups!A3:A12,0),MATCH(B10,Lookups!B2:I2,0))', PCT);
-  note(KF, 4, 3, '[M1] Model lookup envelope: industry × process type. Context only; do not present it as an external benchmark or a cash-flow assumption by itself.');
+  fml(KF, 4, 2, selectedCaseFormula('automationPotential', '0'), PCT);
+  note(KF, 4, 3, 'Live selected-case formula. Change a blue operating input on the matching case tab to update the automation ceiling.');
   val(KF, 5, 1, 'Industry Success Rate');
   fml(KF, 5, 2, 'VLOOKUP(Inputs!B4,Lookups!A16:B25,2,FALSE)', PCT);
   val(KF, 6, 1, 'Adoption Rate');
@@ -1306,17 +1371,17 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 27, 2, 'IF(Inputs!B19<=2,1.3,IF(Inputs!B19=3,1.1,1))', DEC);
   val(KF, 28, 1, 'Max Team');
   fml(KF, 28, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:D41,4,FALSE)', '0');
-  val(KF, 29, 1, 'Deployment Engineers (pace-adjusted)');
-  fml(KF, 29, 2, `MIN(CEILING(B25*B26*B27,1),B28)*Inputs!B${exportInputRows.deliveryCostMultiplier}`, DEC);
+  val(KF, 29, 1, 'Deployment Engineers (scope/timeline adjusted)');
+  fml(KF, 29, 2, 'MIN(CEILING(B25*B26*B27,1),B28)', DEC);
   val(KF, 30, 1, 'Impl Timeline (yrs)');
-  fml(KF, 30, 2, `CEILING(CEILING(Inputs!B24*VLOOKUP(Inputs!B19,Lookups!A29:C33,3,FALSE)*VLOOKUP(Inputs!B5,Lookups!A37:B41,2,FALSE)*IF(Inputs!B20="Yes",1,1.25),1)*Inputs!B${exportInputRows.deliveryDurationMultiplier},1)/12`, DEC);
-  val(KF, 31, 1, 'Cost to Deploy');
-  fml(KF, 31, 2, 'B29*B24*B30', DOL);
-  note(KF, 31, 3, 'Pace-adjusted deployment staffing × blended rate × timeline');
-  val(KF, 32, 1, 'PM + Infra + Training');
-  fml(KF, 32, 2, 'B31*(Lookups!B100*MAX(0.5,CEILING(B29/5,1))/B29+Lookups!B98+Lookups!B99)', DOL);
+  fml(KF, 30, 2, 'CEILING(Inputs!B24*VLOOKUP(Inputs!B19,Lookups!A29:C33,3,FALSE)*VLOOKUP(Inputs!B5,Lookups!A37:B41,2,FALSE)*IF(Inputs!B20="Yes",1,1.25),1)/12', DEC);
+  val(KF, 31, 1, 'Paced Delivery Labor (Eng. + PM)');
+  fml(KF, 31, 2, `(MIN(CEILING(B25*B27,1),B28)+MAX(0.5,CEILING(MIN(CEILING(B25*B27,1),B28)/5,1)))*B24*CEILING(6*VLOOKUP(Inputs!B19,Lookups!A29:C33,3,FALSE)*VLOOKUP(Inputs!B5,Lookups!A37:B41,2,FALSE),1)/12*Inputs!B${exportInputRows.deliveryCostMultiplier}*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)`, DOL);
+  note(KF, 31, 3, 'Web-model delivery plan: baseline engineers + PM, weighted workforce rate, baseline data/size timeline, delivery pace, and industry complexity.');
+  val(KF, 32, 1, 'Infrastructure + Training');
+  fml(KF, 32, 2, 'B31*(Lookups!B98+Lookups!B99)', DOL);
   val(KF, 33, 1, 'Computed Impl Cost');
-  fmlBold(KF, 33, 2, 'B31+B32', DOL, calcFill);
+  fmlBold(KF, 33, 2, '(B31+B32)*B83', DOL, calcFill);
   val(KF, 34, 1, 'Delivery Pace Adjustment');
   fml(KF, 34, 2, `Inputs!B${exportInputRows.deliveryCostMultiplier}`, PCT);
   note(KF, 34, 3, '[D1] Model scenario: Accelerated = 120%; Standard = 100%; Extended = 80%. [10] is contingency context only, not proof of these deltas.');
@@ -1329,36 +1394,43 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 37, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:H41,8,FALSE)', DOL);
   val(KF, 38, 1, 'Contingency');
   fml(KF, 38, 2, 'B42*Lookups!B84', DOL);
-  note(KF, 38, 3, '20% of Realistic Impl Cost');
+  note(KF, 38, 3, '10% of Realistic Impl Cost');
   val(KF, 39, 1, 'Change Management');
   fml(KF, 39, 2, 'B42*Lookups!B97', DOL);
-  note(KF, 39, 3, '15% of Realistic Impl Cost');
+  note(KF, 39, 3, '8% of Realistic Impl Cost');
   val(KF, 40, 1, 'Total Deployment One-Time');
-  fmlBold(KF, 40, 2, 'SUM(B36:B39)', DOL, calcFill);
+  fmlBold(KF, 40, 2, 'SUM(B36:B39)+SUM(B101:B104)', DOL, calcFill);
   val(KF, 41, 1, 'Data Cost Mult');
   fml(KF, 41, 2, 'VLOOKUP(Inputs!B19,Lookups!A29:D33,4,FALSE)', DEC);
   val(KF, 42, 1, 'Realistic Impl Cost');
-  fmlBold(KF, 42, 2, 'MAX(Inputs!B23*B41,B33)', DOL, calcFill);
+  fmlBold(KF, 42, 2, 'MAX(Inputs!B23*B41*B83,B33)', DOL, calcFill);
 
   // --- Ongoing AI Costs (rows 44-51) ---
   sub(KF, 44, 'Ongoing AI Costs', 3);
   val(KF, 45, 1, 'Ongoing AI Headcount');
-  fml(KF, 45, 2, 'MAX(0.5,ROUND(B29*0.25*2,0)/2)', DEC);
+  fml(KF, 45, 2, 'MAX(0.5,ROUND(B29*0.15*2,0)/2)', DEC);
   val(KF, 46, 1, 'Ongoing Labor');
   fml(KF, 46, 2, 'B45*B24', DOL);
+  // Blank optional meters preserve the web model's fallback behavior, while
+  // an entered zero remains a deliberate zero. This distinction matters for
+  // consumption and license sizing and prevents Excel from inventing volume.
+  const monthlyRequestFormula = `IF(OR(ISBLANK(Inputs!B${exportInputRows.monthlyAiRequests}),Inputs!B${exportInputRows.monthlyAiRequests}=""),Inputs!B${exportInputRows.monthlyUsageVolume},Inputs!B${exportInputRows.monthlyAiRequests})`;
+  const monthlyAgentWorkflowFormula = `IF(OR(ISBLANK(Inputs!B${exportInputRows.monthlyAgentWorkflows}),Inputs!B${exportInputRows.monthlyAgentWorkflows}=""),IF(Inputs!B37="Yes",${monthlyRequestFormula},0),Inputs!B${exportInputRows.monthlyAgentWorkflows})`;
+  const monthlyDocumentFormula = `IF(OR(ISBLANK(Inputs!B${exportInputRows.documentsPerMonth}),Inputs!B${exportInputRows.documentsPerMonth}=""),IF(Inputs!B10="internal-process-automation",Inputs!B${exportInputRows.monthlyUsageVolume},0),Inputs!B${exportInputRows.documentsPerMonth})`;
   val(KF, 47, 1, 'Consumption (Annual Variable Use)');
-  fml(KF, 47, 2, `(Inputs!B${exportInputRows.monthlyUsageVolume}+Inputs!B${exportInputRows.monthlyAgentWorkflows}*5)*IF((Inputs!B${exportInputRows.avgInputTokensPerRequest}+Inputs!B${exportInputRows.avgOutputTokensPerRequest})>0,(Inputs!B${exportInputRows.avgInputTokensPerRequest}+Inputs!B${exportInputRows.avgOutputTokensPerRequest})/1000,VLOOKUP(B10,Lookups!A56:C63,3,FALSE))*IF(Inputs!B37="Yes",2.5,1)*VLOOKUP(B10,Lookups!A56:B63,2,FALSE)*12`, DOL);
-  note(KF, 47, 3, '[C2] Variable model use. Uses measured request/token inputs when supplied; otherwise uses a model workload proxy. [11]/[29]/[36] are context, not quotes for this exact formula.');
+  fml(KF, 47, 2, `(IF(OR(Inputs!B${exportInputRows.avgInputTokensPerRequest}>0,Inputs!B${exportInputRows.avgOutputTokensPerRequest}>0),${monthlyRequestFormula}*IF(Inputs!B37="Yes",4,1)*(Inputs!B${exportInputRows.avgInputTokensPerRequest}*0.3+Inputs!B${exportInputRows.avgOutputTokensPerRequest}*15)/1000000,${monthlyRequestFormula}/1000*VLOOKUP(B10,Lookups!A56:B63,2,FALSE))+${monthlyAgentWorkflowFormula}*IF(Inputs!B37="Yes",2,0)*0.01*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)+${monthlyDocumentFormula}*0.002)*12`, DOL);
+  note(KF, 47, 3, '[C2] Request, token, agent-run, and document volume. Entered tokens activate the standard-tier token estimate (input $0.30/M after prompt-cache effect; output $15/M); a typed zero remains zero.');
   val(KF, 48, 1, 'Access (Annual Licensing)');
-  fml(KF, 48, 2, `MAX(VLOOKUP(Inputs!B5,Lookups!A37:F41,6,FALSE),MAX(1,IF(Inputs!B${exportInputRows.aiLicensedUsers}>0,Inputs!B${exportInputRows.aiLicensedUsers},Inputs!B11))*VLOOKUP(Inputs!B5,Lookups!A37:F41,6,FALSE)/MAX(1,Inputs!B11))+B42*Lookups!B88`, DOL);
+  fml(KF, 48, 2, `VLOOKUP(Inputs!B5,Lookups!A37:F41,6,FALSE)*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)*(1+Lookups!B91)+MAX(1,IF(OR(ISBLANK(Inputs!B${exportInputRows.aiLicensedUsers}),Inputs!B${exportInputRows.aiLicensedUsers}=""),Inputs!B11,Inputs!B${exportInputRows.aiLicensedUsers}))*360*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)`, DOL);
   note(KF, 48, 3, '[M1/C1] Annual license/seat access. The size/license envelope and planning allocation are model/user planning assumptions, not external benchmarks.');
   val(KF, 49, 1, 'Run: Support, Monitoring & Governance');
-  fml(KF, 49, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:I41,9,FALSE)+VLOOKUP(Inputs!B5,Lookups!A37:J41,10,FALSE)', DOL);
-  note(KF, 49, 3, '[M1/C1] Model/user planning envelope for support, monitoring, and governance; validate with the operating model.');
+  fml(KF, 49, 2, `B46+IF(Inputs!B37="Yes",VLOOKUP(Inputs!B5,Lookups!A37:N41,14,FALSE)*12,0)+B42*Lookups!B88+B105+Inputs!B${exportInputRows.employeesToRetrain}*Inputs!B${exportInputRows.employeeFullyBurdenedCost}*Lookups!B89+B42*Lookups!B90+VLOOKUP(Inputs!B5,Lookups!A37:J41,10,FALSE)*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)+B73`, DOL);
+  note(KF, 49, 3, '[M1/C1] Labor + agent infrastructure + retraining + compliance + retained-worker training + technical debt + cyber + data transfer. Validate against the operating model.');
   val(KF, 50, 1, 'Computed Ongoing');
-  fml(KF, 50, 2, 'B46+B47+B48+B49+B72+B73', DOL);
+  fml(KF, 50, 2, 'B47+B48+B49', DOL);
   val(KF, 51, 1, 'Base Ongoing Cost');
-  fmlBold(KF, 51, 2, 'MAX(Inputs!B25,B50)', DOL, calcFill);
+  fmlBold(KF, 51, 2, 'IF(OR(ISBLANK(Inputs!B25),Inputs!B25=""),B50,Inputs!B25)', DOL, calcFill);
+  note(KF, 51, 3, 'Explicit annual run-cost input. It overrides the derived planning bucket; clear it only to use the transparent computed operating-cost model.');
 
   // --- Annual Savings (rows 53-61) ---
   sub(KF, 53, 'Annual Savings', 3);
@@ -1366,16 +1438,16 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 54, 2, `B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}`, DOL);
   note(KF, 54, 3, 'Explicit redundancies only; direct employee fully burdened cost. This declared cash action is not risk-adjusted.');
   val(KF, 55, 1, 'Freed Capacity Value (Context Only)');
-  fml(KF, 55, 2, `MAX(0,(B13*Inputs!B${exportInputRows.totalEfficiencyGainPct})-(B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}))*B9`, DOL);
+  fml(KF, 55, 2, `MAX(0,(B13*B98)-(B20*Inputs!B${exportInputRows.employeeFullyBurdenedCost}))*B9`, DOL);
   note(KF, 55, 3, '[E1] Freed capacity after hard headcount savings. Planning context only; excluded from NPV, ROIC, and payback unless Finance explicitly changes the cash-flow formulas.');
   val(KF, 56, 1, 'Measured Rework Savings (Risk-Adj)');
-  fml(KF, 56, 2, `B85*Inputs!B${exportInputRows.totalEfficiencyGainPct}*B9`, DOL);
+  fml(KF, 56, 2, 'B85*B98*B9', DOL);
   note(KF, 56, 3, 'Only uses entered error counts, rework share, and cost per item');
   val(KF, 57, 1, 'Tool Replacement (Risk-Adj)');
   fml(KF, 57, 2, 'Inputs!B15*B80*B9', DOL);
   val(KF, 58, 1, 'Enhancement Savings (RA)');
-  fml(KF, 58, 2, 'B56+B57+B61', DOL);
-  note(KF, 58, 3, 'Cash savings only: measurable rework + tools + contracts. Excludes capacity value.');
+  fml(KF, 58, 2, 'B56+B57+B61+IF(AND(Inputs!B10="customer-facing-ai",Inputs!B78="Yes",B97="OK"),MIN(B81,B79*52*B12)*B9,0)', DOL);
+  note(KF, 58, 3, 'Cash savings only: measured rework + tools + contracts + Customer Service savings after the explicit evidence gate. Excludes capacity value and risk avoidance.');
   val(KF, 59, 1, 'Total Risk-Adj Savings');
   fmlBold(KF, 59, 2, 'B54+B58', DOL, calcFill);
   val(KF, 60, 1, 'Net Annual Benefit');
@@ -1406,38 +1478,41 @@ export async function generateExcelModel(formData, mcResults, results) {
   val(KF, 69, 1, 'Discount Rate');
   fml(KF, 69, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:C41,3,FALSE)', PCT);
 
-  // --- Additional Ongoing Costs (rows 71-73) ---
-  sub(KF, 71, 'Additional Ongoing Costs (included in Computed Ongoing above)', 3);
+  // --- Workforce & data cost detail (rows 71-73) ---
+  sub(KF, 71, 'Workforce & Data Cost Detail', 3);
   val(KF, 72, 1, 'Retained Talent Premium');
   fml(KF, 72, 2, 'B21*Inputs!B13*Inputs!B36', DOL);
-  note(KF, 72, 3, '[28] Retained FTEs × salary × premium rate. Treat the default as planning context and validate against the company’s retention plan.');
-  val(KF, 73, 1, 'Data Transfer Cost');
-  fml(KF, 73, 2, 'IF(Inputs!B5="Startup (1-50)",2400,IF(Inputs!B5="SMB (51-500)",9600,IF(Inputs!B5="Mid-Market (501-5,000)",36000,IF(Inputs!B5="Enterprise (5,001-50,000)",144000,480000))))', DOL);
-  note(KF, 73, 3, '[30] Model egress/ingress planning estimate. Validate against the selected cloud provider and the measured data-transfer pattern.');
+  note(KF, 72, 3, '[28] Retained FTEs × salary × premium rate. Workforce-planning context only; excluded from ongoing AI cost and the DCF.');
+  val(KF, 73, 1, 'Data Transfer & Connected Systems');
+  fml(KF, 73, 2, `IF(Inputs!B5="Startup (1-50)",2400,IF(Inputs!B5="SMB (51-500)",9600,IF(Inputs!B5="Mid-Market (501-5,000)",36000,IF(Inputs!B5="Enterprise (5,001-50,000)",144000,480000))))*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)+Inputs!B${exportInputRows.dataStoredGb}*0.12*12+Inputs!B${exportInputRows.connectedApplications}*100*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)*12`, DOL);
+  note(KF, 73, 3, '[30] Baseline data transfer + entered stored-data and connected-system run cost. Validate against the selected cloud provider and measured pattern.');
 
   // --- Archetype Detail Refinement Bridge (rows 75-82) ---
   sub(KF, 75, 'Archetype Detail Refinement', 3);
   val(KF, 76, 1, 'Has Archetype Detail?');
-  fml(KF, 76, 2, `IF(COUNTA('Archetype Detail'!B${adSummaryRow}:B${adSummaryRow + 5})>0,"Yes","No")`, null, calcFill);
-  note(KF, 76, 3, 'Detects if archetype inputs have been filled');
+  fml(KF, 76, 2, 'IF(B79>0,"Yes","No")', null, calcFill);
+  note(KF, 76, 3, 'Selected case is live when its calculated weekly workload is greater than zero.');
   val(KF, 77, 1, 'Adj Automation Potential');
-  fml(KF, 77, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow}),'Archetype Detail'!B${adSummaryRow},B4),B4)`, PCT, calcFill);
-  note(KF, 77, 3, 'Benchmark reference; final efficiency value uses the explicit Inputs efficiency-gain assumption');
+  fml(KF, 77, 2, selectedCaseFormula('automationPotential', 'B4'), PCT, calcFill);
+  note(KF, 77, 3, 'Live selected-case automation ceiling.');
   val(KF, 78, 1, 'Legacy Error Rate (not used)');
   fml(KF, 78, 2, '0', PCT, calcFill);
   note(KF, 78, 3, 'Preserved only for older workbook formulas; measurable rework is calculated below.');
   KF.getRow(78).hidden = true;
   val(KF, 79, 1, 'Adj Hours/Week');
-  fml(KF, 79, 2, 'Inputs!B12', NUM, calcFill);
-  note(KF, 79, 3, '[H1] Explicit hours per person per week; 40 is a work-calendar convention, not a benchmark.');
+  fml(KF, 79, 2, selectedCaseFormula('caseWorkloadHoursPerWeek', '0'), NUM, calcFill);
+  note(KF, 79, 3, 'Live weekly workload from the selected case tab. Used to cap any workforce claim to the work actually described.');
   val(KF, 80, 1, 'Adj Tool Replace %');
-  fml(KF, 80, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 3}),'Archetype Detail'!B${adSummaryRow + 3},VLOOKUP(B10,Lookups!A56:D63,4,FALSE)),VLOOKUP(B10,Lookups!A56:D63,4,FALSE))`, PCT, calcFill);
+  fml(KF, 80, 2, 'VLOOKUP(Inputs!B10,Lookups!A205:D208,4,FALSE)', PCT, calcFill);
   val(KF, 81, 1, 'Case Direct Savings (evidence-gated)');
-  fml(KF, 81, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 4}),'Archetype Detail'!B${adSummaryRow + 4},0),0)`, DOL, calcFill);
+  fml(KF, 81, 2, selectedCaseFormula('caseDirectSavings', '0'), DOL, calcFill);
   note(KF, 81, 3, '[M3] Direct case savings are planning context until the required operating/Finance evidence gate is passed in the core model.');
   val(KF, 82, 1, 'Case Risk Avoidance (context only)');
-  fml(KF, 82, 2, `IF(B76="Yes",IF(ISNUMBER('Archetype Detail'!B${adSummaryRow + 5}),'Archetype Detail'!B${adSummaryRow + 5},0),0)`, DOL, calcFill);
+  fml(KF, 82, 2, selectedCaseFormula('caseRiskAvoidance', '0'), DOL, calcFill);
   note(KF, 82, 3, '[M3] Historical-loss avoidance is shown for diligence context and is excluded from core NPV until Finance validates the evidence.');
+  val(KF, 83, 1, 'Case Build Complexity Multiplier');
+  fml(KF, 83, 2, selectedCaseFormula('caseBuildComplexityMultiplier', '1'), DEC, calcFill);
+  note(KF, 83, 3, 'Live selected-case build-complexity adjustment. It increases deployment cost, not the benefit claim.');
 
   // --- Measured Baseline & Workforce Outcomes (rows 84-88) ---
   sub(KF, 84, 'Measured Baseline & Workforce Outcomes', 3);
@@ -1445,14 +1520,53 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 85, 2, `Inputs!B${exportInputRows.annualMeasuredReworkCost}`, DOL);
   note(KF, 85, 3, 'Measured errors × rework share × cost per item; no blanket default');
   val(KF, 86, 1, 'Annual Freed-Up Hours');
-  fml(KF, 86, 2, `Inputs!B11*Inputs!B12*52*Inputs!B${exportInputRows.totalEfficiencyGainPct}`, NUM);
-  note(KF, 86, 3, 'Total workforce × hours/person/week × 52 × total efficiency gain');
+  fml(KF, 86, 2, 'MIN(B79,Inputs!B11*Inputs!B12)*52*B98', NUM);
+  note(KF, 86, 3, 'Selected case weekly workload (capped by staffed weekly capacity) × 52 × effective efficiency gain.');
   val(KF, 87, 1, 'Employees to Retrain');
   fml(KF, 87, 2, `Inputs!B${exportInputRows.employeesToRetrain}`, NUM);
   note(KF, 87, 3, 'Redeployed capacity; does not create a second hard headcount saving');
   val(KF, 88, 1, 'Employees to Make Redundant');
   fml(KF, 88, 2, `Inputs!B${exportInputRows.employeesToMakeRedundant}`, NUM);
   note(KF, 88, 3, 'Explicit hard headcount-savings input, capped at direct employees in B18');
+
+  // --- Case Guardrails (rows 96-98) ---
+  sub(KF, 96, 'Selected-Case Workload Guardrails', 3);
+  val(KF, 97, 1, 'Workload Guardrail');
+  fml(KF, 97, 2, 'IF(OR(B79<=0,B79>Inputs!B11*Inputs!B12*1.25),"BLOCKED","OK")', null, calcFill);
+  note(KF, 97, 3, '[M3] Blocks cash-flow savings if the selected case has no measurable workload or requires more than 125% of staffed process capacity.');
+  val(KF, 98, 1, 'Effective Efficiency Gain');
+  fml(KF, 98, 2, `IF(B97="OK",MIN(Inputs!B${exportInputRows.totalEfficiencyGainPct},B77),0)`, PCT, calcFill);
+  note(KF, 98, 3, 'The lower of the user-entered efficiency gain and the selected case’s automation ceiling; zero when the workload guardrail is blocked.');
+
+  // --- Hidden-cost and DCF parity detail (rows 100-108) ---
+  sub(KF, 100, 'Hidden Costs & DCF Schedules (included in the live cash flow)', 3);
+  val(KF, 101, 1, 'Cultural Resistance');
+  fml(KF, 101, 2, 'B42*Lookups!B85', DOL, calcFill);
+  note(KF, 101, 3, '4% of realistic implementation cost — a stated model planning assumption.');
+  val(KF, 102, 1, 'Data Cleanup');
+  fml(KF, 102, 2, 'B42*IF(Inputs!B19<=2,0.15,IF(Inputs!B19=3,0.05,0))', DOL, calcFill);
+  note(KF, 102, 3, '15% for low readiness, 5% for usable data, otherwise 0%; tied to the data-readiness input.');
+  val(KF, 103, 1, 'Integration Testing');
+  fml(KF, 103, 2, 'B42*0.05', DOL, calcFill);
+  note(KF, 103, 3, '5% of realistic implementation cost for integration and validation testing.');
+  val(KF, 104, 1, 'Productivity Dip During Change');
+  fml(KF, 104, 2, 'Inputs!B44/12*VLOOKUP(Inputs!B5,Lookups!A37:L41,12,FALSE)*VLOOKUP(Inputs!B5,Lookups!A37:M41,13,FALSE)', DOL, calcFill);
+  note(KF, 104, 3, 'Affected-workforce cost × company-size change-absorption months × temporary productivity dip rate.');
+  val(KF, 105, 1, 'Annual Compliance Component');
+  fml(KF, 105, 2, 'VLOOKUP(Inputs!B5,Lookups!A37:I41,9,FALSE)*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)', DOL, calcFill);
+  note(KF, 105, 3, 'Separately escalated 8% annually inside total operating cost, matching the web model.');
+  val(KF, 106, 1, 'Industry Wage Growth');
+  fml(KF, 106, 2, 'VLOOKUP(Inputs!B4,Lookups!A16:H25,8,FALSE)', PCT, calcFill);
+  note(KF, 106, 3, 'Industry-specific avoided-labor inflation used in the DCF benefit stream.');
+  val(KF, 107, 1, 'Model Drift Rate');
+  fml(KF, 107, 2, '0.03', PCT, calcFill);
+  note(KF, 107, 3, 'Benefits decline 3% per year without further evidence of offsetting improvement.');
+  val(KF, 108, 1, 'Compliance Cost Escalation');
+  fml(KF, 108, 2, '0.08', PCT, calcFill);
+  note(KF, 108, 3, 'Annual compliance refresh escalation used only to split the entered operating-cost total.');
+  val(KF, 109, 1, 'Run-Cost Input Check');
+  fml(KF, 109, 2, 'IF(B51<B47+B48,"REVIEW — entered annual run cost is below modeled access + consumption. Confirm a contracted all-in price, zero usage, or an input error.","OK")', null, calcFill);
+  note(KF, 109, 3, '[M3] Guidance only: the DCF honors a validated explicit annual cost rather than silently replacing it.');
 
   // --- Executive AI Cost Buckets (rows 90-95) ---
   sub(KF, 90, 'Executive AI Cost Buckets — Planning View', 3);
@@ -1550,19 +1664,19 @@ export async function generateExcelModel(formData, mcResults, results) {
   val(SU, 33, 1, 'AI Project IRR');
   fml(SU, 33, 2, "'P&L & Cash Flow'!B28", PCT);
   val(SU, 34, 1, 'vs Illustrative Return Hurdle (8%) [M1]');
-  fml(SU, 34, 2, "'P&L & Cash Flow'!B28-0.08", PCT);
+  fml(SU, 34, 2, "IFERROR('P&L & Cash Flow'!B28-0.08,\"N/A\")", PCT);
   note(SU, 34, 3, 'Editable model comparator, not a market benchmark. Replace with the company’s approved return hurdle.');
   val(SU, 35, 1, 'vs Illustrative M&A Hurdle (15%) [M1]');
-  fml(SU, 35, 2, "'P&L & Cash Flow'!B28-0.15", PCT);
+  fml(SU, 35, 2, "IFERROR('P&L & Cash Flow'!B28-0.15,\"N/A\")", PCT);
   note(SU, 35, 3, 'Editable model comparator, not a standard M&A threshold. Replace with the company’s approved hurdle.');
   val(SU, 36, 1, 'vs Illustrative Low-Risk Rate (4.5%) [M1]');
-  fml(SU, 36, 2, "'P&L & Cash Flow'!B28-0.045", PCT);
+  fml(SU, 36, 2, "IFERROR('P&L & Cash Flow'!B28-0.045,\"N/A\")", PCT);
   note(SU, 36, 3, 'Editable model comparator, not a current Treasury quote. Use the current approved reference rate if relevant.');
 
   // --- Cost of Inaction (rows 38-41) ---
   sub(SU, 38, 'Cost of Inaction (Do-Nothing Scenario)', 4);
   val(SU, 39, 1, '5-Year Do-Nothing Cost');
-  fml(SU, 39, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+Lookups!B86)^0+(1+Lookups!B86)^1+(1+Lookups!B86)^2+(1+Lookups!B86)^3+(1+Lookups!B86)^4)", DOL);
+  fml(SU, 39, 2, "'Key Formulas'!B13*(VLOOKUP(Inputs!B4,Lookups!A16:C25,3,FALSE)+VLOOKUP(Inputs!B4,Lookups!A16:D25,4,FALSE))*((1+'Key Formulas'!B106)^0+(1+'Key Formulas'!B106)^1+(1+'Key Formulas'!B106)^2+(1+'Key Formulas'!B106)^3+(1+'Key Formulas'!B106)^4)", DOL);
   note(SU, 39, 3, 'Competitive penalty + compliance risk over 5 years');
   val(SU, 40, 1, 'Net Advantage of AI Project');
   fml(SU, 40, 2, "B39+'P&L & Cash Flow'!B27", DOL);
@@ -1585,44 +1699,44 @@ export async function generateExcelModel(formData, mcResults, results) {
   colorLegend(PL, 2);
   tableHeaders(PL, 3, ['', 'FY 0', 'FY 1', 'FY 2', 'FY 3', 'FY 4', 'FY 5']);
 
-  // --- Parameters (rows 4-9) ---
+  // The web engine separately escalates the compliance portion of the entered
+  // annual run-cost estimate.  Reuse the exact expression in the DCF and the
+  // scenario table so a validated `ongoingAnnualCost` is never overridden.
+  const modeledOngoingCostFormula = (baseCostReference, year) =>
+    `(${baseCostReference}-'Key Formulas'!$B$105)*Lookups!$F$${103 + year}+'Key Formulas'!$B$105*(1+'Key Formulas'!$B$108)^${year - 1}`;
+
+  // --- Parameters (rows 4-10) ---
   sub(PL, 4, 'PARAMETERS', 7);
   val(PL, 5, 1, 'Adoption Ramp');
   for (let y = 1; y <= 5; y++) fml(PL, 5, y + 2, `Lookups!D${103 + y}`, PCT);
   val(PL, 6, 1, 'Wage Growth Factor');
-  for (let y = 1; y <= 5; y++) fml(PL, 6, y + 2, `(1+Lookups!B86)^${y - 1}`, DEC);
+  for (let y = 1; y <= 5; y++) fml(PL, 6, y + 2, `(1+'Key Formulas'!$B$106)^${y - 1}`, DEC);
   val(PL, 7, 1, 'Severance Schedule (year)');
   for (let y = 1; y <= 5; y++) fml(PL, 7, y + 2, `Lookups!B${103 + y}`, PCT);
   val(PL, 8, 1, 'Cumulative Workforce Savings');
   for (let y = 1; y <= 5; y++) fml(PL, 8, y + 2, `Lookups!C${103 + y}`, PCT);
   val(PL, 9, 1, 'Cost Escalation Factor');
-  for (let y = 1; y <= 5; y++) fml(PL, 9, y + 2, `Lookups!F${103 + y}`, DEC);
+  for (let y = 1; y <= 5; y++) fml(PL, 9, y + 2,
+    `IF('Key Formulas'!$B$51<>0,(${modeledOngoingCostFormula("'Key Formulas'!$B$51", y)})/'Key Formulas'!$B$51,0)`, DEC);
+  val(PL, 10, 1, 'Model Drift Factor');
+  for (let y = 1; y <= 5; y++) fml(PL, 10, y + 2, `(1-'Key Formulas'!$B$107)^${y - 1}`, DEC);
 
   // --- Cash Inflows (rows 11-14) ---
   sub(PL, 11, 'CASH INFLOWS', 7);
   val(PL, 12, 1, 'Enhancement Savings');
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
-    fml(PL, 12, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseEnhancementSavings, y)
-        : `'Key Formulas'!B58*${c}5*${c}6`, DOL);
+    fml(PL, 12, y + 2, `'Key Formulas'!B58*${c}5*${c}6*${c}10`, DOL);
   }
   val(PL, 13, 1, 'Headcount Savings');
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
-    fml(PL, 13, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseHeadcountSavings, y)
-        : `'Key Formulas'!B54*${c}8*${c}6`, DOL);
+    fml(PL, 13, y + 2, `'Key Formulas'!B54*${c}8*${c}6*${c}10`, DOL);
   }
   val(PL, 14, 1, 'GROSS SAVINGS');
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
-    fmlBold(PL, 14, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseGrossSavings, y)
-        : `${c}12+${c}13`, DOL, calcFill);
+    fmlBold(PL, 14, y + 2, `${c}12+${c}13`, DOL, calcFill);
   }
 
   // --- Cash Outflows (rows 16-18) ---
@@ -1630,33 +1744,20 @@ export async function generateExcelModel(formData, mcResults, results) {
   val(PL, 17, 1, 'Severance Cost (50% / 30% / 20%)');
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
-    fml(PL, 17, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseSeveranceCost, y)
-        : `'Key Formulas'!B67*${c}7`, DOL, warnFill);
+    fml(PL, 17, y + 2, `'Key Formulas'!B67*${c}7`, DOL, warnFill);
   }
   val(PL, 18, 1, 'Ongoing AI Cost');
   for (let y = 1; y <= 5; y++) {
-    const c = String.fromCharCode(66 + y);
-    fml(PL, 18, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseOngoingCost, y)
-        : `'Key Formulas'!B51*${c}9`, DOL, warnFill);
+    fml(PL, 18, y + 2, modeledOngoingCostFormula("'Key Formulas'!$B$51", y), DOL, warnFill);
   }
 
   // --- Net Cash Flow (row 20) ---
   sub(PL, 20, 'NET CASH FLOWS', 7);
   val(PL, 21, 1, 'NET CASH FLOW'); PL.getRow(21).getCell(1).font = fontBold;
-  fmlBold(PL, 21, 2,
-    hasEngineSnapshot
-      ? engineBaseCashFlowRef(engineSnapshotRows.baseNetCashFlow, 0)
-      : "-'Key Formulas'!B64-'Key Formulas'!B62", DOL, warnFill);
+  fmlBold(PL, 21, 2, "-'Key Formulas'!B64-'Key Formulas'!B62", DOL, warnFill);
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
-    fmlBold(PL, 21, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseNetCashFlow, y)
-        : `${c}14-${c}17-${c}18`, DOL, calcFill);
+    fmlBold(PL, 21, y + 2, `${c}14-${c}17-${c}18`, DOL, calcFill);
   }
 
   // --- DCF (rows 22-25) ---
@@ -1673,29 +1774,23 @@ export async function generateExcelModel(formData, mcResults, results) {
     cell.font = goldFont;
   }
   val(PL, 24, 1, 'CUMULATIVE');
-  fml(PL, 24, 2,
-    hasEngineSnapshot
-      ? engineBaseCashFlowRef(engineSnapshotRows.baseCumulativeCashFlow, 0)
-      : 'B21', DOL);
+  fml(PL, 24, 2, 'B21', DOL);
   for (let y = 1; y <= 5; y++) {
     const c = String.fromCharCode(66 + y);
     const p = String.fromCharCode(65 + y);
-    fml(PL, 24, y + 2,
-      hasEngineSnapshot
-        ? engineBaseCashFlowRef(engineSnapshotRows.baseCumulativeCashFlow, y)
-        : `${p}24+${c}21`, DOL);
+    fml(PL, 24, y + 2, `${p}24+${c}21`, DOL);
   }
 
   // --- Financial Metrics (rows 27-30) ---
   sub(PL, 26, 'FINANCIAL METRICS', 7);
   val(PL, 27, 1, 'Net Present Value (NPV)'); PL.getRow(27).getCell(1).font = fontBold;
-  { const cell = PL.getRow(27).getCell(2); cell.value = { formula: hasEngineSnapshot ? engineScenarioRef(engineSnapshotRows.npv, 'base') : 'SUM(B23:G23)' }; cell.numFmt = DOL; cell.fill = goldFill; cell.font = goldFont; }
+  { const cell = PL.getRow(27).getCell(2); cell.value = { formula: 'SUM(B23:G23)' }; cell.numFmt = DOL; cell.fill = goldFill; cell.font = goldFont; }
   val(PL, 28, 1, 'IRR'); PL.getRow(28).getCell(1).font = fontBold;
-  { const cell = PL.getRow(28).getCell(2); cell.value = { formula: hasEngineSnapshot ? engineScenarioRef(engineSnapshotRows.irr, 'base') : 'IFERROR(MIN(MAX(IRR(B21:G21),Lookups!B96*-1),Lookups!B96),"N/A")' }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
+  { const cell = PL.getRow(28).getCell(2); cell.value = { formula: 'IFERROR(MIN(MAX(IRR(B21:G21),Lookups!B96*-1),Lookups!B96),"N/A")' }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
   val(PL, 29, 1, 'Payback (months)'); PL.getRow(29).getCell(1).font = fontBold;
-  { const cell = PL.getRow(29).getCell(2); cell.value = { formula: hasEngineSnapshot ? engineScenarioRef(engineSnapshotRows.payback, 'base') : 'IF(B24>=0,0,IF(C24>=0,ROUND(-B24/C21*12,0),IF(D24>=0,ROUND(12+(-C24/D21*12),0),IF(E24>=0,ROUND(24+(-D24/E21*12),0),IF(F24>=0,ROUND(36+(-E24/F21*12),0),IF(G24>=0,ROUND(48+(-F24/G21*12),0),61))))))' }; cell.numFmt = '0'; cell.fill = goldFill; cell.font = goldFont; }
+  { const cell = PL.getRow(29).getCell(2); cell.value = { formula: 'IF(B24>=0,0,IF(C24>=0,ROUND(-B24/C21*12,0),IF(D24>=0,ROUND(12+(-C24/D21*12),0),IF(E24>=0,ROUND(24+(-D24/E21*12),0),IF(F24>=0,ROUND(36+(-E24/F21*12),0),IF(G24>=0,ROUND(48+(-F24/G21*12),0),61))))))' }; cell.numFmt = '0'; cell.fill = goldFill; cell.font = goldFont; }
   val(PL, 30, 1, 'ROIC'); PL.getRow(30).getCell(1).font = fontBold;
-  { const cell = PL.getRow(30).getCell(2); cell.value = { formula: hasEngineSnapshot ? engineScenarioRef(engineSnapshotRows.roic, 'base') : "(SUM(C21:G21)-'Key Formulas'!B64-'Key Formulas'!B62)/'Key Formulas'!B68" }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
+  { const cell = PL.getRow(30).getCell(2); cell.value = { formula: "(SUM(C21:G21)-'Key Formulas'!B64-'Key Formulas'!B62)/'Key Formulas'!B68" }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
 
   // --- ROIC Calculation Walkthrough (rows 32-38) ---
   sub(PL, 32, 'ROIC CALCULATION WALKTHROUGH', 7);
@@ -1709,25 +1804,17 @@ export async function generateExcelModel(formData, mcResults, results) {
   fmlBold(PL, 35, 2, 'B33-B34', DOL, calcFill);
   note(PL, 35, 3, 'A - B');
   val(PL, 36, 1, 'D. Total Capital Deployed');
-  fml(PL, 36, 2,
-    hasEngineSnapshot
-      ? engineScenarioRef(engineSnapshotRows.totalInvestment, 'base')
-      : "'Key Formulas'!B68", DOL);
+  fml(PL, 36, 2, "'Key Formulas'!B68", DOL);
   note(PL, 36, 3, 'Cost to Deploy + Contract Cancellation + Severance');
   val(PL, 37, 1, 'E. Net Return');
-  fmlBold(PL, 37, 2,
-    hasEngineSnapshot
-      ? engineScenarioRef(engineSnapshotRows.netReturn, 'base')
-      : "B35-'Key Formulas'!B64-'Key Formulas'!B62", DOL, calcFill);
+  fmlBold(PL, 37, 2, "B35-'Key Formulas'!B64-'Key Formulas'!B62", DOL, calcFill);
   note(PL, 37, 3, 'C - Cost to Deploy - Contract Cancellation');
   val(PL, 38, 1, 'F. ROIC = E / D'); PL.getRow(38).getCell(1).font = fontBold;
-  { const cell = PL.getRow(38).getCell(2); cell.value = { formula: hasEngineSnapshot ? engineScenarioRef(engineSnapshotRows.roic, 'base') : 'IF(B36>0,B37/B36,0)' }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
+  { const cell = PL.getRow(38).getCell(2); cell.value = { formula: 'IF(B36>0,B37/B36,0)' }; cell.numFmt = PCT; cell.fill = goldFill; cell.font = goldFont; }
   note(PL, 38, 3, 'Net Return / Total Capital Deployed');
 
   // ROIC note
-  note(PL, 40, 1, hasEngineSnapshot
-    ? 'P&L cash flows and headline metrics are linked to the core calculation engine export snapshot. Change inputs in the web model and re-export to refresh them.'
-    : 'ROIC measures total net profit relative to total capital invested. A positive ROIC means the project returns more than it costs.');
+  note(PL, 40, 1, 'This is a live Excel DCF. Edit blue inputs on Inputs or the selected case tab; formulas recalculate P&L, NPV, IRR, payback, and ROIC.');
   PL.mergeCells(40, 1, 40, 7);
   printSetup(PL);
 
@@ -1747,23 +1834,19 @@ export async function generateExcelModel(formData, mcResults, results) {
   sub(SE, 6, 'Year-by-Year Net Cash Flows', 4);
   val(SE, 7, 1, 'FY 0');
   for (let s = 0; s < 3; s++) {
-    const scenario = engineScenarioKeys[s];
-    fml(SE, 7, s + 2,
-      hasEngineSnapshot
-        ? engineScenarioCashFlowRef(scenario, 0)
-        : "-'Key Formulas'!B64-'Key Formulas'!B62", DOL);
+    fml(SE, 7, s + 2, "-'Key Formulas'!B64-'Key Formulas'!B62", DOL);
   }
 
   for (let y = 1; y <= 5; y++) {
     val(SE, 7 + y, 1, `FY ${y}`);
     for (let s = 0; s < 3; s++) {
       const m = `$${String.fromCharCode(66 + s)}$4`;
-      const f = `('Key Formulas'!$B$58*Lookups!$D$${103 + y}*${m}*(1+Lookups!$B$86)^${y - 1}` +
-        `+'Key Formulas'!$B$54*Lookups!$C$${103 + y}*${m}*(1+Lookups!$B$86)^${y - 1})` +
+      const benefitGrowth = `*(1+'Key Formulas'!$B$106)^${y - 1}*(1-'Key Formulas'!$B$107)^${y - 1}`;
+      const f = `('Key Formulas'!$B$58*Lookups!$D$${103 + y}*${m}${benefitGrowth}` +
+        `+'Key Formulas'!$B$54*Lookups!$C$${103 + y}*${m}${benefitGrowth})` +
         `-'Key Formulas'!$B$67*Lookups!$B$${103 + y}` +
-        `-'Key Formulas'!$B$51*Lookups!$F$${103 + y}`;
-      fml(SE, 7 + y, s + 2,
-        hasEngineSnapshot ? engineScenarioCashFlowRef(engineScenarioKeys[s], y) : f, DOL);
+        `-${modeledOngoingCostFormula("'Key Formulas'!$B$51", y)}`;
+      fml(SE, 7 + y, s + 2, f, DOL);
     }
   }
 
@@ -1773,27 +1856,21 @@ export async function generateExcelModel(formData, mcResults, results) {
   for (let s = 0; s < 3; s++) {
     const c = String.fromCharCode(66 + s);
     fml(SE, 14, s + 2,
-      hasEngineSnapshot
-        ? engineScenarioRef(engineSnapshotRows.npv, engineScenarioKeys[s])
-        : `${c}7+NPV('Key Formulas'!B69,${c}8:${c}12)`, DOL,
+      `${c}7+NPV('Key Formulas'!B69,${c}8:${c}12)`, DOL,
       s === 0 ? warnFill : s === 2 ? resultFill : calcFill);
   }
   val(SE, 15, 1, 'IRR');
   for (let s = 0; s < 3; s++) {
     const c = String.fromCharCode(66 + s);
     fml(SE, 15, s + 2,
-      hasEngineSnapshot
-        ? engineScenarioRef(engineSnapshotRows.irr, engineScenarioKeys[s])
-        : `IFERROR(MIN(MAX(IRR(${c}7:${c}12),Lookups!B96*-1),Lookups!B96),"N/A")`, PCT,
+      `IFERROR(MIN(MAX(IRR(${c}7:${c}12),Lookups!B96*-1),Lookups!B96),"N/A")`, PCT,
       s === 0 ? warnFill : s === 2 ? resultFill : calcFill);
   }
   val(SE, 16, 1, 'ROIC');
   for (let s = 0; s < 3; s++) {
     const c = String.fromCharCode(66 + s);
     fml(SE, 16, s + 2,
-      hasEngineSnapshot
-        ? engineScenarioRef(engineSnapshotRows.roic, engineScenarioKeys[s])
-        : `MIN(MAX((SUM(${c}8:${c}12)-'Key Formulas'!B64-'Key Formulas'!B62)/'Key Formulas'!B68,Lookups!B95*-1),Lookups!B95)`, PCT,
+      `MIN(MAX((SUM(${c}8:${c}12)-'Key Formulas'!B64-'Key Formulas'!B62)/'Key Formulas'!B68,Lookups!B95*-1),Lookups!B95)`, PCT,
       s === 0 ? warnFill : s === 2 ? resultFill : calcFill);
   }
   val(SE, 17, 1, 'Payback (months)');
@@ -1801,24 +1878,17 @@ export async function generateExcelModel(formData, mcResults, results) {
     const c = String.fromCharCode(66 + s);
     const cu0 = `${c}7`, cu1 = `${c}7+${c}8`, cu2 = `${cu1}+${c}9`, cu3 = `${cu2}+${c}10`, cu4 = `${cu3}+${c}11`, cu5 = `${cu4}+${c}12`;
     fml(SE, 17, s + 2,
-      hasEngineSnapshot
-        ? engineScenarioRef(engineSnapshotRows.payback, engineScenarioKeys[s])
-        : `IF(${cu0}>=0,0,IF(${cu1}>=0,ROUND(-${cu0}/${c}8*12,0),IF(${cu2}>=0,ROUND(12+(-${cu1})/${c}9*12,0),IF(${cu3}>=0,ROUND(24+(-${cu2})/${c}10*12,0),IF(${cu4}>=0,ROUND(36+(-${cu3})/${c}11*12,0),IF(${cu5}>=0,ROUND(48+(-${cu4})/${c}12*12,0),61))))))`,
+      `IF(${cu0}>=0,0,IF(${cu1}>=0,ROUND(-${cu0}/${c}8*12,0),IF(${cu2}>=0,ROUND(12+(-${cu1})/${c}9*12,0),IF(${cu3}>=0,ROUND(24+(-${cu2})/${c}10*12,0),IF(${cu4}>=0,ROUND(36+(-${cu3})/${c}11*12,0),IF(${cu5}>=0,ROUND(48+(-${cu4})/${c}12*12,0),61))))))`,
       '0', s === 0 ? warnFill : s === 2 ? resultFill : calcFill);
   }
   val(SE, 18, 1, '5-Yr Total Net');
   for (let s = 0; s < 3; s++) {
     const c = String.fromCharCode(66 + s);
     fml(SE, 18, s + 2,
-      hasEngineSnapshot
-        ? engineScenarioRef(engineSnapshotRows.totalNetCashFlow, engineScenarioKeys[s])
-        : `SUM(${c}8:${c}12)`, DOL, s === 0 ? warnFill : s === 2 ? resultFill : calcFill);
+      `SUM(${c}8:${c}12)`, DOL, s === 0 ? warnFill : s === 2 ? resultFill : calcFill);
   }
   val(SE, 19, 1, 'Expected NPV (25/50/25)');
-  fmlBold(SE, 19, 2,
-    hasEngineSnapshot
-      ? engineRef(engineSnapshotRows.expectedNpv, 2)
-      : 'B14*0.25+C14*0.5+D14*0.25', DOL);
+  fmlBold(SE, 19, 2, 'B14*0.25+C14*0.5+D14*0.25', DOL);
 
   // --- Tornado Analysis (rows 21-35) ---
   sub(SE, 21, 'TORNADO ANALYSIS — NPV IMPACT BY VARIABLE', 8);
@@ -3022,13 +3092,6 @@ export async function generateExcelModel(formData, mcResults, results) {
   // Calculation → Footnotes. Only actual model-linked inputs and formulas
   // appear here; broad illustrative ranges are intentionally excluded.
   // ===================================================================
-  const ARCHETYPE_TAB_NAMES = {
-    'internal-process-automation': 'Assumptions - Process',
-    'customer-facing-ai':         'Assumptions - Customer',
-    'data-analytics-automation':  'Assumptions - Analytics',
-    'risk-compliance-legal-ai':   'Assumptions - Compliance',
-  };
-
   const archetypeSheets = [];
 
   for (const schema of supportedArchetypeSchemas) {
@@ -3050,19 +3113,15 @@ export async function generateExcelModel(formData, mcResults, results) {
     colorLegend(ws, r);
     r += 2;
 
-    // Active indicator
-    if (isActive) {
-      const activeRow = ws.getRow(r);
-      activeRow.getCell(1).value = '\u2713 ACTIVE — This use case is selected in your model';
-      activeRow.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
-      activeRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
-      ws.mergeCells(r, 1, r, 4);
-    } else {
-      const activeRow = ws.getRow(r);
-      activeRow.getCell(1).value = 'Not active — select this use case on Inputs (row 10) to activate';
-      activeRow.getCell(1).font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF999999' } };
-      ws.mergeCells(r, 1, r, 4);
-    }
+    // This status is formula-driven so changing Inputs!B10 switches the
+    // central engine immediately; it is not a message frozen at export time.
+    const activeRow = ws.getRow(r);
+    activeRow.getCell(1).value = {
+      formula: `IF(Inputs!$B$10="${schema.id}","✓ ACTIVE — This use case drives Key Formulas, P&L, Summary, and sensitivity.","Not active — select this use case on Inputs (row 10) to activate.")`,
+    };
+    activeRow.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF2E7D32' } };
+    activeRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+    ws.mergeCells(r, 1, r, 4);
     r += 2;
 
     // 1. Use case definition
@@ -3094,8 +3153,11 @@ export async function generateExcelModel(formData, mcResults, results) {
 
     for (const input of schema.inputs) {
       const cellValue = userValues[input.key] ?? inputDefaults[input.key] ?? input.default;
-      const fill = isActive ? inputFill : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
-      const cellFont = isActive ? inputFont : { name: 'Calibri', size: 10, color: { argb: 'FF999999' } };
+      // Every case keeps its own blue, unlocked input cells.  Analysts can
+      // maintain all four cases, then use Inputs!B10 to select the live DCF
+      // without copying values into a hidden or static calculation layer.
+      const fill = inputFill;
+      const cellFont = inputFont;
 
       val(ws, r, 1, displayArchetypeInputLabel(input));
       ws.getRow(r).getCell(1).font = fontBold;
@@ -3104,6 +3166,11 @@ export async function generateExcelModel(formData, mcResults, results) {
       vCell.value = cellValue;
       vCell.font = cellFont;
       vCell.fill = fill;
+      vCell.protection = { locked: false };
+      vCell.dataValidation = {
+        type: 'decimal', operator: 'between', formulae: [input.min ?? 0, input.max ?? 10000000],
+        allowBlank: false, showErrorMessage: true,
+      };
       if (input.type === 'percent') vCell.numFmt = PCT;
       else if (input.format === '$#,##0') vCell.numFmt = DOL;
       else vCell.numFmt = input.format || NUM;
@@ -3155,15 +3222,16 @@ export async function generateExcelModel(formData, mcResults, results) {
       val(ws, r, 1, mapping.mapsTo);
       ws.getRow(r).getCell(1).font = greenFontBold;
 
-      // Compute the value
-      const merged = { ...inputDefaults, ...userValues };
-      try {
-        const computed = mapping.jsMap(merged);
-        const mFmt = mappingNumberFormat(mapping.mapsTo);
-        val(ws, r, 2, computed, mFmt, calcFill);
-      } catch {
-        val(ws, r, 2, 'N/A', null, calcFill);
-      }
+      // Formulas reference the case tab's editable blue cells.  Do not write
+      // a JavaScript-calculated snapshot here: this cell is one of the live
+      // links used by the selected-case engine.
+      const caseInputReferences = Object.fromEntries(schema.inputs.map((input, inputIndex) => [
+        input.key,
+        `B${CASE_INPUT_START_ROW + inputIndex}`,
+      ]));
+      const liveFormula = (mapping.excelFormula || '0').replace(/\{([^}]+)\}/g,
+        (_match, key) => caseInputReferences[key] || '0');
+      fml(ws, r, 2, liveFormula, mappingNumberFormat(mapping.mapsTo), calcFill);
 
       ws.getRow(r).getCell(3).value = mapping.excelFormula || '';
       ws.getRow(r).getCell(3).font = { name: 'Calibri', size: 9, color: { argb: 'FF2E7D32' } };
@@ -3215,6 +3283,13 @@ export async function generateExcelModel(formData, mcResults, results) {
     { ws: SF, name: 'Sources & Footnotes' },
     ...archetypeSheets,
   ];
+
+  // Final presentation pass happens after every tab has been populated. It
+  // applies number-format normalization, consistent label/value alignment,
+  // and a bounded print area to every generated tab (including hidden
+  // Lookups), without touching a cell's value, formula, color, or protection.
+  [...allSheets.map(({ ws }) => ws), L].forEach(normalizeWorksheetPresentation);
+
   for (const { ws, name } of allSheets) {
     if (!includedTabs.includes(name)) {
       ws.state = 'hidden';

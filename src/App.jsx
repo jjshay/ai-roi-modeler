@@ -285,7 +285,6 @@ async function saveModelToAPI(formData) {
 export default function App() {
   const [screen, setScreen] = useState('landing'); // landing | wizard | analyzing | results
   const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
-  const [modelId, setModelId] = useState(null);
   const initialLoadDone = useRef(false);
 
   // Restore from share token (/share/:token) or URL hash on initial load
@@ -339,7 +338,6 @@ export default function App() {
     // Try API-based short URL first
     const saved = await saveModelToAPI(formData);
     if (saved?.shareToken) {
-      setModelId(saved.id);
       const url = `${window.location.origin}/share/${saved.shareToken}`;
       navigator.clipboard.writeText(url).catch(() => {});
       return url;
@@ -352,7 +350,6 @@ export default function App() {
   }, [formData]);
   const handleStartOver = useCallback(() => {
     setFormData(DEFAULT_FORM_DATA);
-    setModelId(null);
     setScreen('landing');
   }, []);
 

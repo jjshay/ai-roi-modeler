@@ -6,6 +6,11 @@ import { AI_MATURITY_PREMIUM } from '../../logic/benchmarks';
 import { formatCurrency, formatPercent, formatCompact } from '../../utils/formatters';
 import { getOutputTier, tierShows, AUTO_EXPAND } from '../../utils/outputTier';
 import { getValueBreakdownCategories, getValueBreakdownTotals } from './ValueBreakdown';
+import {
+  buildTwoDriverSensitivityMatrix,
+  getCaseSensitivityConfig,
+  getSensitivityLeverLabel,
+} from './sensitivityMatrix';
 
 // ---------------------------------------------------------------------------
 // Interactive driver configuration — maps lever labels → formData fields
@@ -17,6 +22,14 @@ const LEVER_FIELD_MAP = {
   'Automation Potential':{ path: 'assumptions.automationPotential', type: 'percent', min: 0.10, max: 0.95, step: 0.01 },
   'Implementation Cost': { path: 'implementationBudget', type: 'currency', min: 0, max: 50000000, step: 10000 },
   'Ongoing Annual Cost': { path: 'ongoingAnnualCost', type: 'currency', min: 0, max: 10000000, step: 5000 },
+};
+
+// The wizard now collects the employee / contractor mix directly. Keep the
+// result page honest: these legacy aggregate levers are shown as calculated
+// context, not editable substitutes for the source-of-truth workforce inputs.
+const WORKFORCE_LEVER_LABELS = {
+  'Team Size': 'Current process workforce',
+  'Avg Cost per Person': 'Blended annual workforce cost',
 };
 
 function getNestedValue(obj, path) {
@@ -63,10 +76,12 @@ export function buildSavingsBuckets(valueBreakdown = {}, scale = 1) {
 // ---------------------------------------------------------------------------
 // Tooltip: cost buildup for each driver
 // ---------------------------------------------------------------------------
-function LeverTooltip({ lever, results, formData }) {
+function LeverTooltip({ lever, displayLabel, results, formData }) {
   const vb = results.valueBreakdown;
   const ai = results.aiCostModel;
   const assumptions = results.executiveSummary?.keyAssumptions;
+  const workforce = results.currentState?.workforceMix;
+  const usesWorkforceMix = Boolean(workforce?.hasWorkforceMix);
 
   const buildupLines = useMemo(() => {
     const lines = [];
@@ -84,14 +99,22 @@ function LeverTooltip({ lever, results, formData }) {
         lines.push(`5-yr ongoing: ${formatCompact(ai?.totalOngoing5Year || 0)}`);
         break;
       case 'Avg Cost per Person':
-        lines.push(`Team: ${formData.teamSize} × ${formatCurrency(formData.avgSalary || 0)}`);
-        lines.push(`Annual labor: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0))}`);
-        lines.push(`Rework cost: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0) * (formData.errorRate || 0.10))}/yr`);
+        if (usesWorkforceMix) {
+          lines.push(`Direct employees: ${workforce.directEmployeeCount} × ${formatCurrency(workforce.employeeFullyBurdenedCost || 0)}`);
+          lines.push(`Contractors: ${workforce.offshoreContractorCount} × ${formatCurrency(workforce.contractorFullyBurdenedCost || 0)}`);
+          lines.push(`Annual headcount cost: ${formatCompact(workforce.totalAnnualHeadcountCost || 0)}`);
+        } else {
+          lines.push(`Team: ${formData.teamSize} × ${formatCurrency(formData.avgSalary || 0)}`);
+          lines.push(`Annual labor: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0))}`);
+          lines.push(`Rework cost: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0) * (formData.errorRate || 0.10))}/yr`);
+        }
         break;
       case 'Team Size':
-        lines.push(`Annual labor: ${formatCompact((formData.teamSize || 0) * (formData.avgSalary || 0))}`);
+        lines.push(`People doing this work: ${results.currentState?.totalHeadcount ?? formData.teamSize}`);
+        lines.push(`Annual headcount cost: ${formatCompact(workforce?.totalAnnualHeadcountCost ?? ((formData.teamSize || 0) * (formData.avgSalary || 0)))}`);
+        lines.push(`Measured workload: ${formatCompact(results.caseEconomics?.caseWorkloadHoursPerWeek || 0)} hours/week`);
         lines.push(`Automatable: ${formatPercent(assumptions?.automationPotential || 0)}`);
-        lines.push(`Potential headcount: ${Math.round((formData.teamSize || 0) * (assumptions?.automationPotential || 0))} FTEs`);
+        lines.push(`Potential capacity: ${Math.round(((results.currentState?.totalHeadcount ?? formData.teamSize ?? 0) * (assumptions?.automationPotential || 0)))} FTEs`);
         break;
       case 'Ongoing Annual Cost':
         lines.push(`Base ongoing: ${formatCompact(ai?.baseAnnualOngoing || 0)}/yr`);
@@ -107,11 +130,11 @@ function LeverTooltip({ lever, results, formData }) {
     }
     lines.push(`Swing: ${formatCompact(lever.npvSwing)}`);
     return lines;
-  }, [lever, vb, ai, formData, results, assumptions]);
+  }, [lever, vb, ai, formData, results, assumptions, workforce, usesWorkforceMix]);
 
   return (
     <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-gray-900/95 backdrop-blur-xl text-white text-xs rounded-2xl shadow-2xl shadow-black/10 px-4 py-3 pointer-events-none">
-      <p className="font-medium mb-1.5 text-white/60 tracking-wide uppercase text-[10px]">{lever.label}</p>
+      <p className="font-medium mb-1.5 text-white/60 tracking-wide uppercase text-[10px]">{displayLabel || lever.label}</p>
       {buildupLines.map((line, i) => (
         <p key={i} className="text-white/80 leading-relaxed">{line}</p>
       ))}
@@ -123,7 +146,7 @@ function LeverTooltip({ lever, results, formData }) {
 // ---------------------------------------------------------------------------
 // Inline editable driver input
 // ---------------------------------------------------------------------------
-function DriverInput({ lever, config, currentValue, onChange }) {
+function DriverInput({ lever: _lever, config, currentValue, onChange }) {
   const [editing, setEditing] = useState(false);
   const [localVal, setLocalVal] = useState('');
   const inputRef = useRef(null);
@@ -190,7 +213,7 @@ function DriverInput({ lever, config, currentValue, onChange }) {
   );
 }
 
-function DriverCard({ index, lever, config, currentValue, results, formData, leverInputDisplay, onValueChange }) {
+function DriverCard({ index, lever, displayLabel, config, currentValue, results, formData, leverInputDisplay, onValueChange }) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -206,7 +229,7 @@ function DriverCard({ index, lever, config, currentValue, results, formData, lev
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-gray-900 text-white text-[10px] font-semibold">{index + 1}</span>
-          <span className="text-gray-900 font-medium text-sm tracking-tight">{lever.label}</span>
+          <span className="text-gray-900 font-medium text-sm tracking-tight">{displayLabel || lever.label}</span>
         </div>
         <span className="font-mono text-gray-500 text-xs">{formatCompact(lever.npvSwing)} swing</span>
       </div>
@@ -233,7 +256,7 @@ function DriverCard({ index, lever, config, currentValue, results, formData, lev
             exit={{ opacity: 0, y: 5 }}
             transition={{ duration: 0.15 }}
           >
-            <LeverTooltip lever={lever} results={results} formData={formData} />
+            <LeverTooltip lever={lever} displayLabel={displayLabel} results={results} formData={formData} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -328,7 +351,7 @@ function SimpleBarChart({ projections, delay = 0 }) {
   );
 }
 
-function TornadoChart({ extendedSensitivity, baseNPV }) {
+function TornadoChart({ extendedSensitivity, baseNPV, sensitivityConfig }) {
   // Sort by impact range (largest swing first)
   const sorted = [...extendedSensitivity].sort((a, b) => {
     const rangeA = Math.abs(a.npvHigh - a.npvLow);
@@ -350,6 +373,7 @@ function TornadoChart({ extendedSensitivity, baseNPV }) {
   return (
     <div className="space-y-2">
       {sorted.map((row, i) => {
+        const label = getSensitivityLeverLabel(row.label, sensitivityConfig);
         const lowPct = pct(row.npvLow);
         const highPct = pct(row.npvHigh);
         const leftPct = Math.min(lowPct, highPct);
@@ -363,7 +387,7 @@ function TornadoChart({ extendedSensitivity, baseNPV }) {
             transition={{ delay: i * 0.08, duration: 0.3 }}
           >
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[11px] text-gray-500 w-32 sm:w-40 shrink-0 truncate">{row.label}</span>
+              <span className="text-[11px] text-gray-500 w-32 sm:w-40 shrink-0 truncate" title={label}>{label}</span>
               <div className="flex-1 relative h-4 bg-gray-100/80 rounded-lg">
                 <div
                   className="absolute top-0 bottom-0 w-px bg-gray-400/40 z-10"
@@ -393,6 +417,199 @@ function TornadoChart({ extendedSensitivity, baseNPV }) {
         <span className="text-[10px] text-gray-400 w-20 text-right shrink-0">Swing</span>
       </div>
     </div>
+  );
+}
+
+function formatSensitivityInput(value, input, unit = '') {
+  if (!Number.isFinite(Number(value))) return '—';
+  const numeric = Number(value);
+  if (input?.format?.startsWith('$') || unit.startsWith('$')) return formatCurrency(numeric);
+  if (input?.type === 'percent') return formatPercent(numeric);
+  const decimals = input?.step && input.step < 1 ? 1 : 0;
+  const formatted = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+  }).format(numeric);
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function sensitivityCellStyle(value, allValues) {
+  if (!Number.isFinite(value)) {
+    return { className: 'bg-gray-50 text-gray-400 border-gray-100', style: undefined };
+  }
+  const maxMagnitude = Math.max(...allValues.map((candidate) => Math.abs(candidate)).filter(Number.isFinite), 1);
+  const intensity = Math.min(0.88, 0.16 + (Math.abs(value) / maxMagnitude) * 0.62);
+  const positive = value >= 0;
+  return {
+    className: `${positive ? 'border-emerald-200/50' : 'border-red-200/50'} ${intensity > 0.58 ? 'text-white' : positive ? 'text-emerald-950' : 'text-red-950'}`,
+    style: {
+      backgroundColor: positive
+        ? `rgba(16, 185, 129, ${intensity})`
+        : `rgba(248, 113, 113, ${intensity})`,
+    },
+  };
+}
+
+function TwoDriverSensitivityMatrix({ matrix, metric, onMetricChange }) {
+  if (!matrix) return null;
+
+  const isNpv = metric === 'npv';
+  // Capacity bumpers are not financial outcomes. Exclude them from the
+  // heat-map scale so a blocked scenario cannot distort the defensible range.
+  const allValues = matrix.rows
+    .flatMap((row) => row.cells)
+    .filter((cell) => !cell.blocked)
+    .map((cell) => cell[metric]);
+  const planningPoints = [
+    { key: 'p25', label: 'P25', description: 'Lower planning point', tone: 'border-amber-200 bg-amber-50/70 text-amber-900' },
+    { key: 'p50', label: 'Median', description: 'Current planning point', tone: 'border-gray-300 bg-gray-900 text-white' },
+    { key: 'p75', label: 'P75', description: 'Upper planning point', tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-900' },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.55, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+      className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-1">
+        <div>
+          <h3 className="text-gray-900 font-semibold text-base tracking-tight">Two-Driver Sensitivity</h3>
+          <p className="text-gray-400 text-[11px] mt-1">
+            10 × 10 case-specific planning square: {matrix.config.volumeLabel.toLowerCase()} × {matrix.config.economicLabel.toLowerCase()}
+          </p>
+        </div>
+        <div className="inline-flex self-start rounded-lg bg-gray-100/80 p-0.5 border border-gray-200/60" aria-label="Sensitivity metric">
+          <button
+            type="button"
+            onClick={() => onMetricChange('npv')}
+            aria-pressed={isNpv}
+            className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors cursor-pointer ${
+              isNpv ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            5-Yr NPV
+          </button>
+          <button
+            type="button"
+            onClick={() => onMetricChange('annualCashSavings')}
+            aria-pressed={!isNpv}
+            className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors cursor-pointer ${
+              !isNpv ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            FY5 cash savings
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-4 mb-5">
+        {planningPoints.map(({ key, label, description, tone }) => {
+          const point = matrix.planningPoints[key];
+          const value = point?.[metric];
+          const pointIsBlocked = point?.blocked;
+          return (
+            <div key={key} className={`rounded-xl border px-3.5 py-3 ${tone}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider font-semibold">{label}</span>
+                <span className="text-[10px] opacity-70">{description}</span>
+              </div>
+              <p className="font-mono text-lg font-bold mt-1">{pointIsBlocked ? 'Guardrail' : formatCompact(value)}</p>
+              <p className="text-[10px] mt-1 opacity-80">
+                {pointIsBlocked
+                  ? 'Reconcile workload capacity'
+                  : isNpv
+                    ? `FY5 cash: ${formatCompact(point?.annualCashSavings)}`
+                    : `NPV: ${formatCompact(point?.npv)}`}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="overflow-x-auto pb-1">
+        <div className="min-w-[690px]" role="grid" aria-label={`${matrix.config.volumeLabel} by ${matrix.config.economicLabel} sensitivity matrix`}>
+          <p className="text-[10px] font-medium uppercase tracking-wider text-gray-400 text-right pr-1 mb-1">
+            {matrix.config.volumeLabel} →
+          </p>
+          <div className="grid grid-cols-[minmax(150px,1.5fr)_repeat(10,minmax(50px,1fr))] gap-1.5 mb-1.5">
+            <div className="flex items-end pb-1 text-[10px] font-medium uppercase tracking-wider text-gray-400">
+              {matrix.config.economicLabel} ↓
+            </div>
+            {matrix.volumeLevels.map((value, index) => (
+              <div
+                key={`${value}-${index}`}
+                className={`text-center rounded-md px-1 py-1.5 text-[10px] font-mono ${index === 5 ? 'bg-gray-900 text-white font-semibold' : 'bg-gray-50 text-gray-500'}`}
+                title={`${matrix.config.volumeLabel}: ${formatSensitivityInput(value, matrix.volumeInput, matrix.config.volumeUnit)}`}
+              >
+                {formatSensitivityInput(value, matrix.volumeInput)}
+              </div>
+            ))}
+          </div>
+          {matrix.rows.map((row, rowIndex) => (
+            <div key={`${row.economicValue}-${rowIndex}`} className="grid grid-cols-[minmax(150px,1.5fr)_repeat(10,minmax(50px,1fr))] gap-1.5 mb-1.5" role="row">
+              <div className={`flex items-center rounded-md px-2 text-[10px] font-mono ${rowIndex === 5 ? 'bg-gray-900 text-white font-semibold' : 'bg-gray-50 text-gray-600'}`}>
+                {formatSensitivityInput(row.economicValue, matrix.economicInput, matrix.config.economicUnit)}
+              </div>
+              {row.cells.map((cell, columnIndex) => {
+                const displayValue = cell[metric];
+                const tone = sensitivityCellStyle(displayValue, allValues);
+                const isBlocked = cell.blocked;
+                const isPlanningPoint = (
+                  (rowIndex === 3 && columnIndex === 3)
+                  || (rowIndex === 5 && columnIndex === 5)
+                  || (rowIndex === 7 && columnIndex === 7)
+                );
+                const planningLabel = rowIndex === 3 && columnIndex === 3
+                  ? 'P25 lower planning point'
+                  : rowIndex === 5 && columnIndex === 5
+                    ? 'Median current planning point'
+                    : rowIndex === 7 && columnIndex === 7
+                      ? 'P75 upper planning point'
+                      : '';
+                const guardrailSuffix = isBlocked
+                  ? ` Guardrail: ${cell.guardrailMessage || 'This combination falls outside the measured workforce capacity.'}`
+                  : '';
+                const label = `${matrix.config.volumeLabel}: ${formatSensitivityInput(cell.volume, matrix.volumeInput, matrix.config.volumeUnit)}. ${matrix.config.economicLabel}: ${formatSensitivityInput(cell.economicValue, matrix.economicInput, matrix.config.economicUnit)}.${isBlocked ? '' : ` FY5 cash savings ${formatCurrency(cell.annualCashSavings)}. Five-year NPV ${formatCurrency(cell.npv)}.`}${planningLabel ? ` ${planningLabel}.` : ''}${guardrailSuffix}`;
+                return (
+                  <div
+                    key={`${cell.volume}-${cell.economicValue}-${columnIndex}`}
+                    role="gridcell"
+                    aria-label={label}
+                    title={isBlocked
+                      ? `Guardrail: ${cell.guardrailMessage || 'This combination falls outside the measured workforce capacity.'}${planningLabel ? `\n${planningLabel}` : ''}`
+                      : `FY5 cash savings: ${formatCurrency(cell.annualCashSavings)}\n5-year NPV: ${formatCurrency(cell.npv)}${planningLabel ? `\n${planningLabel}` : ''}`}
+                    className={`min-h-10 rounded-md border px-1 flex items-center justify-center text-center font-mono text-[10px] font-semibold transition-col ${isBlocked ? 'border-amber-300 border-dashed bg-amber-50 text-amber-800' : tone.className} ${isPlanningPoint ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}
+                    style={isBlocked ? undefined : tone.style}
+                  >
+                    {isBlocked ? 'Guardrail' : Number.isFinite(displayValue) ? formatCompact(displayValue) : '—'}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      {((isNpv && !matrix.hasNpvVariation) || (!isNpv && !matrix.hasAnnualCashSavingsVariation)) && (
+        <p className="text-[10px] text-amber-700 mt-3 leading-relaxed">
+          This range is flat because the current workforce and contract plan does not convert additional workload into an approved cash action. That is intentional: the model will not invent savings from freed capacity alone.
+        </p>
+      )}
+      {matrix.blockedCellCount > 0 && (
+        <p className="text-[10px] text-amber-700 mt-3 leading-relaxed">
+          {matrix.blockedCellCount} planning combination{matrix.blockedCellCount === 1 ? '' : 's'} exceed credible workforce capacity or have no measurable workload. They are marked Guardrail and excluded from the range rather than being treated as a financial result.
+        </p>
+      )}
+      <p className="text-[10px] text-gray-400 mt-4 leading-relaxed">
+        Each cell reruns the base DCF with the selected case inputs. FY5 cash savings are the model’s gross savings at full adoption; NPV includes timing, AI costs, and the selected workforce/contract actions. P25, Median, and P75 pair lower, current, and upper planning levels (targeting 75%, 100%, and 125%, adjusted to valid input steps); they are planning points, not statistical probability estimates.
+      </p>
+      {matrix.config.capacityOnly && (
+        <p className="text-[10px] text-amber-700 mt-2 leading-relaxed">
+          Customer support cost per contact has not been validated as cash-realizable, so the matrix uses resolution time and does not add unvalidated support-cost avoidance to NPV.
+        </p>
+      )}
+    </motion.div>
   );
 }
 
@@ -553,7 +770,6 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
   const show = useCallback((section) => tierShows(tier, section), [tier]);
   const autoExpand = AUTO_EXPAND[tier] || [];
 
-  const effectiveTier = tier;
   const effectiveShow = show;
   const effectiveAutoExpand = autoExpand;
 
@@ -599,23 +815,44 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
   // Top levers count based on tier
   const leverCount = typeof effectiveShow('topLevers') === 'number' ? effectiveShow('topLevers') : 3;
+  const workforceMix = results.currentState?.workforceMix;
+  const usesWorkforceMix = Boolean(workforceMix?.hasWorkforceMix);
+  const currentProcessWorkforce = results.currentState?.totalHeadcount ?? formData.teamSize ?? 0;
+  const blendedWorkforceCost = results.currentState?.blendedFullyBurdenedCost ?? formData.avgSalary ?? 0;
+  const totalAnnualHeadcountCost = workforceMix?.totalAnnualHeadcountCost
+    ?? results.currentState?.annualLaborCost
+    ?? (currentProcessWorkforce * blendedWorkforceCost);
 
   // Map lever labels to current input values for display
   const leverInputValues = useMemo(() => ({
-    'Team Size': `${formData.teamSize} people`,
-    'Avg Cost per Person': formatCompact(formData.avgSalary || 0),
+    'Team Size': `${currentProcessWorkforce} people`,
+    'Avg Cost per Person': formatCompact(blendedWorkforceCost),
     'Error Rate': `${((formData.errorRate || results.executiveSummary?.keyAssumptions?.errorRate || 0.10) * 100).toFixed(0)}%`,
     'Automation Potential': formatPercent(results.executiveSummary?.keyAssumptions?.automationPotential || 0),
     'Implementation Cost': formatCompact(formData.implementationBudget || 0),
     'Ongoing Cost': formatCompact(formData.ongoingAnnualCost || 0),
     'Discount Rate': formatPercent(results.discountRate || 0),
-  }), [formData, results]);
+  }), [formData, results, currentProcessWorkforce, blendedWorkforceCost]);
 
   // Download loading states
   const [pdfLoading, setPdfLoading] = useState(false);
   const [excelLoading, setExcelLoading] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
+  const [sensitivityMetric, setSensitivityMetric] = useState('npv');
+
+  const caseSensitivityConfig = useMemo(
+    () => getCaseSensitivityConfig(effectiveFormData.projectArchetype, results),
+    [effectiveFormData.projectArchetype, results],
+  );
+
+  // The 100 model runs are intentionally deferred until the user asks for
+  // Detailed Analysis, keeping the initial executive result fast.
+  const twoDriverSensitivity = useMemo(() => (
+    showDetailedAnalysis
+      ? buildTwoDriverSensitivityMatrix(effectiveFormData, results)
+      : null
+  ), [showDetailedAnalysis, effectiveFormData, results]);
 
   const handlePdfDownload = useCallback(async () => {
     setPdfLoading(true);
@@ -947,11 +1184,15 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         >
           <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-1">What Drives This Result?</h3>
           <p className="text-gray-400 text-[11px] mb-4">
-            {leverCount === 1 ? 'The single biggest lever on your ROI' : `Top ${leverCount} levers — click values to adjust live`}
+            {leverCount === 1 ? 'The single biggest lever on your ROI' : `Top ${leverCount} levers — editable values show a pencil`}
           </p>
           <div className="space-y-2.5">
             {results.executiveSummary.topLevers.slice(0, leverCount).map((lever, i) => {
-              const config = LEVER_FIELD_MAP[lever.label];
+              const isCalculatedWorkforceLever = usesWorkforceMix && Boolean(WORKFORCE_LEVER_LABELS[lever.label]);
+              const config = isCalculatedWorkforceLever ? null : LEVER_FIELD_MAP[lever.label];
+              const displayLabel = isCalculatedWorkforceLever
+                ? WORKFORCE_LEVER_LABELS[lever.label]
+                : lever.label;
               // Use formData value, falling back to calculated effective value for null/auto fields
               let currentRaw = config ? getNestedValue(effectiveFormData, config.path) : null;
               if (currentRaw == null && config) {
@@ -966,6 +1207,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                   key={lever.label}
                   index={i}
                   lever={lever}
+                  displayLabel={displayLabel}
                   config={config}
                   currentValue={currentRaw}
                   results={results}
@@ -1016,81 +1258,45 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
 
         {showDetailedAnalysis && (<>
 
-        {/* Break-Even & Volume Sensitivity */}
-        {results.volumeSensitivity && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.55, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-            className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-6 mb-6"
-          >
-            <h3 className="text-gray-900 font-semibold text-base tracking-tight mb-1">Volume Sensitivity</h3>
-            <p className="text-gray-400 text-[11px] mb-4">
-              How changes in {results.volumeSensitivity.inputLabel.toLowerCase()} affect your 5-year NPV
-            </p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-gray-200/60">
-                    <th className="text-left py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">{results.volumeSensitivity.inputLabel}</th>
-                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">Change</th>
-                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">5-FY NPV</th>
-                    <th className="text-right py-2.5 text-gray-400 font-medium text-[11px] uppercase tracking-wider">NPV Impact</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.volumeSensitivity.levels.map((level, i) => {
-                    const isCurrent = level.delta === 0;
-                    return (
-                      <tr key={i} className={`border-b border-gray-100/80 ${isCurrent ? 'bg-gray-50/50 font-semibold' : ''}`}>
-                        <td className="py-2.5 font-mono text-gray-900">
-                          {level.volume.toLocaleString()}
-                          {isCurrent && <span className="ml-2 text-xs text-gray-400 font-normal">(current)</span>}
-                        </td>
-                        <td className={`py-2 text-right font-mono ${level.delta < 0 ? 'text-red-500' : level.delta > 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
-                          {level.delta > 0 ? '+' : ''}{level.delta.toLocaleString()}
-                        </td>
-                        <td className={`py-2 text-right font-mono ${level.npv >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                          {formatCompact(level.npv)}
-                        </td>
-                        <td className={`py-2 text-right font-mono font-medium ${level.npvDelta > 0 ? 'text-emerald-600' : level.npvDelta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                          {level.npvDelta === 0 ? '—' : `${level.npvDelta > 0 ? '+' : ''}${formatCompact(level.npvDelta)}`}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {results.breakEvenUnits && results.breakEvenUnits.length > 0 && (() => {
-              // Filter out items with trivial break-even (margin > 500% means the input barely matters)
-              const meaningful = results.breakEvenUnits.filter(item => Math.abs(item.marginPct) <= 500);
-              if (meaningful.length === 0) return null;
-              return (
-                <div className="mt-4 pt-4 border-t border-gray-200/60">
-                  <p className="text-[11px] text-gray-400 font-medium uppercase tracking-wider mb-2">Break-Even Thresholds</p>
-                  <div className="flex flex-wrap gap-2">
-                    {meaningful.slice(0, 3).map((item) => {
-                      const pct = Math.min(Math.abs(item.marginPct), 500);
-                      const sign = item.marginPct > 0 ? '+' : '-';
-                      return (
-                        <div key={item.key} className="bg-gray-50/80 rounded-xl px-3 py-2 text-[11px]">
-                          <span className="text-gray-400">{item.label}:</span>{' '}
-                          <span className="font-mono font-semibold text-gray-900">
-                            {item.type === 'percent' ? `${(item.breakEvenValue * 100).toFixed(1)}%` : item.breakEvenValue.toLocaleString()}
-                          </span>
-                          <span className={`ml-1 font-mono ${item.direction === 'floor' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            ({item.direction === 'floor' ? `${sign}${pct}% margin` : `${pct}% gap`})
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-          </motion.div>
-        )}
+        {/* Case-specific two-driver sensitivity — replaces the legacy 1-D table. */}
+        <TwoDriverSensitivityMatrix
+          matrix={twoDriverSensitivity}
+          metric={sensitivityMetric}
+          onMetricChange={setSensitivityMetric}
+        />
+
+        {results.breakEvenUnits && results.breakEvenUnits.length > 0 && (() => {
+          // Filter out trivial thresholds, which do not change a planning decision.
+          const meaningful = results.breakEvenUnits.filter(item => Math.abs(item.marginPct) <= 500);
+          if (meaningful.length === 0) return null;
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+              className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm p-5 mb-6"
+            >
+              <p className="text-[11px] text-gray-400 font-medium uppercase tracking-wider mb-2">Break-Even Thresholds</p>
+              <div className="flex flex-wrap gap-2">
+                {meaningful.slice(0, 3).map((item) => {
+                  const pct = Math.min(Math.abs(item.marginPct), 500);
+                  const sign = item.marginPct > 0 ? '+' : '-';
+                  return (
+                    <div key={item.key} className="bg-gray-50/80 rounded-xl px-3 py-2 text-[11px]">
+                      <span className="text-gray-400">{item.label}:</span>{' '}
+                      <span className="font-mono font-semibold text-gray-900">
+                        {item.type === 'percent' ? `${(item.breakEvenValue * 100).toFixed(1)}%` : item.breakEvenValue.toLocaleString()}
+                      </span>
+                      <span className={`ml-1 font-mono ${item.direction === 'floor' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        ({item.direction === 'floor' ? `${sign}${pct}% margin` : `${pct}% gap`})
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          );
+        })()}
 
         {/* Process Volume by Year */}
         {results.adoptionRamp && effectiveFormData.archetypeInputs?.processVolume > 0 && effectiveShow('yearByYear') !== 'totals-only' && (
@@ -1260,6 +1466,8 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
                 <p className="text-[10px] text-gray-400 mb-1.5 font-medium">FY {i + 1}</p>
                 <input
                   type="number"
+                  name={`transition-ramp-fy-${i + 1}`}
+                  aria-label={`FY ${i + 1} automation realization percentage`}
                   min={0}
                   max={100}
                   step={5}
@@ -1304,11 +1512,23 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
             <ul className="space-y-2.5 text-gray-600 text-[13px]">
               <li className="flex items-start gap-2.5">
                 <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
-                <span><strong className="text-gray-900">Larger team scope:</strong> AI savings scale with team size. Consider expanding to {Math.max(formData.teamSize * 2, 30)}+ people.</span>
+                <span>
+                  <strong className="text-gray-900">
+                    {caseSensitivityConfig ? `Broader ${caseSensitivityConfig.volumeShortLabel}:` : 'Broader measured workload:'}
+                  </strong>{' '}
+                  {caseSensitivityConfig
+                    ? `Cash savings scale with ${caseSensitivityConfig.volumeShortLabel}. Use the P75 planning point to test a proven roughly 25% expansion of the current operating scope.`
+                    : 'Cash savings scale with verified workload volume. Test a larger, measured operating scope before changing the investment case.'}
+                </span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
-                <span><strong className="text-gray-900">Higher-value processes:</strong> Focus on processes with more manual hours or higher error costs.</span>
+                <span>
+                  <strong className="text-gray-900">
+                    {caseSensitivityConfig?.valueLeverTitle || 'Higher-value operating work:'}
+                  </strong>{' '}
+                  {caseSensitivityConfig?.valueLeverDescription || 'Focus on measured handling time, support cost, or other operating value that is allowed into the cash model.'}
+                </span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="text-amber-400 mt-0.5 text-xs">&rarr;</span>
@@ -1401,7 +1621,11 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {/* Sensitivity Tornado Chart */}
         {effectiveShow('sensitivityAnalysis') && (
           <CollapsibleSection title="Sensitivity Analysis" subtitle="How each variable affects 5-fiscal-year NPV" defaultOpen={effectiveAutoExpand.includes('sensitivityAnalysis')}>
-            <TornadoChart extendedSensitivity={results.extendedSensitivity} baseNPV={results.scenarios.base.npv} />
+            <TornadoChart
+              extendedSensitivity={results.extendedSensitivity}
+              baseNPV={results.scenarios.base.npv}
+              sensitivityConfig={caseSensitivityConfig}
+            />
           </CollapsibleSection>
         )}
 
@@ -1648,8 +1872,16 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
           <CollapsibleSection title="Quick Facts" subtitle="Key input parameters and results">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-500">Team Size</span>
-                <span className="text-navy font-mono">{formData.teamSize} people</span>
+                <span className="text-gray-500">Current process workforce</span>
+                <span className="text-navy font-mono">{currentProcessWorkforce} people</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Blended annual workforce cost</span>
+                <span className="text-navy font-mono">{formatCurrency(blendedWorkforceCost)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Ongoing headcount cost</span>
+                <span className="text-navy font-mono">{formatCurrency(totalAnnualHeadcountCost)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Implementation</span>
@@ -1907,7 +2139,7 @@ export default function LiveCalculation({ formData, onDownload, onDownloadExcel,
         {effectiveShow('phasedDeploymentGates') && (
           <CollapsibleSection title="Phased Deployment Gates" subtitle="Go/no-go thresholds at each stage">
             <div className="space-y-3">
-              {results.gateStructure.map((gate, i) => {
+              {results.gateStructure.map((gate) => {
                 const allMet = Object.values(gate.meetsThresholds).every(Boolean);
                 return (
                   <div

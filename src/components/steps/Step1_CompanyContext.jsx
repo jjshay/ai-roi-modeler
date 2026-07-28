@@ -56,7 +56,7 @@ function initialSubStep(formData) {
   return 0;
 }
 
-export default function Step1_CompanyContext({ formData, updateField, onFlowStateChange }) {
+export default function Step1_CompanyContext({ formData, updateField, onFlowStateChange, onComplete }) {
   const [subStep, setSubStep] = useState(() => initialSubStep(formData));
   const advanceTimer = useRef(null);
 
@@ -241,7 +241,7 @@ export default function Step1_CompanyContext({ formData, updateField, onFlowStat
 
         {subStep === 5 && (
           <Motion.div key="costTransitionPlan" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.15, ease: 'easeOut' }}>
-            <CostTransitionPlan formData={formData} updateField={updateField} />
+            <CostTransitionPlan formData={formData} updateField={updateField} onComplete={onComplete} />
           </Motion.div>
         )}
       </AnimatePresence>

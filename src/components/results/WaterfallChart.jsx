@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { formatCurrency } from '../../utils/formatters';
 
-function WaterfallBar({ label, value, runningTotal, maxAbsVal, isTotal, delay, color }) {
+function WaterfallBar({ label, value, runningTotal: _runningTotal, maxAbsVal, isTotal, delay, color }) {
   // Calculate bar positioning relative to zero line
   const scale = maxAbsVal > 0 ? 40 / maxAbsVal : 0; // 40% of container width per max value
   const barWidthPct = Math.abs(value) * scale;
@@ -45,8 +45,6 @@ function WaterfallBar({ label, value, runningTotal, maxAbsVal, isTotal, delay, c
 
 export default function WaterfallChart({ results, delay = 0 }) {
   const base = results.scenarios.base;
-  const yr1 = base.projections[0];
-  const yr5 = base.projections[4];
 
   // Waterfall steps: what builds up to NPV
   const steps = [

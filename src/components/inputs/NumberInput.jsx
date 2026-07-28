@@ -14,13 +14,15 @@ export default function NumberInput({
   suffix,
   helperText,
   prefix,
+  placeholder,
+  allowEmpty = false,
 }) {
   const id = useId();
 
   const handleChange = (event) => {
     const raw = event.target.value;
     if (raw === '') {
-      onChange(0);
+      onChange(allowEmpty ? undefined : 0);
       return;
     }
 
@@ -50,8 +52,9 @@ export default function NumberInput({
           min={min}
           max={max}
           step={step}
-          value={value ?? 0}
+          value={allowEmpty && (value === null || value === undefined) ? '' : (value ?? 0)}
           onChange={handleChange}
+          placeholder={placeholder}
           className={`w-full rounded-lg border-2 border-gray-200 bg-white py-3 font-mono text-lg font-semibold text-navy transition-colors duration-150 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/30 ${prefix ? 'pl-9' : 'pl-4'} ${suffix ? 'pr-20' : 'pr-4'}`}
         />
         {suffix && (

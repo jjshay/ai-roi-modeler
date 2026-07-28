@@ -36,11 +36,20 @@ const slideVariants = {
 
 const EMPTY_INPUTS = Object.freeze({});
 
-function getStepForNumber(min, max) {
-  const range = max - min;
-  if (range > 10000) return 100;
-  if (range > 1000) return 10;
-  return 1;
+// eslint-disable-next-line react-refresh/only-export-components
+export function getStepForNumber(input) {
+  // Precision is a model property, not a UI heuristic. Keeping it in the
+  // shared schema lets the web experience and exported workbook accept the
+  // exact same valid values.
+  const step = Number(input?.step);
+  return Number.isFinite(step) && step > 0 ? step : 1;
+}
+
+function formatWorkloadHours(hours) {
+  if (!Number.isFinite(hours) || hours <= 0) return '0 hrs/week';
+  if (hours < 1) return `${hours.toFixed(hours < 0.1 ? 2 : 1)} hr/week`;
+  if (hours < 10 && !Number.isInteger(hours)) return `${hours.toFixed(1)} hrs/week`;
+  return `${Math.round(hours).toLocaleString()} hrs/week`;
 }
 
 function initialSubStep(formData) {
@@ -82,7 +91,7 @@ function readableMessage(message) {
   return typeof message === 'string' ? message : message.message;
 }
 
-export default function Step3_ProcessDetails({ formData, updateField, onFlowStateChange }) {
+export default function Step3_ProcessDetails({ formData, updateField, onFlowStateChange, onAdvance }) {
   const [subStep, setSubStep] = useState(() => initialSubStep(formData));
   const workforce = useMemo(() => calculateWorkforceMix(formData), [formData]);
   const contractExit = useMemo(() => calculateContractExitCost(formData), [formData]);
@@ -135,6 +144,15 @@ export default function Step3_ProcessDetails({ formData, updateField, onFlowStat
     || caseEconomics?.workloadStatus === 'blocked'
     || (Number.isFinite(workloadRatio) && workloadRatio > 1.25)
   );
+  const requestedEfficiencyPct = Number.isFinite(caseEconomics?.requestedEfficiencyGainPct)
+    ? caseEconomics.requestedEfficiencyGainPct * 100
+    : null;
+  const efficiencyCeilingPct = Number.isFinite(caseEconomics?.efficiencyCeilingPct)
+    ? caseEconomics.efficiencyCeilingPct * 100
+    : null;
+  const efficiencyCeilingIsBinding = Number.isFinite(requestedEfficiencyPct)
+    && Number.isFinite(efficiencyCeilingPct)
+    && requestedEfficiencyPct > efficiencyCeilingPct;
 
   const workforceReady = workforce.totalHeadcount > 0
     && (workforce.directEmployeeCount === 0 || workforce.employeeFullyBurdenedCost > 0)
@@ -363,7 +381,10 @@ export default function Step3_ProcessDetails({ formData, updateField, onFlowStat
                 <button type="button" onClick={() => setSubStep(2)} className={secondaryButtonClass}>Back to workforce</button>
                 <button
                   type="button"
-                  onClick={() => updateField('projectInputsComplete', true)}
+                  onClick={() => {
+                    updateField('projectInputsComplete', true);
+                    onAdvance?.();
+                  }}
                   className={actionButtonClass()}
                 >
                   Continue to company context
@@ -432,7 +453,7 @@ export default function Step3_ProcessDetails({ formData, updateField, onFlowStat
                       onChange={(value) => handleArchetypeInput(input.key, value)}
                       min={input.min}
                       max={input.max}
-                      step={getStepForNumber(input.min, input.max)}
+                      step={getStepForNumber(input)}
                       helperText={helperText}
                     />
                   );
@@ -511,14 +532,21 @@ export default function Step3_ProcessDetails({ formData, updateField, onFlowStat
               )}
 
               {computed.automationPotential != null && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <div className={`rounded-xl border p-3 ${efficiencyCeilingIsBinding ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-medium text-emerald-700">Estimated automation potential</p>
-                      <p className="text-[11px] text-emerald-600/70">Computed from your process inputs</p>
+                      <p className={`text-xs font-medium ${efficiencyCeilingIsBinding ? 'text-amber-800' : 'text-emerald-700'}`}>Estimated automation potential</p>
+                      <p className={`text-[11px] ${efficiencyCeilingIsBinding ? 'text-amber-700/70' : 'text-emerald-600/70'}`}>Computed from your process inputs</p>
                     </div>
-                    <span className="font-mono text-xl font-bold text-emerald-700">{Math.round(computed.automationPotential * 100)}%</span>
+                    <span className={`font-mono text-xl font-bold ${efficiencyCeilingIsBinding ? 'text-amber-800' : 'text-emerald-700'}`}>{Math.round(computed.automationPotential * 100)}%</span>
                   </div>
+                  {Number.isFinite(requestedEfficiencyPct) && Number.isFinite(efficiencyCeilingPct) && (
+                    <p className={`mt-2 text-[11px] leading-relaxed ${efficiencyCeilingIsBinding ? 'text-amber-900' : 'text-emerald-800/75'}`}>
+                      {efficiencyCeilingIsBinding
+                        ? `Your requested ${Math.round(requestedEfficiencyPct)}% efficiency gain is capped at ${Math.round(efficiencyCeilingPct)}% by these operating inputs.`
+                        : `Your requested ${Math.round(requestedEfficiencyPct)}% efficiency gain is below this ${Math.round(efficiencyCeilingPct)}% ceiling. These inputs validate the claim and become a financial cap only if the ceiling falls below your requested gain.`}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -540,7 +568,7 @@ export default function Step3_ProcessDetails({ formData, updateField, onFlowStat
                     )}
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <SummaryMetric label="Case workload" value={`${Math.round(computedWorkloadHours).toLocaleString()} hrs/week`} detail="From the operating drivers above" />
+                    <SummaryMetric label="Case workload" value={formatWorkloadHours(computedWorkloadHours)} detail="From the operating drivers above" />
                     <SummaryMetric label="Stated team capacity" value={`${Math.round(availableCapacityHours).toLocaleString()} hrs/week`} detail="Current workforce × weekly process hours" />
                   </div>
                   {workloadBlocked && (

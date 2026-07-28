@@ -3,7 +3,6 @@ import {
   getAutomationPotential,
   getErrorRate,
   getIndustrySuccessRate,
-  getRealisticTimeline,
   ADOPTION_MULTIPLIERS,
   SEPARATION_COST_MULTIPLIER,
   TOOL_REPLACEMENT_RATE,

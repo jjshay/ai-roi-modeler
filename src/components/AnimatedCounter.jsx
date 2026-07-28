@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatCurrency } from '../utils/formatters';
 
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);

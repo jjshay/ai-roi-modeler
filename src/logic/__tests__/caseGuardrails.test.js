@@ -81,6 +81,54 @@ describe('case-specific workload and evidence guardrails', () => {
     }
   });
 
+  it.each([
+    ['internal-process-automation', 'processVolume'],
+    ['customer-facing-ai', 'ticketsPerMonth'],
+    ['data-analytics-automation', 'reportsPerMonth'],
+    ['risk-compliance-legal-ai', 'reviewsPerMonth'],
+  ])('%s blocks savings when its measured workload is zero', (projectArchetype, volumeKey) => {
+    const result = modelForCase(projectArchetype, {
+      archetypeInputs: { [volumeKey]: 0 },
+      employeesToMakeRedundant: 100,
+    });
+
+    expect(result.caseEconomics.caseWorkloadHoursPerWeek).toBe(0);
+    expect(result.caseEconomics.workloadStatus).toBe('blocked');
+    expect(result.caseEconomics.workloadBlocked).toBe(true);
+    expect(result.caseEconomics.effectiveEfficiencyGainPct).toBe(0);
+    expect(result.workforceTransition.employeesToMakeRedundant).toBe(0);
+    expect(result.valueBreakdown.headcount.gross).toBe(0);
+    expect(result.valueBreakdown.caseDirectSavings.gross).toBe(0);
+    expect(result.savings.grossAnnualSavings).toBe(0);
+    expect(result.inputWarnings.some(warning => (
+      warning.field === 'caseWorkloadHoursPerWeek' && warning.severity === 'blocking'
+    ))).toBe(true);
+  });
+
+  it.each([
+    ['internal-process-automation', 'processVolume'],
+    ['customer-facing-ai', 'ticketsPerMonth'],
+    ['data-analytics-automation', 'reportsPerMonth'],
+    ['risk-compliance-legal-ai', 'reviewsPerMonth'],
+  ])('%s preserves a smallest positive workload as capacity-only', (projectArchetype, volumeKey) => {
+    const result = modelForCase(projectArchetype, {
+      archetypeInputs: { [volumeKey]: 1 },
+      totalEfficiencyGainPct: 0.90,
+      employeesToMakeRedundant: 100,
+    });
+
+    expect(result.caseEconomics.caseWorkloadHoursPerWeek).toBeGreaterThan(0);
+    expect(result.caseEconomics.workloadRatio).toBeGreaterThan(0);
+    expect(result.caseEconomics.workloadRatio).toBeLessThan(0.10);
+    expect(result.caseEconomics.workloadStatus).toBe('capacity-only');
+    expect(result.caseEconomics.workloadBlocked).toBe(false);
+    expect(result.workforceTransition.employeesToMakeRedundant).toBe(0);
+    expect(result.valueBreakdown.headcount.gross).toBe(0);
+    expect(result.inputWarnings.some(warning => (
+      warning.field === 'caseWorkloadHoursPerWeek' && warning.severity === 'warning'
+    ))).toBe(true);
+  });
+
   it('turns off savings when customer workload exceeds the entered staffing capacity', () => {
     const result = runCalculations({
       ...BASE_INPUTS,

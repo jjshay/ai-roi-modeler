@@ -289,4 +289,25 @@ describe('workforce-mix integration with the DCF', () => {
     expect(r.aiCostModel.usageMeters.monthlyAiRequests).toBe(50000);
     expect(r.aiCostModel.usageMeters.documentsPerMonth).toBe(10000);
   });
+
+  it('does not turn nonzero request volume into zero consumption when optional token fields are zero', () => {
+    const base = {
+      ...BASE_INPUTS,
+      monthlyAiRequests: 5000,
+      avgInputTokensPerRequest: null,
+      avgOutputTokensPerRequest: null,
+    };
+    const untouched = runCalculations(base);
+    const enteredZeroes = runCalculations({
+      ...base,
+      avgInputTokensPerRequest: 0,
+      avgOutputTokensPerRequest: 0,
+    });
+
+    expect(untouched.consultingAssumptions.useTokenModel).toBe(false);
+    expect(enteredZeroes.consultingAssumptions.useTokenModel).toBe(false);
+    expect(enteredZeroes.aiCostModel.costBuckets.consumptionAnnual).toBeGreaterThan(0);
+    expect(enteredZeroes.aiCostModel.costBuckets.consumptionAnnual)
+      .toBe(untouched.aiCostModel.costBuckets.consumptionAnnual);
+  });
 });

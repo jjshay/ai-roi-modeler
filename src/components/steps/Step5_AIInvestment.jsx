@@ -51,8 +51,6 @@ function computeSuggestedValues(formData) {
   // affected process. No hidden location-based implementation salary applies.
   const { annualFullyBurdenedRate } = getDeploymentRate(formData);
   const maxTeam = MAX_IMPL_TEAM[companySize] || 10;
-  const sizeMult = SIZE_MULTIPLIER[companySize] || 1.0;
-  const dataCostMult = DATA_COST_MULTIPLIER[dataReadiness] || 1.10;
   const dataTimeMult = DATA_TIMELINE_MULTIPLIER[dataReadiness] || 1.10;
 
   const adjustedTimeline = Math.ceil(suggestedTimeline * dataTimeMult);
@@ -120,7 +118,6 @@ function computeScopePreview(formData) {
   const { annualFullyBurdenedRate, source: deploymentRateSource } = getDeploymentRate(formData);
   const maxTeam = MAX_IMPL_TEAM[companySize] || 10;
   const sizeMult = SIZE_MULTIPLIER[companySize] || 1.0;
-  const dataCostMult = DATA_COST_MULTIPLIER[dataReadiness] || 1.10;
   const dataTimeMult = DATA_TIMELINE_MULTIPLIER[dataReadiness] || 1.10;
 
   const adjustedTimeline = Math.ceil(expectedTimeline * dataTimeMult * sizeMult);
@@ -168,21 +165,14 @@ function computeScopePreview(formData) {
 export default function Step5_AIInvestment({ formData, updateField }) {
   const [subStep, setSubStep] = useState(0);
   const advanceTimer = useRef(null);
-  const [hasAutoFilled, setHasAutoFilled] = useState(false);
+  const hasAutoFilledRef = useRef(false);
 
   // Compute suggested values based on all context
-  const suggested = useMemo(() => computeSuggestedValues(formData), [
-    formData.teamSize, formData.companySize,
-    formData.directEmployeeCount, formData.employeeFullyBurdenedCost,
-    formData.offshoreContractorCount, formData.contractorFullyBurdenedCost,
-    formData.avgSalary,
-    formData.dataReadiness, formData.industry, formData.projectArchetype,
-    formData.hoursPerWeek
-  ]);
+  const suggested = useMemo(() => computeSuggestedValues(formData), [formData]);
 
   // Auto-fill values from computed benchmarks — budget is always model-driven
   useEffect(() => {
-    if (!hasAutoFilled) {
+    if (!hasAutoFilledRef.current) {
       // Budget is always computed from staffing model, not user-entered
       updateField('implementationBudget', suggested.suggestedBudget);
       if (formData.expectedTimeline === null || formData.expectedTimeline === undefined) {
@@ -191,9 +181,9 @@ export default function Step5_AIInvestment({ formData, updateField }) {
       if (formData.ongoingAnnualCost === null || formData.ongoingAnnualCost === undefined) {
         updateField('ongoingAnnualCost', suggested.suggestedOngoing);
       }
-      setHasAutoFilled(true);
+      hasAutoFilledRef.current = true;
     }
-  }, [hasAutoFilled, suggested, formData, updateField]);
+  }, [suggested, formData, updateField]);
 
   const autoAdvance = useCallback(
     (nextSubStep) => {
@@ -206,8 +196,6 @@ export default function Step5_AIInvestment({ formData, updateField }) {
     },
     [],
   );
-
-  const isQuick = formData.wizardMode === 'quick';
 
   const handleTimeline = (val) => {
     updateField('expectedTimeline', val);
@@ -227,13 +215,7 @@ export default function Step5_AIInvestment({ formData, updateField }) {
     ? Math.ceil((selectedTimeline + realisticMonths) / 2)
     : null;
 
-  const scope = useMemo(
-    () => computeScopePreview(formData),
-    [formData.teamSize, formData.companySize, formData.directEmployeeCount,
-     formData.employeeFullyBurdenedCost, formData.offshoreContractorCount,
-     formData.contractorFullyBurdenedCost, formData.avgSalary,
-     formData.dataReadiness, formData.expectedTimeline],
-  );
+  const scope = useMemo(() => computeScopePreview(formData), [formData]);
 
   return (
     <div className="mx-auto w-full max-w-xl">
