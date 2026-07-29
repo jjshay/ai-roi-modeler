@@ -1456,11 +1456,15 @@ export async function generateExcelModel(formData, mcResults, results) {
   val(KF, 49, 1, 'Run: Support, Monitoring & Governance');
   fml(KF, 49, 2, `B46+IF(Inputs!B37="Yes",VLOOKUP(Inputs!B5,Lookups!A37:N41,14,FALSE)*12,0)+B42*Lookups!B88+B105+Inputs!B${exportInputRows.employeesToRetrain}*Inputs!B${exportInputRows.employeeFullyBurdenedCost}*Lookups!B89+B42*Lookups!B90+VLOOKUP(Inputs!B5,Lookups!A37:J41,10,FALSE)*VLOOKUP(Inputs!B4,Lookups!A16:I25,9,FALSE)+B73`, DOL);
   note(KF, 49, 3, '[M1/C1] Labor + agent infrastructure + retraining + compliance + retained-worker training + technical debt + cyber + measured data/connector operations. Validate against the operating model.');
-  val(KF, 50, 1, 'Computed Ongoing');
+  val(KF, 50, 1, 'Modeled Annual AI Cost (Before Override)');
   fml(KF, 50, 2, 'B47+B48+B49', DOL);
-  val(KF, 51, 1, 'Base Ongoing Cost');
+  note(KF, 50, 3, 'Transparent operating-model estimate before any user-entered all-in annual planning total.');
+  val(KF, 51, 1, 'Annual AI Cost Used in DCF');
   fmlBold(KF, 51, 2, 'IF(OR(ISBLANK(Inputs!B25),Inputs!B25=""),B50,Inputs!B25)', DOL, calcFill);
-  note(KF, 51, 3, 'Explicit annual run-cost input. It overrides the derived planning bucket; clear it only to use the transparent computed operating-cost model.');
+  note(KF, 51, 3, 'Uses the explicit all-in annual planning input when entered; otherwise equals the transparent modeled annual cost above.');
+  val(KF, 52, 1, 'Annual Planning Adjustment (Entered − Modeled)');
+  fml(KF, 52, 2, 'B51-B50', DOL, calcFill);
+  note(KF, 52, 3, 'A non-zero amount means the user supplied a total. The executive Access, Consumption, and Run buckets below are then allocated proportionately so they reconcile to the DCF total.');
 
   // --- Annual Savings (rows 53-61) ---
   sub(KF, 53, 'Annual Savings', 3);
@@ -1611,17 +1615,17 @@ export async function generateExcelModel(formData, mcResults, results) {
   fml(KF, 91, 2, 'B64', DOL);
   note(KF, 91, 3, '[C1] User planning framework: estimated 30–45% allocation. Not an external benchmark.');
   val(KF, 92, 1, 'Access (Annual Licensing)');
-  fml(KF, 92, 2, 'B48', DOL);
-  note(KF, 92, 3, '[C1] User planning framework: estimated 20–30% allocation. Seats/licenses are separate from model use.');
+  fml(KF, 92, 2, 'IFERROR(B48*B51/B50,0)', DOL);
+  note(KF, 92, 3, '[C1] User planning framework: estimated 20–30% allocation. Seats/licenses are separate from model use. When an all-in annual total is entered, this is a proportional planning allocation.');
   val(KF, 93, 1, 'Consumption (Annual Variable Use)');
-  fml(KF, 93, 2, 'B47', DOL);
-  note(KF, 93, 3, '[C1/C2] User planning framework: estimated 10–25% allocation. Driven by measured inputs or model workload proxies.');
+  fml(KF, 93, 2, 'IFERROR(B47*B51/B50,0)', DOL);
+  note(KF, 93, 3, '[C1/C2] User planning framework: estimated 10–25% allocation. Driven by measured inputs or model workload proxies; proportionately allocated if the user enters an all-in annual total.');
   val(KF, 94, 1, 'Run (Annual Support, Monitoring & Governance)');
   fml(KF, 94, 2, 'MAX(0,B51-B92-B93)', DOL);
-  note(KF, 94, 3, '[C1] User planning framework: estimated 15–25% allocation. Includes support/governance and any entered ongoing-cost override.');
+  note(KF, 94, 3, '[C1] User planning framework: estimated 15–25% allocation. Residual bucket makes Access + Consumption + Run exactly equal the annual DCF cost.');
   val(KF, 95, 1, 'Annual AI Operating Cost');
   fmlBold(KF, 95, 2, 'B51', DOL, calcFill);
-  note(KF, 95, 3, '[C1] Access + Consumption + Run. Planning allocation ranges are estimates, not facts or external benchmarks.');
+  note(KF, 95, 3, '[C1] Access + Consumption + Run. Equals the annual AI cost used in the DCF; compare with B50/B52 for the modeled total and entered adjustment. Planning allocation ranges are estimates, not facts or external benchmarks.');
 
   printSetup(KF);
 

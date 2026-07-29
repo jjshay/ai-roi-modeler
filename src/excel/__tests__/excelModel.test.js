@@ -544,6 +544,14 @@ describe('Excel Model: live formula-driven workbook', () => {
     expect(pnl.getCell('C7').formula).toContain('Inputs!B38');
     expect(pnl.getCell('C8').formula).toContain('Inputs!B38');
     expect(formulas.getCell('B51').formula).toBe('IF(OR(ISBLANK(Inputs!B25),Inputs!B25=""),B50,Inputs!B25)');
+    expect(formulas.getCell('B52').formula).toBe('B51-B50');
+    // Executive recurring-cost buckets must reflect the exact annual total
+    // used in the DCF, including an explicit all-in annual cost. This mirrors
+    // the website's proportional allocation and leaves Run as the residual.
+    expect(formulas.getCell('B92').formula).toBe('IFERROR(B48*B51/B50,0)');
+    expect(formulas.getCell('B93').formula).toBe('IFERROR(B47*B51/B50,0)');
+    expect(formulas.getCell('B94').formula).toBe('MAX(0,B51-B92-B93)');
+    expect(formulas.getCell('B95').formula).toBe('B51');
     expect(formulas.getCell('B73').formula).not.toContain('IF(Inputs!B5="Startup (1-50)"');
     expect(formulas.getCell('B73').formula).toContain('Inputs!B75*0.12*12');
     expect(formulas.getCell('B110').formula).toBe('IFERROR(B105*B51/B50,0)');

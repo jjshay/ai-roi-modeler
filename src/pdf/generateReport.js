@@ -81,6 +81,107 @@ function safePayback(months) {
   return `Month ${months}`;
 }
 
+function finiteCost(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+/**
+ * Returns the recurring-cost disclosure used by the PDF.  The live model
+ * deliberately allows a user to replace its model-derived annual total with
+ * an all-in planning amount.  In that case, `costBuckets.breakdown` contains
+ * the proportional, effective allocation that feeds the DCF; using the raw
+ * component fields here would make the PDF disagree with the FY1 cash flow.
+ */
+export function getPdfOngoingCostBreakdown(ai = {}) {
+  const breakdown = ai.costBuckets?.breakdown;
+  const sourceCategories = Array.isArray(breakdown?.categories)
+    ? breakdown.categories
+    : [];
+
+  if (sourceCategories.length > 0) {
+    const categories = sourceCategories.map((category) => {
+      const items = Array.isArray(category.items)
+        ? category.items.map((item) => ({
+          label: item.label || 'Other operating-model cost',
+          amount: finiteCost(item.amount),
+        }))
+        : [];
+      const itemTotal = items.reduce((sum, item) => sum + item.amount, 0);
+      const statedAmount = finiteCost(category.amount, itemTotal);
+
+      return {
+        label: category.label || 'Other recurring cost',
+        // Prefer the effective item allocation when it reconciles.  The
+        // category amount remains the guard for legacy/malformed payloads.
+        amount: Math.abs(itemTotal - statedAmount) < 0.01 ? itemTotal : statedAmount,
+        items,
+      };
+    });
+    const annualTotal = finiteCost(
+      breakdown.annualTotal,
+      finiteCost(ai.baseOngoingCost, categories.reduce((sum, category) => sum + category.amount, 0)),
+    );
+    const modeledAnnualTotal = finiteCost(breakdown.modeledAnnualTotal, annualTotal);
+
+    return {
+      source: breakdown.source || (ai.userProvidedOngoing ? 'user-entered-total' : 'model-derived'),
+      allocationIsEstimated: Boolean(breakdown.allocationIsEstimated),
+      annualTotal,
+      modeledAnnualTotal,
+      annualOverrideDelta: finiteCost(breakdown.annualOverrideDelta, annualTotal - modeledAnnualTotal),
+      categories,
+    };
+  }
+
+  // Compatibility fallback for an older saved calculation result that does
+  // not yet include the executive cost-bucket payload.  Include every known
+  // raw recurring component so this fallback still reconciles as closely as
+  // possible to the legacy operating-cost build-up.
+  const fallbackCategories = [
+    {
+      label: 'Access & licensing',
+      items: [
+        { label: 'Platform & user licences', amount: finiteCost(ai.annualLicenseCost) },
+        { label: 'Adjacent AI products', amount: finiteCost(ai.annualAdjacentCost) },
+      ],
+    },
+    {
+      label: 'Consumption',
+      items: [
+        { label: 'API / inference', amount: finiteCost(ai.annualApiCost) },
+      ],
+    },
+    {
+      label: 'Operations & governance',
+      items: [
+        { label: 'AI operations & support', amount: finiteCost(ai.ongoingAiLaborCost) },
+        { label: 'Agent tools, monitoring & guardrails', amount: finiteCost(ai.annualAgentInfrastructureCost) },
+        { label: 'Model updates & retraining', amount: finiteCost(ai.modelRetrainingCost) },
+        { label: 'Governance & compliance', amount: finiteCost(ai.annualComplianceCost) },
+        { label: 'Employee retraining', amount: finiteCost(ai.retainedRetrainingCost) },
+        { label: 'Technology maintenance reserve', amount: finiteCost(ai.techDebtCost) },
+        { label: 'Cybersecurity coverage', amount: finiteCost(ai.cyberInsuranceCost) },
+        { label: 'Measured data storage & connected apps', amount: finiteCost(ai.dataTransferCostAnnual) },
+      ],
+    },
+  ].map((category) => ({
+    ...category,
+    amount: category.items.reduce((sum, item) => sum + item.amount, 0),
+  }));
+  const fallbackModeledTotal = fallbackCategories.reduce((sum, category) => sum + category.amount, 0);
+  const fallbackAnnualTotal = finiteCost(ai.baseOngoingCost, fallbackModeledTotal);
+
+  return {
+    source: ai.userProvidedOngoing ? 'user-entered-total' : 'model-derived',
+    allocationIsEstimated: Boolean(ai.userProvidedOngoing),
+    annualTotal: fallbackAnnualTotal,
+    modeledAnnualTotal: finiteCost(ai.computedOngoingCost, fallbackModeledTotal),
+    annualOverrideDelta: fallbackAnnualTotal - finiteCost(ai.computedOngoingCost, fallbackModeledTotal),
+    categories: fallbackCategories,
+  };
+}
+
 function getDeploymentPlanSummary(formData = {}, results = {}) {
   const plan = results.deploymentPlan || results.aiCostModel?.deploymentPlan || {};
   const pace = plan.deliveryPace || formData.deliveryPace || 'standard';
@@ -949,42 +1050,80 @@ function page3_InvestmentAnalysis(doc, formData, results) {
   doc.text(formatCurrency(results.totalInvestment), PAGE_W - MARGIN - 4, y + 7, { align: 'right' });
   y += 16;
 
-  // Ongoing AI Operations Cost
+  // Ongoing AI Operations Cost.  This is intentionally kept together: an
+  // orphaned first table row on the prior page makes it too easy to miss that
+  // the totals below are part of the same recurring-cost schedule.
+  const ongoingBreakdown = getPdfOngoingCostBreakdown(ai);
+  const ongoingRows = ongoingBreakdown.categories.map((category) => {
+    const materialItems = category.items.filter((item) => Math.abs(item.amount) >= 0.005);
+    return [
+      category.label,
+      materialItems.length > 0
+        ? materialItems.map((item) => item.label).join('; ')
+        : 'No material recurring cost entered',
+      formatCurrency(category.amount),
+    ];
+  });
+  const ongoingSectionEstimatedHeight = 62 + ongoingRows.length * 10;
+  if (y + ongoingSectionEstimatedHeight > PAGE_H - 18) {
+    doc.addPage();
+    addHeader(doc);
+    y = 25;
+  }
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...NAVY);
   doc.text(`Ongoing AI Operations (${AI_COST_ESCALATION_SCHEDULE.filter(r => r > 0).map(r => formatPercent(r)).join('/')} tapered escalation) [22]`, MARGIN, y);
   y += 5;
 
-  const ongoingRows = [
-    [`AI Ops Team (${ai.ongoingAiHeadcount} FTE)`, formatCurrency(ai.ongoingAiLaborCost)],
-    [`API / Inference (${Math.round(ai.monthlyApiVolume).toLocaleString()} req/mo)`, formatCurrency(ai.annualApiCost)],
-    ['Platform & Licenses', formatCurrency(ai.annualLicenseCost)],
-    ['Adjacent Product Costs (25% of license)', formatCurrency(ai.annualAdjacentCost)],
-    ['Model Retraining / Drift Monitoring', formatCurrency(ai.modelRetrainingCost)],
-    ['Annual Compliance Recertification', formatCurrency(ai.annualComplianceCost)],
-    ['Retained Employee Retraining', formatCurrency(ai.retainedRetrainingCost)],
-    ['Technical Debt / Integration Maintenance', formatCurrency(ai.techDebtCost)],
-    ['Cyber Insurance Increase', formatCurrency(ai.cyberInsuranceCost)],
-  ];
+  if (ongoingBreakdown.source === 'user-entered-total') {
+    const delta = ongoingBreakdown.annualOverrideDelta;
+    const deltaDirection = delta >= 0 ? 'above' : 'below';
+    const allocationText = ongoingBreakdown.allocationIsEstimated
+      ? 'The category allocation below is estimated pro rata so it reconciles to your selected total.'
+      : 'The category allocation below reconciles to your selected total.';
+    y = bodyText(
+      doc,
+      `Selected annual AI run-cost plan: ${formatCurrency(ongoingBreakdown.annualTotal)}. ` +
+      `Model-derived annual cost: ${formatCurrency(ongoingBreakdown.modeledAnnualTotal)} ` +
+      `(${formatCurrency(Math.abs(delta))} ${deltaDirection} the selected plan). ${allocationText}`,
+      MARGIN,
+      y,
+      { size: 7.5, color: MID_GRAY },
+    );
+    y += 2;
+  } else {
+    y = bodyText(
+      doc,
+      'Model-derived recurring cost shown by executive bucket. Replace it with a contracted all-in annual amount only when one is available.',
+      MARGIN,
+      y,
+      { size: 7.5, color: MID_GRAY },
+    );
+    y += 2;
+  }
 
   autoTable(doc, {
     startY: y,
-    head: [['Ongoing Component', 'Annual Cost']],
+    head: [['Cost Bucket', 'What It Includes', 'Annual Cost']],
     body: ongoingRows,
     ...autoTableTheme(),
-    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 8.5, cellPadding: 2.5 },
+    bodyStyles: { ...autoTableTheme().bodyStyles, fontSize: 7.4, cellPadding: 2.2 },
     headStyles: { ...autoTableTheme().headStyles, fontSize: 8.5, cellPadding: 2.5 },
     columnStyles: {
-      0: { cellWidth: CONTENT_W * 0.65 },
-      1: { cellWidth: CONTENT_W * 0.35, halign: 'right' },
+      0: { cellWidth: CONTENT_W * 0.28, fontStyle: 'bold' },
+      1: { cellWidth: CONTENT_W * 0.49 },
+      2: { cellWidth: CONTENT_W * 0.23, halign: 'right' },
     },
+    pageBreak: 'avoid',
+    rowPageBreak: 'avoid',
   });
 
   y = doc.lastAutoTable.finalY + 2;
 
   // FY 1 and FY 5 ongoing costs
-  const yr1Cost = ai.baseOngoingCost;
+  const yr1Cost = ongoingBreakdown.annualTotal;
   const yr5Cost = ai.ongoingCostsByYear[4];
   drawRoundedRect(doc, MARGIN, y, CONTENT_W, 16, 1.5, NAVY);
   doc.setFont('helvetica', 'bold');
