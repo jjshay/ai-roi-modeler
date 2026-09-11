@@ -1,5 +1,10 @@
 # AI ROI Calculator
 
+<!-- portfolio-navigation:start -->
+[Project brief](docs/PROJECT_BRIEF.md) · [Structured project record](project.json) · [Portfolio](https://github.com/jjshay)
+
+<!-- portfolio-navigation:end -->
+
 The AI ROI calculator that doesn't lie. Built by an M&A executive, not a vendor trying to sell you something.
 
 **Live:** [ai-roi-modeler.vercel.app](https://ai-roi-modeler.vercel.app)

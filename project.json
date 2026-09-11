@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "name": "ai-roi-modeler",
+  "title": "AI ROI Modeler",
+  "category": "Strategy and capital allocation",
+  "summary": "AI investment decisions need transparent assumptions about adoption, operating costs, implementation, and financial returns.",
+  "status": "Source available; runtime not revalidated in this documentation review",
+  "visibility": "public",
+  "reviewed_on": "2026-09-11",
+  "reviewed_commit": "6c3ffbe765c49b701e602255851980669e7244cf",
+  "architecture": "Context and readiness wizard \u2192 financial assumptions \u2192 scenario calculations \u2192 decision views and workbook export.",
+  "evidence": [
+    {
+      "path": "src/App.jsx",
+      "role": "Application entry point, interface, or integration boundary."
+    },
+    {
+      "path": "api/src/index.ts",
+      "role": "Application entry point, interface, or integration boundary."
+    }
+  ],
+  "validation": "Repository tree and referenced source reviewed. Existing application tests, hosted deployments, paid providers, and external mutations were not re-run in this documentation review.",
+  "limitations": "Formula transparency helps decision review; outputs remain conditional on assumptions and do not establish realized savings.",
+  "next_improvement": "Validate financial formulas with independently calculated fixtures and reconcile a pilot's actual costs and benefits against the original case.",
+  "related_repositories": [
+    "global-gauntlet-site-kit",
+    "ai-mna-model"
+  ]
+}
